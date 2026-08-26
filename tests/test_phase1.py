@@ -192,6 +192,18 @@ def test_color_enabled_respects_humans_and_pipes():
     assert pythia.color_enabled(Pipe(), {"NO_COLOR": "1", "FORCE_COLOR": "1"}) is True
 
 
+def test_banner_gradient_modes():
+    # truecolor terminals get a smooth RGB gradient...
+    assert "38;2;" in pythia.banner(True, {"COLORTERM": "truecolor"})
+    # ...Windows Terminal advertises itself via WT_SESSION, not COLORTERM...
+    assert "38;2;" in pythia.banner(True, {"WT_SESSION": "abc"})
+    # ...everything else falls back to a 256-color gradient
+    fallback = pythia.banner(True, {})
+    assert "38;5;" in fallback and "38;2;" not in fallback
+    # and agents piping output get nothing at all
+    assert pythia.banner(False) == ""
+
+
 def test_paint_wraps_only_when_enabled():
     assert pythia.paint("hi", "green", True) == "\x1b[32mhi\x1b[0m"
     assert pythia.paint("hi", "green", False) == "hi"

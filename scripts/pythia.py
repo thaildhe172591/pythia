@@ -114,13 +114,49 @@ BLOCK_LOGO = """\
 ╚═╝        ╚═╝      ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝"""
 
 
-def banner(enabled):
-    """A hello on `check`, TTY only — agents piping output never see it."""
+LOGO_STOPS = ((34, 211, 238), (167, 139, 250), (244, 114, 182))  # cyan → violet → pink
+LOGO_256 = (51, 45, 39, 105, 141, 177)                            # same ramp, 256-color
+
+
+def _logo_rgb(t):
+    """Interpolate the gradient stops at t in [0, 1]."""
+    seg = t * (len(LOGO_STOPS) - 1)
+    i = min(int(seg), len(LOGO_STOPS) - 2)
+    f = seg - i
+    a, b = LOGO_STOPS[i], LOGO_STOPS[i + 1]
+    return tuple(round(a[k] + (b[k] - a[k]) * f) for k in range(3))
+
+
+def banner(enabled, env=None):
+    """A hello on `check`, TTY only — agents piping output never see it.
+    Solid blocks get a diagonal color gradient; the box-drawing outline stays
+    dim for depth. Truecolor when the terminal advertises it (COLORTERM, or
+    WT_SESSION — Windows Terminal supports 24-bit but never says so),
+    a 256-color ramp everywhere else."""
     if not enabled:
         return ""
-    logo = "\n".join(paint(ln, "cyan", enabled) for ln in BLOCK_LOGO.splitlines())
+    env = os.environ if env is None else env
+    truecolor = (env.get("COLORTERM", "").lower() in ("truecolor", "24bit")
+                 or bool(env.get("WT_SESSION")))
+    lines = BLOCK_LOGO.splitlines()
+    out = []
+    for y, ln in enumerate(lines):
+        width = max(len(ln), 1)
+        chunk = []
+        for x, ch in enumerate(ln):
+            if ch == " ":
+                chunk.append(ch)
+            elif ch == "█":
+                if truecolor:
+                    r, g, b = _logo_rgb((x / width + y / len(lines)) / 2)
+                    chunk.append(f"\x1b[38;2;{r};{g};{b}m{ch}\x1b[0m")
+                else:
+                    chunk.append(f"\x1b[38;5;{LOGO_256[min(y, len(LOGO_256) - 1)]}m{ch}\x1b[0m")
+            else:
+                chunk.append(f"\x1b[2m{ch}\x1b[0m")   # outline: dim, for depth
+        out.append("".join(chunk))
     tag = paint("judgment for your agent's Oracle connection", "dim", enabled)
-    return f"\n{logo}\n{tag}\n\n"
+    return "\n" + "\n".join(out) + f"\n{tag}\n\n"
 
 
 def paint_diff_line(ln, enabled):
