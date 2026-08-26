@@ -76,10 +76,10 @@ def test_resolve_path_segment():
 
 
 def test_resolve_default_connection_when_path_gives_nothing():
-    cfg = {"ALPHA": {"user": "a"}, "BETA": {"user": "b", "default": True}}
+    cfg = {"ALPHA": {"user": "a"}, "BETA": {"user": "b"}, "default": "BETA"}
     root = pathlib.Path("C:/proj")
-    # standing at the root itself there is nothing to infer from, so the entry
-    # marked default wins — a configured choice, not a guess
+    # standing at the root itself there is nothing to infer from, so the named
+    # default wins — a choice the user wrote down, not a guess
     name, c = pythia.resolve_connection(cfg, None, {}, root, root)
     assert name == "BETA" and c["user"] == "b"
     # a path segment is more specific, so it still beats the default
@@ -91,12 +91,35 @@ def test_resolve_default_connection_when_path_gives_nothing():
     # so does PYTHIA_CONNECTION
     name, _ = pythia.resolve_connection(cfg, None, {"PYTHIA_CONNECTION": "ALPHA"}, root, root)
     assert name == "ALPHA"
+    # "default" is not itself offered as a connection to choose
+    expect_exit(lambda: pythia.resolve_connection(cfg, "default", {}, root, root),
+                "unknown connection")
 
 
-def test_resolve_rejects_more_than_one_default():
-    cfg = {"ALPHA": {"user": "a", "default": True}, "BETA": {"user": "b", "default": True}}
-    expect_exit(lambda: pythia.resolve_connection(cfg, None, {}, pathlib.Path("C:/x"), None),
-                "default", "ALPHA", "BETA")
+def test_resolve_default_must_name_a_connection():
+    root = pathlib.Path("C:/proj")
+    # the shape mistake that is easy to make: a bare true instead of a name
+    expect_exit(lambda: pythia.resolve_connection(
+        {"ALPHA": {"user": "a"}, "default": True}, None, {}, root, root),
+        "must name a connection", "\"default\": \"ALPHA\"")
+    # naming something that does not exist
+    expect_exit(lambda: pythia.resolve_connection(
+        {"ALPHA": {"user": "a"}, "default": "NOPE"}, None, {}, root, root),
+        "NOPE", "ALPHA")
+
+
+def test_resolve_rejects_a_connection_that_is_not_an_object():
+    expect_exit(lambda: pythia.resolve_connection(
+        {"ALPHA": {"user": "a"}, "BETA": "oops"}, None, {}, pathlib.Path("C:/x"), None),
+        "BETA", "object")
+
+
+def test_resolve_points_a_per_entry_default_to_the_right_place():
+    """The default used to go inside an entry; say so rather than ignoring it."""
+    expect_exit(lambda: pythia.resolve_connection(
+        {"ALPHA": {"user": "a"}, "BETA": {"user": "b", "default": True}},
+        None, {}, pathlib.Path("C:/proj"), pathlib.Path("C:/proj")),
+        "top level", "\"default\": \"BETA\"")
 
 
 def test_resolve_error_says_how_to_set_a_default():

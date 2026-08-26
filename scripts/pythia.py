@@ -14,7 +14,7 @@ Connection resolution order:
        - a single entry is used as-is
        - with several entries, the path segment directly under the project
          root picks one (root/DEV/anything -> DEV)
-       - failing that, the entry marked "default": true
+       - failing that, the entry named by a top-level "default": "<name>"
        - anything still ambiguous is an error, never a guess
 
 Output is capped so large objects cannot swallow a context window; every cut
@@ -130,15 +130,30 @@ def _load_config(path):
 
 def resolve_connection(cfg, explicit, env, cwd, root):
     """Pick a connection. Precedence: --conn, PYTHIA_CONNECTION, PYTHIA_* env
-    credentials, then the config file (single entry, or the path segment
-    directly under the project root). Ambiguity is an error, never a guess."""
+    credentials, then the config file (single entry, the path segment directly
+    under the project root, or the entry named by the top-level "default").
+    Ambiguity is an error, never a guess."""
+    cfg = dict(cfg or {})
+    fallback = cfg.pop("default", None)
+    if fallback is not None and not isinstance(fallback, str):
+        example = next((k for k in cfg), "dev")
+        sys.exit(f'"default" must name a connection, for example '
+                 f'"default": "{example}" — got {json.dumps(fallback)}.')
+
     lookup = {}
-    for k, v in (cfg or {}).items():
+    for k, v in cfg.items():
+        if not isinstance(v, dict):
+            sys.exit(f"Connection {k!r} in {CONFIG_NAME} must be an object of "
+                     f"settings, got {json.dumps(v)}.")
         if k.upper() in lookup:
             sys.exit(f"Connection names collide ignoring case in {CONFIG_NAME}: "
                      f"{lookup[k.upper()][0]!r} vs {k!r}")
         lookup[k.upper()] = (k, v)
     names = ", ".join(sorted(k for k, _ in lookup.values()))
+
+    if fallback and fallback.upper() not in lookup:
+        sys.exit(f'"default" names {fallback!r}, which is not a connection. '
+                 f"Available: {names or 'none'}.")
 
     wanted = explicit or env.get("PYTHIA_CONNECTION")
     if wanted:
@@ -172,19 +187,21 @@ def resolve_connection(cfg, explicit, env, cwd, root):
             if hit:
                 return hit
 
-    # Nothing in the path to go on. An entry marked "default": true is an
-    # explicit choice by the user, not a guess, so it is safe to fall back to —
-    # and the connection actually used is always echoed on stderr.
-    marked = [hit for hit in lookup.values() if hit[1].get("default")]
-    if len(marked) > 1:
-        sys.exit("More than one connection is marked \"default\": "
-                 + ", ".join(sorted(n for n, _ in marked)) + ". Mark exactly one.")
-    if marked:
-        return marked[0]
+    # Nothing in the path to go on. The top-level "default" is a choice the user
+    # wrote down rather than a guess, so it is safe to fall back to — and the
+    # connection actually used is always echoed on stderr.
+    if fallback:
+        return lookup[fallback.upper()]
+
+    misplaced = sorted(n for n, v in lookup.values() if "default" in v)
+    if misplaced:
+        sys.exit(f'Connection {misplaced[0]!r} has a "default" key inside it. '
+                 f"The default belongs at the top level of {CONFIG_NAME}, "
+                 f'alongside the connections: "default": "{misplaced[0]}"')
 
     sys.exit(f"Cannot infer a connection from {cwd}. Available: {names}.\n"
-             "Use --conn NAME, set PYTHIA_CONNECTION, or add \"default\": true to "
-             f"one entry in {CONFIG_NAME}.")
+             "Use --conn NAME, set PYTHIA_CONNECTION, or name one at the top "
+             f'level of {CONFIG_NAME}: "default": "<name>"')
 
 
 def clip(rows, limit, offset=0):
