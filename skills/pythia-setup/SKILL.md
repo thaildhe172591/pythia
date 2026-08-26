@@ -41,8 +41,15 @@ connects *through* the schema owner. The agent never learns the owner's
 password, revocation is one statement, the audit trail shows who really
 connected, and the blast radius is the one development schema.
 
-Run `examples/agent-user-setup.example.sql` (as a DBA, names adapted), then
-set the connection's user to `"agent_user[schema_owner]"`.
+Run `pythia agent-user --save` — ONE run, in the project directory. It
+prints the three-statement proxy SQL with a generated password and saves
+the matching credential as connection `<conn>_agent` (the new default; the
+owner entry stays untouched). The password is regenerated on every run, so
+never preview first and save later — the SQL and the saved config must
+come from the same run. Relay the SQL to the developer verbatim for a DBA
+to execute, then verify with `pythia check`. `--json` gives the same
+result machine-readable. Manual alternative:
+`examples/agent-user-setup.example.sql`, names adapted.
 
 Oracle's own guidance for LLM access, follow it: grant minimum privileges,
 never point an LLM at a production database, audit its activity regularly.

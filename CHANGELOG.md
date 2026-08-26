@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-08-26
+
+- `agent-user` speaks agent: `--json` returns owner/agent/password/sql/
+  saved_connection in one self-consistent payload; the text output warns
+  that the password is regenerated per run (one `--save` run, never
+  preview-then-save); the setup skill and README teach that flow.
+
 ## 0.2.0 — 2026-08-26
 
 - **Skills renamed `plsql-*` → `pythia-*`** for recognizability. The no-Node

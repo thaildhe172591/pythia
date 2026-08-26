@@ -1403,18 +1403,31 @@ def cmd_agent_user(conn, schema, ns):
                  f"({base['user']}) — nothing to set up.")
     agent = (ns.name or f"{owner}_AGENT").upper()
     password = agent_password()
-    print(AGENT_USER_SQL.format(owner=owner, agent=agent, password=password))
+    sql = AGENT_USER_SQL.format(owner=owner, agent=agent, password=password)
+    saved = None
     if ns.save:
-        name = save_agent_connection(root, base_name, base, agent, password)
-        print(f"Saved connection '{name}' (now the default) in "
-              f"{pathlib.Path(root) / CONFIG_DIR / CONFIG_NAME};\n"
+        saved = save_agent_connection(root, base_name, base, agent, password)
+    if ns.json:
+        print(json.dumps({
+            "owner": owner, "agent": agent, "password": password, "sql": sql,
+            "saved_connection": saved, "owner_connection": base_name,
+            "next": ["have a DBA run the sql", f"{invocation()} check"]}))
+        return
+    print(sql)
+    print("-- The password is regenerated on EVERY run — only the SQL from")
+    print("-- this exact run matches what --save writes. One run, not two.")
+    if saved:
+        print(f"\nSaved connection '{saved}' (now the default) in "
+              f"{pathlib.Path(root) / CONFIG_DIR / CONFIG_NAME} — its "
+              f"password matches the SQL above;\n"
               f"the owner entry '{base_name}' is untouched — switch back "
               f"any time with --conn {base_name}.")
-        print(f"\nNext: run the SQL above as a DBA, then: {invocation()} check")
+        print(f"\nNext: relay the SQL above to the developer verbatim for a "
+              f"DBA to run, then: {invocation()} check")
     else:
-        print(f"-- Rerun with --save to add this credential to "
-              f"connections.json as '{base_name}_agent' and make it the "
-              f"default once the DBA has run it.")
+        print(f"-- Nothing was saved. Use --save to also write this "
+              f"credential to connections.json as '{base_name}_agent' in "
+              f"the same run.")
 
 
 # unistr escapes. Single quote doubles to '' per SQL (a \' is ORA-01756 for

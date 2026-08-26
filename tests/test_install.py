@@ -87,6 +87,38 @@ def test_pack_dirs_resolve_in_the_source_layout():
     assert (pythia.SKILLS_DIR / "pythia-apply" / "SKILL.md").is_file()
 
 
+def test_agent_user_json_saves_the_same_password_it_prints():
+    """The agent flow: one --json --save run must be self-consistent — the
+    password inside the SQL is the password written to connections.json."""
+    import argparse
+    import contextlib
+    import io
+    import os
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        (root / ".pythia").mkdir()
+        (root / ".pythia" / "connections.json").write_text(json.dumps(
+            {"dev": {"host": "h", "port": 1521, "service_name": "s",
+                     "user": "OWNER", "password": "p", "schema": "OWNER"}}),
+            encoding="utf-8")
+        cwd = os.getcwd()
+        os.chdir(td)
+        try:
+            ns = argparse.Namespace(conn=None, json=True, save=True, name=None)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                pythia.cmd_agent_user(None, None, ns)
+            d = json.loads(buf.getvalue())
+            assert d["saved_connection"] == "dev_agent"
+            assert d["password"] in d["sql"]
+            cfg = json.loads((root / ".pythia" / "connections.json")
+                             .read_text(encoding="utf-8"))
+            assert cfg["dev_agent"]["password"] == d["password"]
+            assert cfg["dev"]["password"] == "p"        # owner untouched
+        finally:
+            os.chdir(cwd)
+
+
 def test_one_version_across_every_manifest():
     """pyproject, plugin.json, marketplace.json and npm/package.json must all
     carry the same version — the release workflow publishes from one tag."""
