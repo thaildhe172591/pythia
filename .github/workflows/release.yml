@@ -45,6 +45,8 @@ jobs:
       - run: pip install build
       - run: python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true   # a duplicate/delayed run must stay green
 
   npm:
     needs: check
@@ -55,7 +57,21 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
-      - run: npm publish
+      # idempotent, and `latest` always points at the HIGHEST version —
+      # npm hands `latest` to the most recent publish, so a delayed or
+      # re-run backfill of an old tag would otherwise drag users backwards
+      - run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "pythia-plsql@$V" version >/dev/null 2>&1; then
+            echo "npm already has $V — skipping publish"
+          else
+            npm publish
+          fi
+          TOP=$(npm view pythia-plsql versions --json | python3 -c "import json,sys; vs=json.load(sys.stdin); vs=[vs] if isinstance(vs,str) else vs; print(sorted(vs, key=lambda v: [int(x) for x in v.split('.')])[-1])")
+          CUR=$(npm view pythia-plsql dist-tags.latest)
+          if [ "$TOP" != "$CUR" ]; then
+            npm dist-tag add "pythia-plsql@$TOP" latest
+          fi
         working-directory: npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
