@@ -305,6 +305,103 @@ def plscope_message(name, has_any_data):
             "Until then, the approximate answer is: pythia grep \"<text>\"")
 
 
+# --- write layer: pure decision functions (tests/test_phase3.py) -------------
+
+GROUPS = ("plsql_source", "data_dml", "structural", "grants", "session")
+
+PLSQL_SOURCE_RE = re.compile(
+    r"^create\s+(?:or\s+replace\s+)?(?:(?:no)?editionable\s+|(?:no)?force\s+)*"
+    r"(procedure|function|package\s+body|package|trigger|view|type\s+body|type)\b",
+    re.I | re.S)
+
+
+def skip_leading_noise(sql):
+    """Drop leading whitespace and comments so classification sees the first
+    keyword. Only leading ones: stripping comments globally would corrupt
+    string literals like '-- not a comment'."""
+    while True:
+        sql = sql.lstrip()
+        if sql.startswith("--"):
+            nl = sql.find("\n")
+            sql = "" if nl < 0 else sql[nl + 1:]
+        elif sql.startswith("/*"):
+            end = sql.find("*/")
+            if end < 0:
+                return ""
+            sql = sql[end + 2:]
+        else:
+            return sql
+
+
+def classify(sql):
+    """Which policy group a statement belongs to, or "anonymous" for a bare
+    BEGIN/DECLARE block (it can EXECUTE IMMEDIATE anything, so giving it a
+    group would be self-deception), or None for anything unrecognized.
+    Unrecognized means refused: a classifier that guesses generously is a
+    classifier that lets deny be bypassed."""
+    s = skip_leading_noise(sql)
+    if re.match(r"^alter\s+session\b", s, re.I):
+        return "session"                      # before the generic ALTER below
+    if PLSQL_SOURCE_RE.match(s):
+        return "plsql_source"
+    if re.match(r"^(insert|update|delete|merge)\b", s, re.I):
+        return "data_dml"
+    if re.match(r"^(grant|revoke)\b", s, re.I):
+        return "grants"
+    if re.match(r"^(alter|drop|truncate|rename|create)\b", s, re.I):
+        return "structural"
+    if re.match(r"^(begin|declare)\b", s, re.I):
+        return "anonymous"
+    return None
+
+
+def parse_object(sql):
+    """(type, name, schema|None) from a plsql_source statement. The parsed
+    identity drives the snapshot — getting it wrong would snapshot the wrong
+    object and silently destroy the only undo, hence the strict match."""
+    s = skip_leading_noise(sql)
+    m = PLSQL_SOURCE_RE.match(s)
+    if not m:
+        sys.exit("Cannot parse the object type from this CREATE statement.")
+    otype = " ".join(m.group(1).upper().split())
+    rest = s[m.end():]
+    ident = r'(?:"([^"]+)"|([A-Za-z][\w$#]*))'
+    m2 = re.match(r"\s*" + ident + r"(?:\s*\.\s*" + ident + r")?", rest)
+    if not m2:
+        sys.exit(f"Cannot parse the {otype.lower()} name from this statement.")
+    q1, p1, q2, p2 = m2.groups()
+    first = q1 if q1 is not None else p1.upper()
+    if q2 is None and p2 is None:
+        return otype, first, None
+    second = q2 if q2 is not None else p2.upper()
+    return otype, second, first
+
+
+def prepare_statement(sql, group):
+    """What actually gets executed. A trailing line holding only / is a
+    SQL*Plus directive, not SQL. The trailing ; belongs to a PL/SQL block but
+    must go for everything else — specified per group because getting it
+    backwards produces baffling compile errors. Content after the terminator
+    means two statements in one file: refused, one object per file."""
+    lines = sql.replace("\r\n", "\n").split("\n")
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines and lines[-1].strip() == "/":
+        lines.pop()
+    if any(ln.strip() == "/" for ln in lines):
+        sys.exit("The file contains more than one statement (a / separator "
+                 "remains mid-file). pythia apply takes exactly one statement "
+                 "per file — split it.")
+    text = "\n".join(lines).rstrip()
+    if group != "plsql_source":
+        body = text.rstrip(";").rstrip()
+        if ";" in body:
+            sys.exit("The file contains more than one statement. pythia apply "
+                     "takes exactly one statement per file — split it.")
+        return body
+    return text
+
+
 def json_envelope(command, connection, schema, cols, rows, truncated, **extra):
     payload = {"ok": True, "command": command, "connection": connection,
                "schema": schema, "rows": [dict(zip(cols, r)) for r in rows],
