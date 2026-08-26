@@ -365,6 +365,35 @@ def test_write_path_skips_readonly_transaction():
     assert not pythia.session_should_be_readonly("journal", "restore")
 
 
+def test_invocation_reflects_how_the_tool_was_run():
+    old = sys.argv[0]
+    try:
+        sys.argv[0] = "scripts/pythia.py"        # run from source
+        assert pythia.invocation() == "python scripts/pythia.py"
+        sys.argv[0] = r"C:\somewhere\pythia.exe"  # packaged entry point
+        assert pythia.invocation() == "pythia.exe"
+    finally:
+        sys.argv[0] = old
+
+
+def test_preview_hint_is_pasteable():
+    """The printed To-apply line must work when pasted verbatim — a bare
+    `pythia ...` is CommandNotFound for anyone running from source."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        buf = io.StringIO()
+        old = sys.argv[0]
+        try:
+            sys.argv[0] = "scripts/pythia.py"
+            with contextlib.redirect_stdout(buf):
+                pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql"), NEW_FILE)
+        finally:
+            sys.argv[0] = old
+        assert "python scripts/pythia.py apply f.sql --confirm " in buf.getvalue()
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

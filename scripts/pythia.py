@@ -80,11 +80,21 @@ def is_readonly_sql(stmt):
     return bool(READONLY.match(stmt))
 
 
+def invocation():
+    """How to invoke this tool, exactly as the user actually ran it. Every
+    printed command must be paste-able: a bare `pythia ...` is
+    CommandNotFound for anyone running from source."""
+    prog = sys.argv[0] or "pythia"
+    if prog.lower().endswith(".py"):
+        return f"python {prog}"
+    return pathlib.Path(prog).name
+
+
 def forbid_write_flag(argv):
     if "--write" in argv:
-        sys.exit("There is no --write flag. The write path is `pythia apply "
-                 "<file>` — snapshot, preview and verify included; nothing "
-                 "else writes.")
+        sys.exit(f"There is no --write flag. The write path is `{invocation()} "
+                 "apply <file>` — snapshot, preview and verify included; "
+                 "nothing else writes.")
 
 
 def load_query(name):
@@ -311,7 +321,7 @@ def plscope_message(name, has_any_data):
             "  ALTER PROCEDURE <name> COMPILE;\n"
             "Recompiling on a shared schema affects everyone using it — agree it with "
             "the team first. pythia will not run these for you.\n"
-            "Until then, the approximate answer is: pythia grep \"<text>\"")
+            f"Until then, the approximate answer is: {invocation()} grep \"<text>\"")
 
 
 # --- write layer: pure decision functions (tests/test_phase3.py) -------------
@@ -508,7 +518,7 @@ def read_journal_entry(root, entry_id):
     if not d.is_dir():
         available = ", ".join(list_journal_entries(root)[:5]) or "none"
         sys.exit(f"No journal entry {entry_id!r}. Recent: {available}. "
-                 "Use: pythia journal list")
+                 f"Use: {invocation()} journal list")
     return {"before": (d / "before.sql").read_text(encoding="utf-8"),
             "after": (d / "after.sql").read_text(encoding="utf-8"),
             "restore": (d / "restore.sql").read_text(encoding="utf-8"),
@@ -861,7 +871,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                  else "policy forbids it")
         sys.exit(f"Refused: {group} is set to deny — {extra}.\n"
                  f"To allow it once you have weighed that: "
-                 f"pythia policy set {group} confirm")
+                 f"{invocation()} policy set {group} confirm")
     stmt = prepare_statement(file_text, group)
 
     if group == "session":
@@ -896,7 +906,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
     if ns.confirm and ns.confirm != token:
         sys.exit("The confirmation token does not match: the file or the "
                  "database object changed since that preview. Preview again:\n"
-                 f"  pythia apply {ns.file}")
+                 f"  {invocation()} apply {ns.file}")
 
     _, inv_rows = run_query(conn, load_query("invalid-objects.sql"), {"s": schema})
     invalid_before = [(r[0], r[1]) for r in inv_rows]
@@ -935,7 +945,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                 print(f"  {ln}")
         print(f"\n  Snapshot saved: {journal_root(ns.project_root) / entry}")
         if not confirmed:
-            print(f"\n  To apply:\n    pythia apply {ns.file} --confirm {token}")
+            print(f"\n  To apply:\n    {invocation()} apply {ns.file} --confirm {token}")
     if not confirmed:
         return 0
 
@@ -968,7 +978,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         print(json.dumps({"ok": ok, "applied": True, "object": name,
                           "type": otype, "errors": [list(r) for r in own_errors],
                           "newly_invalid": [list(x) for x in broke],
-                          "restore": f"pythia journal restore {entry}",
+                          "restore": f"{invocation()} journal restore {entry}",
                           "exit": 0 if ok else 3}))
     else:
         if ok:
@@ -988,7 +998,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                     print(f"    {n2} ({t2})")
         undo = "dropping it (it did not exist before)" if created else None
         print(f"\n  To undo{' — note: undo means ' + undo if undo else ''}:")
-        print(f"    pythia journal restore {entry}")
+        print(f"    {invocation()} journal restore {entry}")
     return 0 if ok else 3
 
 
@@ -1012,7 +1022,7 @@ def run_restore(conn, schema, ns):
 
 def cmd_policy(conn, schema, ns):
     if ns.action == "set" and (not ns.group or not ns.value):
-        sys.exit("Usage: pythia policy set <group> <value>\n"
+        sys.exit(f"Usage: {invocation()} policy set <group> <value>\n"
                  f"Groups: {', '.join(sorted(POLICY_DEFAULTS))}; "
                  "values: allow, confirm, deny.")
     if ns.action == "set":
@@ -1051,8 +1061,8 @@ def cmd_journal(conn, schema, ns):
             print(f"{eid}  [{state}]")
         return
     if not ns.id:
-        sys.exit("Usage: pythia journal {list | show <id> | diff <id> | export <id> "
-                 "| restore <id>}")
+        sys.exit(f"Usage: {invocation()} journal "
+                 "{list | show <id> | diff <id> | export <id> | restore <id>}")
     e = read_journal_entry(root, ns.id)
     if ns.action == "show":
         print(json.dumps(e["meta"], indent=2))
@@ -1210,7 +1220,7 @@ def main(argv=None):
     try:
         if ns.command == "journal":           # only restore reaches here
             if not ns.id:
-                sys.exit("Usage: pythia journal restore <id>")
+                sys.exit(f"Usage: {invocation()} journal restore <id>")
             ns.file = f"journal:{ns.id}"
             code = run_restore(conn, ns.schema, ns)
             if code:
