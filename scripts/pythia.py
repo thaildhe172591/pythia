@@ -209,16 +209,30 @@ HEADLESS_YES_MSG = (
 
 
 def human_at_the_keyboard():
-    """True only when a person is typing: stdin is a TTY. An agent driving
-    the CLI through a subprocess has no TTY and cannot fake one — which is
-    exactly why the loosening actions below key on this. PYTHIA_CI=1 is the
-    documented escape for real pipelines."""
+    """True only when a person is typing at a real console.
+
+    isatty() alone is not enough on Windows: NUL is a character device, so
+    a subprocess launched with stdin=DEVNULL reports isatty() == True and
+    would sail straight through this gate. Only a real console answers
+    GetConsoleMode, so ask that too. PYTHIA_CI=1 is the documented escape
+    for real pipelines."""
     if os.environ.get("PYTHIA_CI"):
         return True
     try:
-        return sys.stdin.isatty()
+        if not sys.stdin.isatty():
+            return False
     except (AttributeError, ValueError):
         return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            handle = ctypes.windll.kernel32.GetStdHandle(-10)  # STD_INPUT
+            mode = ctypes.c_ulong()
+            return bool(ctypes.windll.kernel32.GetConsoleMode(
+                handle, ctypes.byref(mode)))
+        except Exception:   # noqa: BLE001 — any failure means "not a console"
+            return False
+    return True
 
 
 def forbid_write_flag(argv):
@@ -615,6 +629,12 @@ def load_settings(root):
         return json.loads(path.read_text(encoding="utf-8"))
     except ValueError as e:
         sys.exit(f"Cannot parse {path}: {e}")
+
+
+def undo_group_action(ns):
+    """Undoing a CREATE is a DROP, which is `structural` — so the policy on
+    that group decides whether the restore command we print can run."""
+    return load_policy(ns.project_root)["structural"][0]
 
 
 def journal_root(root):
@@ -1237,6 +1257,9 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                           "type": otype, "errors": [list(r) for r in own_errors],
                           "newly_invalid": [list(x) for x in broke],
                           "restore": f"{invocation()} journal restore {entry}",
+                          "restore_is_drop": created,
+                          "restore_blocked_by_policy": (
+                              created and undo_group_action(ns) == "deny"),
                           "exit": 0 if ok else 3}))
     else:
         en = getattr(ns, "color", False)
@@ -1257,9 +1280,21 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                 print(f"  {len(broke)} objects were VALID before and are INVALID now:")
                 for n2, t2 in broke:
                     print(paint(f"    {n2} ({t2})", "red", en))
-        undo = "dropping it (it did not exist before)" if created else None
-        print(f"\n  To undo{' — note: undo means ' + undo if undo else ''}:")
-        print("    " + paint(f"{invocation()} journal restore {entry}", "cyan", en))
+        if created:
+            print("\n  To undo — note: undo means DROPPING it "
+                  "(it did not exist before):")
+        else:
+            print("\n  To undo:")
+        print("    " + paint(f"{invocation()} journal restore {entry}",
+                             "cyan", en))
+        if created and undo_group_action(ns) == "deny":
+            # the honest half: that restore is a DROP, DROP is structural,
+            # and structural is deny — so the line above would be refused
+            print(paint("  ...but that restore is a DROP, and structural is "
+                        "set to deny, so it will be refused.", "yellow", en))
+            print(paint("  The developer decides: "
+                        f"{invocation()} policy set structural confirm",
+                        "yellow", en))
     return 0 if ok else 3
 
 

@@ -658,6 +658,35 @@ def test_headless_policy_loosening_is_refused_tightening_allowed():
         assert pythia.load_policy(td)["plsql_source"][0] == "deny"
 
 
+def test_report_admits_a_created_objects_undo_is_blocked():
+    """pythia exists so nothing lies about rollback. Undoing a CREATE is a
+    DROP, DROP is structural, and structural is deny by default — so the
+    printed restore command would be refused. Say so, in the same breath."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script(db_source=""))     # object did not exist
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql", yes=True),
+                             NEW_FILE)
+        out = buf.getvalue().lower()
+        assert "dropping it" in out
+        assert "will be refused" in out, out[-400:]
+        assert "policy set structural confirm" in out
+    # and once the developer has loosened it, the warning goes away
+    with tempfile.TemporaryDirectory() as td:
+        pathlib.Path(td, ".pythia").mkdir()
+        pathlib.Path(td, ".pythia", "policy.json").write_text(
+            '{"structural": "confirm"}', encoding="utf-8")
+        conn = FakeConn(base_script(db_source=""))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql", yes=True),
+                             NEW_FILE)
+        assert "will be refused" not in buf.getvalue().lower()
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

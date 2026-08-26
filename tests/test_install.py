@@ -122,6 +122,29 @@ def test_agent_user_json_saves_the_same_password_it_prints():
             os.chdir(cwd)
 
 
+def test_devnull_stdin_is_not_a_human():
+    """The gate must hold for a real subprocess, not just in theory. On
+    Windows NUL is a character device and isatty() says True for it, so a
+    stdin=DEVNULL child would otherwise self-approve writes."""
+    import os
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if k != "PYTHIA_CI"}
+    with tempfile.TemporaryDirectory() as td:
+        (pathlib.Path(td) / ".pythia").mkdir()
+        (pathlib.Path(td) / ".pythia" / "connections.json").write_text(
+            json.dumps({"dev": {"host": "h", "user": "U", "password": "p",
+                                "schema": "U"}}), encoding="utf-8")
+        env["PYTHONPATH"] = str(ROOT / "scripts")   # -m pythia from the repo
+        r = subprocess.run(
+            [sys.executable, "-m", "pythia", "policy", "set", "structural",
+             "allow"],
+            cwd=td, env=env, stdin=subprocess.DEVNULL, text=True,
+            capture_output=True)
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "developer" in (r.stdout + r.stderr).lower()
+        assert not (pathlib.Path(td) / ".pythia" / "policy.json").is_file()
+
+
 def test_one_version_across_every_manifest():
     """pyproject, plugin.json, marketplace.json and npm/package.json must all
     carry the same version — the release workflow publishes from one tag."""

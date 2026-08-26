@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.2 — 2026-08-27
+
+Both fixes come from running the kit against a real 1,516-object schema.
+
+- **The approval gate held on POSIX but not on Windows.** `NUL` is a
+  character device, so `isatty()` answers True for a child launched with
+  `stdin=DEVNULL` — an agent spawning pythia that way sailed through both
+  0.3.0 gates and could loosen policy and self-approve writes. The gate now
+  also asks `GetConsoleMode`, which only a real console answers, and an
+  end-to-end test spawns a `stdin=DEVNULL` subprocess to prove it.
+- **The report promised an undo the tool would refuse.** Undoing a CREATE
+  is a DROP, DROP is `structural`, and `structural` is `deny` by default —
+  so the printed `journal restore` line could not run. It now says so on
+  the spot, and names the command the developer would have to run first.
+
 ## 0.3.1 — 2026-08-26
 
 - Refusals that need no database fire before any connection is opened: a
