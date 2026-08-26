@@ -56,7 +56,7 @@ QUERY_DIR = pathlib.Path(__file__).resolve().parent.parent / "queries"
 QUERY_BINDS = {
     "invalid-objects.sql": {"s"},
     "compile-errors.sql": {"s", "n"},
-    "dependencies.sql": {"s", "n", "depth"},
+    "dependencies.sql": {"s", "n", "depth", "with_sys"},
     "impact.sql": {"s", "n", "depth"},
     "similar-candidates.sql": {"s"},
     "plscope-usages.sql": {"s", "n"},
@@ -517,7 +517,8 @@ def cmd_errors(conn, schema, ns):
 
 def cmd_deps(conn, schema, ns):
     cols, rows = run_query(conn, load_query("dependencies.sql"),
-                           {"s": schema, "n": ns.name, "depth": ns.depth})
+                           {"s": schema, "n": ns.name, "depth": ns.depth,
+                            "with_sys": 1 if ns.with_sys else 0})
     rows, truncated = clip(rows, ns.limit)
     if ns.json:
         print(json_envelope(ns.command, ns.conn_name, ns.schema, cols, rows, truncated))
@@ -640,6 +641,8 @@ def build_parser():
     s.add_argument("name")
     s.add_argument("--depth", type=int, default=3,
                    help="levels to walk (default 3)")
+    s.add_argument("--with-sys", action="store_true", dest="with_sys",
+                   help="include SYS/PUBLIC built-ins, hidden by default")
     s = sub.add_parser("impact", parents=[common()],
                        help="what depends on an object — run this before changing it")
     s.add_argument("name")
