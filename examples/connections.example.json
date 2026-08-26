@@ -7,6 +7,17 @@
     "dsn": "",
     "user": "",
     "password": "",
+    "schema": "",
+    "default": true
+  },
+  "staging": {
+    "host": "",
+    "port": 1521,
+    "service_name": "",
+    "sid": "",
+    "dsn": "",
+    "user": "",
+    "password": "",
     "schema": ""
   }
 }

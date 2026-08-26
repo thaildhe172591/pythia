@@ -13,8 +13,9 @@ Connection resolution order:
      (override the file path with PYTHIA_CONFIG):
        - a single entry is used as-is
        - with several entries, the path segment directly under the project
-         root picks one (root/DEV/anything -> DEV); anything ambiguous is
-         an error, never a guess
+         root picks one (root/DEV/anything -> DEV)
+       - failing that, the entry marked "default": true
+       - anything still ambiguous is an error, never a guess
 
 Output is capped so large objects cannot swallow a context window; every cut
 is announced with "-- truncated ..." (text) or "truncated": true (JSON), so
@@ -170,9 +171,20 @@ def resolve_connection(cfg, explicit, env, cwd, root):
             hit = lookup.get(seg[0].upper())
             if hit:
                 return hit
-            sys.exit(f"Path segment {seg[0]!r} matches no connection. "
-                     f"Available: {names}. Use --conn NAME.")
-    sys.exit(f"Cannot infer a connection from {cwd}. Available: {names}. Use --conn NAME.")
+
+    # Nothing in the path to go on. An entry marked "default": true is an
+    # explicit choice by the user, not a guess, so it is safe to fall back to —
+    # and the connection actually used is always echoed on stderr.
+    marked = [hit for hit in lookup.values() if hit[1].get("default")]
+    if len(marked) > 1:
+        sys.exit("More than one connection is marked \"default\": "
+                 + ", ".join(sorted(n for n, _ in marked)) + ". Mark exactly one.")
+    if marked:
+        return marked[0]
+
+    sys.exit(f"Cannot infer a connection from {cwd}. Available: {names}.\n"
+             "Use --conn NAME, set PYTHIA_CONNECTION, or add \"default\": true to "
+             f"one entry in {CONFIG_NAME}.")
 
 
 def clip(rows, limit, offset=0):
@@ -284,6 +296,14 @@ def json_envelope(command, connection, schema, cols, rows, truncated, **extra):
 
 
 # --- database access ---------------------------------------------------------
+
+def connect_failure_message(exc, conn_name):
+    """A failure to connect should say which entry failed and what to check —
+    a driver stack trace tells the reader nothing actionable."""
+    return (f"Could not connect using connection {conn_name!r}: {exc}\n"
+            "Check host/port/service_name, the credentials, and that the database "
+            "is reachable from here. Use --conn NAME to try a different entry.")
+
 
 def open_pool(c):
     import oracledb
@@ -637,9 +657,15 @@ def main(argv=None):
         import oracledb
     except ModuleNotFoundError:
         sys.exit("The 'oracledb' package is required to connect: pip install oracledb")
-    pool = open_pool(c)
     try:
-        COMMANDS[ns.command](acquire(pool), ns.schema, ns)
+        pool = open_pool(c)
+        conn = acquire(pool)
+    except (oracledb.Error, OSError) as e:
+        # OSError too: a DNS or socket failure arrives raw from the socket layer,
+        # not wrapped as an oracledb.Error.
+        sys.exit(connect_failure_message(e, name))
+    try:
+        COMMANDS[ns.command](conn, ns.schema, ns)
     except oracledb.Error as e:
         sys.exit(f"Oracle error: {e}")
     finally:

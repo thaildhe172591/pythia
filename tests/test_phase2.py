@@ -121,9 +121,11 @@ def main():
             try:
                 fn()
                 print(f"PASS {name}")
-            except Exception as e:  # noqa: BLE001 — report every failure, keep going
+            # SystemExit is a BaseException: an unexpected sys.exit inside a test
+            # would otherwise kill the run and silently skip everything after it.
+            except (Exception, SystemExit) as e:  # noqa: BLE001 — keep going
                 failed += 1
-                print(f"FAIL {name}: {e}")
+                print(f"FAIL {name}: {e!r}")
     if failed:
         sys.exit(f"{failed} test(s) failed")
     print("OK")

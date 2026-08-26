@@ -75,6 +75,37 @@ def test_resolve_path_segment():
                 "--conn")
 
 
+def test_resolve_default_connection_when_path_gives_nothing():
+    cfg = {"ALPHA": {"user": "a"}, "BETA": {"user": "b", "default": True}}
+    root = pathlib.Path("C:/proj")
+    # standing at the root itself there is nothing to infer from, so the entry
+    # marked default wins — a configured choice, not a guess
+    name, c = pythia.resolve_connection(cfg, None, {}, root, root)
+    assert name == "BETA" and c["user"] == "b"
+    # a path segment is more specific, so it still beats the default
+    name, _ = pythia.resolve_connection(cfg, None, {}, root / "ALPHA" / "x", root)
+    assert name == "ALPHA"
+    # and --conn beats everything
+    name, _ = pythia.resolve_connection(cfg, "ALPHA", {}, root, root)
+    assert name == "ALPHA"
+    # so does PYTHIA_CONNECTION
+    name, _ = pythia.resolve_connection(cfg, None, {"PYTHIA_CONNECTION": "ALPHA"}, root, root)
+    assert name == "ALPHA"
+
+
+def test_resolve_rejects_more_than_one_default():
+    cfg = {"ALPHA": {"user": "a", "default": True}, "BETA": {"user": "b", "default": True}}
+    expect_exit(lambda: pythia.resolve_connection(cfg, None, {}, pathlib.Path("C:/x"), None),
+                "default", "ALPHA", "BETA")
+
+
+def test_resolve_error_says_how_to_set_a_default():
+    cfg = {"ALPHA": {"user": "a"}, "BETA": {"user": "b"}}
+    root = pathlib.Path("C:/proj")
+    expect_exit(lambda: pythia.resolve_connection(cfg, None, {}, root, root),
+                "--conn", "default")
+
+
 def test_resolve_single_connection_shortcut():
     name, c = pythia.resolve_connection({"ONLY": {"user": "x"}}, None, {},
                                         pathlib.Path("C:/anywhere"), None)
@@ -107,6 +138,14 @@ def test_find_config_upward():
         alt.write_text('{"X": {"user": "u"}}', encoding="utf-8")
         cfg2, root2 = pythia.find_config(cwd, {"PYTHIA_CONFIG": str(alt)})
         assert cfg2 and "X" in cfg2 and root2 == alt.parent
+
+
+def test_connect_failure_message_names_the_connection():
+    msg = pythia.connect_failure_message(OSError("getaddrinfo failed"), "DEV")
+    assert "DEV" in msg                 # which entry failed, out of many
+    assert "getaddrinfo failed" in msg  # the real cause, not swallowed
+    assert "credential" in msg.lower()  # points at what to check
+    assert "Traceback" not in msg
 
 
 def test_clip_rows():
@@ -156,9 +195,11 @@ def main():
             try:
                 fn()
                 print(f"PASS {name}")
-            except Exception as e:  # noqa: BLE001 — report every failure, keep going
+            # SystemExit is a BaseException: an unexpected sys.exit inside a test
+            # would otherwise kill the run and silently skip everything after it.
+            except (Exception, SystemExit) as e:  # noqa: BLE001 — keep going
                 failed += 1
-                print(f"FAIL {name}: {e}")
+                print(f"FAIL {name}: {e!r}")
     if failed:
         sys.exit(f"{failed} test(s) failed")
     print("OK")
