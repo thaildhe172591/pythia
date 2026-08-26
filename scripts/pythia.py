@@ -979,6 +979,15 @@ def cmd_apply(conn, schema, ns):
         sys.exit(code)
 
 
+def run_restore(conn, schema, ns):
+    """Restore is itself a write: feed the saved statement back through the
+    same six steps. There is no second write path and no silent restore."""
+    e = read_journal_entry(ns.project_root, ns.id)
+    print(f"Restoring from {ns.id} — this is itself a write and goes through "
+          "the full six steps.", file=sys.stderr)
+    return run_apply(conn, schema, ns, e["restore"], origin={"restored_from": ns.id})
+
+
 def cmd_policy(conn, schema, ns):
     if ns.action == "set" and (not ns.group or not ns.value):
         sys.exit("Usage: pythia policy set <group> <value>\n"
@@ -1155,7 +1164,8 @@ def main(argv=None):
     cwd = pathlib.Path.cwd()
     cfg, root = find_config(cwd, os.environ)
     ns.project_root = root if root is not None else cwd
-    if ns.command in NO_DB_COMMANDS:
+    if ns.command in NO_DB_COMMANDS and not (
+            ns.command == "journal" and getattr(ns, "action", "") == "restore"):
         COMMANDS[ns.command](None, None, ns)
         return
     name, c = resolve_connection(cfg, ns.conn, os.environ, cwd, root)
@@ -1175,7 +1185,15 @@ def main(argv=None):
         # not wrapped as an oracledb.Error.
         sys.exit(connect_failure_message(e, name))
     try:
-        COMMANDS[ns.command](conn, ns.schema, ns)
+        if ns.command == "journal":           # only restore reaches here
+            if not ns.id:
+                sys.exit("Usage: pythia journal restore <id>")
+            ns.file = f"journal:{ns.id}"
+            code = run_restore(conn, ns.schema, ns)
+            if code:
+                sys.exit(code)
+        else:
+            COMMANDS[ns.command](conn, ns.schema, ns)
     except oracledb.Error as e:
         sys.exit(f"Oracle error: {e}")
     finally:

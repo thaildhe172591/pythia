@@ -314,6 +314,38 @@ def test_apply_schema_mismatch_refused():
         assert conn.executed == []
 
 
+def test_journal_restore_runs_the_six_steps():
+    with tempfile.TemporaryDirectory() as td:
+        eid = pythia.write_journal_entry(td, "PACKAGE BODY", "PKG_ORDER",
+                                         OLD_SRC, NEW_FILE, {"connection": "DEV"})
+        conn = FakeConn(base_script(db_source="PACKAGE BODY pkg_order AS\n  new line;\nEND;\n"))
+        ns = apply_ns(td, yes=True)
+        ns.command, ns.action, ns.id, ns.file = "journal", "restore", eid, f"journal:{eid}"
+        code = pythia.run_restore(conn, "APP", ns)
+        assert code == 0
+        assert len(wrote_ddl(conn)) == 1
+        assert wrote_ddl(conn)[0].lstrip().upper().startswith("CREATE OR REPLACE PACKAGE BODY")
+        # the restore created its own new journal entry pointing back
+        ids = pythia.list_journal_entries(td)
+        assert len(ids) == 2
+        newest = [i for i in ids if i != eid][0]
+        assert pythia.read_journal_entry(td, newest)["meta"]["restored_from"] == eid
+
+
+def test_journal_restore_of_created_object_is_a_drop_and_policy_gates_it():
+    with tempfile.TemporaryDirectory() as td:
+        eid = pythia.write_journal_entry(td, "PROCEDURE", "P_NEW", "",
+                                         "CREATE OR REPLACE PROCEDURE p_new AS BEGIN NULL; END;",
+                                         {})
+        conn = FakeConn(base_script())
+        ns = apply_ns(td, yes=True)
+        ns.action, ns.id, ns.file = "restore", eid, f"journal:{eid}"
+        # restore.sql is DROP PROCEDURE — structural, deny by default, honest refusal
+        expect_exit(lambda: pythia.run_restore(conn, "APP", ns),
+                    "structural", "deny")
+        assert wrote_ddl(conn) == []
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
