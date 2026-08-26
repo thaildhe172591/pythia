@@ -4,10 +4,10 @@ connections.json
 .env
 .pythia/
 
-# Internal planning material (contains company-specific data) — not part of the
-# public repo. docs/* (not docs/) so docs/superpowers/ can be re-included below.
-docs/*
-!docs/superpowers/
+# Internal planning material — briefs, specs and plans. These name deployments
+# and hosts that must never reach a public repo, and none of them is part of the
+# shipped product, so the whole tree stays out.
+docs/
 tool-oracle-v1/
 NOTES-research.md
 
