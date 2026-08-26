@@ -105,14 +105,22 @@ def paint(text, color, enabled):
     return f"\x1b[{ANSI[color]}m{text}\x1b[0m"
 
 
+BLOCK_LOGO = """\
+██████╗ ██╗   ██╗████████╗██╗  ██╗██╗ █████╗
+██╔══██╗╚██╗ ██╔╝╚══██╔══╝██║  ██║██║██╔══██╗
+██████╔╝ ╚████╔╝    ██║   ███████║██║███████║
+██╔═══╝   ╚██╔╝     ██║   ██╔══██║██║██╔══██║
+██║        ██║      ██║   ██║  ██║██║██║  ██║
+╚═╝        ╚═╝      ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝"""
+
+
 def banner(enabled):
-    """A small hello on `check`, TTY only — agents piping output never see it."""
+    """A hello on `check`, TTY only — agents piping output never see it."""
     if not enabled:
         return ""
-    line = paint("─" * 46, "dim", enabled)
-    name = paint("PYTHIA", "cyan", enabled) + "  " + \
-        paint("judgment for your agent's Oracle connection", "dim", enabled)
-    return f"{line}\n  {name}\n{line}\n"
+    logo = "\n".join(paint(ln, "cyan", enabled) for ln in BLOCK_LOGO.splitlines())
+    tag = paint("judgment for your agent's Oracle connection", "dim", enabled)
+    return f"\n{logo}\n{tag}\n\n"
 
 
 def paint_diff_line(ln, enabled):
