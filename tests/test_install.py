@@ -35,8 +35,11 @@ def test_scaffold_creates_config_once_and_never_clobbers():
 
 
 def test_missing_npx_falls_back_to_the_bundled_pack():
-    """No Node -> the whole kit still installs: run_skills_add signals None
-    and the bundled skills are copied into both conventional layouts."""
+    """No Node -> the whole kit still installs. One target only
+    (.agents/skills, the universal layout) — a second copy in
+    .claude/skills would double every skill in Claude Code's menu. The
+    copy merges: foreign skills survive, and stale plsql-* copies of the
+    pack's old names are cleaned from both conventional roots."""
     import shutil
     old = shutil.which
     shutil.which = lambda name: None
@@ -45,14 +48,23 @@ def test_missing_npx_falls_back_to_the_bundled_pack():
     finally:
         shutil.which = old
     with tempfile.TemporaryDirectory() as td:
+        agents = pathlib.Path(td) / ".agents" / "skills"
+        claude = pathlib.Path(td) / ".claude" / "skills"
+        # pre-existing content: a custom skill, and stale old-name copies
+        (agents / "my-team-skill").mkdir(parents=True)
+        (agents / "my-team-skill" / "SKILL.md").write_text("x", encoding="utf-8")
+        (agents / "plsql-apply").mkdir()
+        (claude / "plsql-review").mkdir(parents=True)
         targets = pythia.copy_bundled_skills(td)
-        assert [t.name for t in targets] == ["skills", "skills"]
-        for root in (pathlib.Path(td) / ".claude" / "skills",
-                     pathlib.Path(td) / ".agents" / "skills"):
-            assert (root / "plsql-apply" / "SKILL.md").is_file()
-            assert (root / "plsql-review" / "reference" / "antipatterns.md").is_file()
-        # second run must not fail on the existing copies
-        pythia.copy_bundled_skills(td)
+        assert targets == [agents]
+        assert (agents / "pythia-apply" / "SKILL.md").is_file()
+        assert (agents / "pythia-review" / "reference" / "antipatterns.md").is_file()
+        assert not (claude / "pythia-apply").exists()      # single target
+        assert (agents / "my-team-skill" / "SKILL.md").read_text(
+            encoding="utf-8") == "x"                        # merge, not wipe
+        assert not (agents / "plsql-apply").exists()        # legacy cleaned
+        assert not (claude / "plsql-review").exists()       # in both roots
+        pythia.copy_bundled_skills(td)                      # idempotent
 
 
 def test_invocation_names_the_dash_m_form():
@@ -72,7 +84,7 @@ def test_invocation_names_the_dash_m_form():
 
 def test_pack_dirs_resolve_in_the_source_layout():
     assert (pythia.QUERY_DIR / "impact.sql").is_file()
-    assert (pythia.SKILLS_DIR / "plsql-apply" / "SKILL.md").is_file()
+    assert (pythia.SKILLS_DIR / "pythia-apply" / "SKILL.md").is_file()
 
 
 def test_one_version_across_every_manifest():

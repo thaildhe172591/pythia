@@ -1,11 +1,11 @@
 ---
-name: plsql-write
+name: pythia-write
 description: Use when writing or modifying PL/SQL source - a procedure, function, package, trigger, or view - after impact is known. The codebase's conventions already exist; copy them instead of inventing style, and anchor every type to the database's reality.
 ---
 
 # Writing PL/SQL
 
-**Announce at start:** "Using plsql-write — mining the codebase's conventions first."
+**Announce at start:** "Using pythia-write — mining the codebase's conventions first."
 
 **Before anything:** if the project has `.pythia/conventions.md`, read it —
 house rules there outrank every generic pattern below, and
@@ -49,7 +49,7 @@ propose style changes to the developer separately, never silently.
 
 ## When NOT to use this skill
 
-- Understanding existing code → `plsql-explore`.
-- Measuring what a change breaks → `plsql-impact` (must already be done).
-- Landing the file on the database → `plsql-apply`, always — never
+- Understanding existing code → `pythia-explore`.
+- Measuring what a change breaks → `pythia-impact` (must already be done).
+- Landing the file on the database → `pythia-apply`, always — never
   `run-sql`, never `sqlplus`.

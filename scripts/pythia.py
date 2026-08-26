@@ -536,7 +536,7 @@ POLICY_DEFAULTS = {"plsql_source": "confirm", "data_dml": "deny",
                    "structural": "deny", "grants": "deny", "session": "allow"}
 
 ROLLBACK_TABLE = """\
-Is rollback real?  (this table also appears in README.md and plsql-apply)
+Is rollback real?  (this table also appears in README.md and pythia-apply)
   plsql_source  Yes - completely. Source is recoverable from ALL_SOURCE.
   data_dml      No. After commit only Flashback Query remains, within undo retention.
   structural    Almost never. DROP COLUMN is permanent; a dropped table may be in the Recycle Bin.
@@ -582,6 +582,17 @@ def load_policy(root):
         return effective_policy(None)
     try:
         return effective_policy(json.loads(path.read_text(encoding="utf-8")))
+    except ValueError as e:
+        sys.exit(f"Cannot parse {path}: {e}")
+
+
+def load_settings(root):
+    """Optional .pythia/settings.json — an absent file means defaults."""
+    path = pathlib.Path(root) / CONFIG_DIR / "settings.json"
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
     except ValueError as e:
         sys.exit(f"Cannot parse {path}: {e}")
 
@@ -1014,6 +1025,19 @@ def privilege_warning(conn, schema, conn_user):
     this session is running with more power than the task needs."""
     _, rows = run_query(conn, load_query("session-privileges.sql"))
     dangerous = [r[0] for r in rows]
+    with conn.cursor() as cur:
+        cur.execute("select sys_context('userenv','proxy_user') from dual")
+        prow = cur.fetchall()
+    proxy = prow[0][0] if prow and prow[0] and prow[0][0] else None
+    if proxy:
+        # sanctioned least-privilege entrance; any excess power is the
+        # OWNER's, inherited by every proxied session — say that
+        if not dangerous:
+            return None
+        return (f"! Proxy session ({proxy} → {schema}), but the owner holds "
+                f"{', '.join(dangerous[:3])}" + ("…" if len(dangerous) > 3 else "")
+                + ":\n  every proxied session inherits this — trim the "
+                "owner's grants; pythia policy explains what is at stake.")
     owner = bool(conn_user) and conn_user.upper() == schema
     if not owner and not dangerous:
         return None
@@ -1151,6 +1175,14 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         return 0
 
     # 4. APPLY
+    if group == "plsql_source" and load_settings(ns.project_root).get(
+            "plscope_on_apply", True):
+        # session-scoped: every object applied through pythia builds the
+        # PL/Scope index as a side effect; opt out with
+        # {"plscope_on_apply": false} in .pythia/settings.json
+        with conn.cursor() as cur:
+            cur.execute("ALTER SESSION SET plscope_settings = "
+                        "'IDENTIFIERS:ALL, STATEMENTS:ALL'")
     with conn.cursor() as cur:
         cur.execute(stmt)
 
@@ -1264,9 +1296,22 @@ def cmd_journal(conn, schema, ns):
             state = "applied" if meta.get("applied") else "preview"
             print(f"{eid}  [{state}]")
         return
+    if ns.action == "prune":
+        import shutil
+        removed = 0
+        for eid in list_journal_entries(root):
+            if not read_journal_entry(root, eid)["meta"].get("applied"):
+                shutil.rmtree(journal_root(root) / eid)
+                removed += 1
+        if ns.json:
+            print(json.dumps({"pruned": removed}))
+        else:
+            print(f"-- pruned {removed} preview-only entries; applied entries "
+                  "(the real snapshots) are all kept")
+        return
     if not ns.id:
         sys.exit(f"Usage: {invocation()} journal "
-                 "{list | show <id> | diff <id> | export <id> | restore <id>}")
+                 "{list | show <id> | diff <id> | export <id> | prune | restore <id>}")
     e = read_journal_entry(root, ns.id)
     if ns.action == "show":
         print(json.dumps(e["meta"], indent=2))
@@ -1460,20 +1505,31 @@ def run_skills_add(source, interactive=False):
     return subprocess.run(cmd).returncode
 
 
+LEGACY_SKILLS = ("plsql-setup", "plsql-explore", "plsql-impact",
+                 "plsql-write", "plsql-apply", "plsql-review",
+                 "plsql-skill-author")
+
+
 def copy_bundled_skills(root):
-    """No-Node fallback: copy the wheel-bundled pack into the two
-    conventional project layouts — Claude Code and the universal .agents one
-    (Codex, Cursor, Copilot, Gemini CLI and friends all read it)."""
+    """No-Node fallback: copy the wheel-bundled pack into .agents/skills/
+    ONLY — the universal layout that Claude Code, Codex, Cursor, Copilot and
+    friends all read. A second copy in .claude/skills/ would show every
+    skill twice in Claude Code's menu. The copy merges: only the pack's own
+    skills are refreshed, anything else in the directory is untouched.
+    Stale copies under the pack's old plsql-* names are removed from both
+    conventional roots (real directories only, never symlinks)."""
     import shutil
-    targets = []
-    for rel in (".claude/skills", ".agents/skills"):
-        dest_root = pathlib.Path(root) / rel
-        for pack in sorted(SKILLS_DIR.iterdir()):
-            if not (pack / "SKILL.md").is_file():
-                continue
-            shutil.copytree(pack, dest_root / pack.name, dirs_exist_ok=True)
-        targets.append(dest_root)
-    return targets
+    dest_root = pathlib.Path(root) / ".agents" / "skills"
+    for pack in sorted(SKILLS_DIR.iterdir()):
+        if not (pack / "SKILL.md").is_file():
+            continue
+        shutil.copytree(pack, dest_root / pack.name, dirs_exist_ok=True)
+    for rel in (".agents/skills", ".claude/skills"):
+        for old_name in LEGACY_SKILLS:
+            legacy = pathlib.Path(root) / rel / old_name
+            if legacy.is_dir() and not legacy.is_symlink():
+                shutil.rmtree(legacy)
+    return [dest_root]
 
 
 def cmd_install(conn, schema, ns):
@@ -1584,7 +1640,7 @@ def build_parser():
     s = sub.add_parser("journal", parents=[common()],
                        help="list, inspect, export and restore write snapshots")
     s.add_argument("action", nargs="?",
-                   choices=["list", "show", "diff", "export", "restore"],
+                   choices=["list", "show", "diff", "export", "prune", "restore"],
                    default="list")
     s.add_argument("id", nargs="?")
     s.add_argument("--what", choices=["after", "before", "restore"],

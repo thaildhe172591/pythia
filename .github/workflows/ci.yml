@@ -38,13 +38,14 @@ jobs:
       # the entry point must run outside the repo layout, with queries and
       # skills resolving from the wheel's package data
       - run: cd /tmp && pythia --help && pythia policy
-      - run: cd /tmp && python -c "import pythia; assert (pythia.QUERY_DIR / 'impact.sql').is_file(); assert (pythia.SKILLS_DIR / 'plsql-apply' / 'SKILL.md').is_file()"
+      - run: cd /tmp && python -c "import pythia; assert (pythia.QUERY_DIR / 'impact.sql').is_file(); assert (pythia.SKILLS_DIR / 'pythia-apply' / 'SKILL.md').is_file()"
       # the no-Node whole-kit fallback: scaffold + bundled skill copies
       # (absolute interpreter + empty PATH so npx is genuinely invisible)
       - run: |
           PY=$(which python)
           mkdir /tmp/kit && cd /tmp/kit
           PATH=/nonexistent "$PY" -m pythia install
-          test -f .claude/skills/plsql-apply/SKILL.md
-          test -f .agents/skills/plsql-review/reference/antipatterns.md
+          test -f .agents/skills/pythia-apply/SKILL.md
+          test ! -e .claude/skills/pythia-apply
+          test -f .agents/skills/pythia-review/reference/antipatterns.md
           test -f .pythia/connections.json

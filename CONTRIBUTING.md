@@ -47,7 +47,7 @@ The original tool this project grew from documented a `--write` flag its code
 refused. That contradiction is the founding bug: if you change behavior,
 change the docstring, the README and the affected skill in the same PR. The
 rollback-honesty table exists in three places (CLI `policy`, README,
-`plsql-apply` skill) and must stay identical.
+`pythia-apply` skill) and must stay identical.
 
 ## Hard rules
 
@@ -83,7 +83,7 @@ disposable artifacts (they are gitignored).
 ## Adding or changing a skill
 
 1. Declare it in `EXPECTED` in `tests/test_phase5.py` (new skills).
-2. Follow the format of the existing pack; `plsql-skill-author` documents it.
+2. Follow the format of the existing pack; `pythia-skill-author` documents it.
 3. Verify triggering in a fresh agent session — a skill that does not
    trigger does not exist.
 

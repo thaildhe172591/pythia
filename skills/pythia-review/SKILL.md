@@ -1,11 +1,11 @@
 ---
-name: plsql-review
+name: pythia-review
 description: Use when reviewing PL/SQL - a changed procedure or package, a proposed file, or an object suspected of causing trouble. Combines the database's own correctness signals with the antipattern checklist, and reports findings anchored to line numbers.
 ---
 
 # Reviewing PL/SQL
 
-**Announce at start:** "Using plsql-review — checking the database's signals first."
+**Announce at start:** "Using pythia-review — checking the database's signals first."
 
 Review in two passes: what the database *knows* is wrong, then what the
 checklist says is *likely* wrong. Machine signals first — they are free and
@@ -45,6 +45,6 @@ style).
 
 ## When NOT to use this skill
 
-- Reviewing whether a change is *safe to apply* — that is `plsql-impact`
-  plus `plsql-apply`'s preview; this skill judges the code itself.
+- Reviewing whether a change is *safe to apply* — that is `pythia-impact`
+  plus `pythia-apply`'s preview; this skill judges the code itself.
 - Reviewing non-PL/SQL application code — outside this skill's scope.

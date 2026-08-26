@@ -1,11 +1,11 @@
 ---
-name: plsql-explore
+name: pythia-explore
 description: Use when you need to understand anything in an Oracle schema - finding objects, reading PL/SQL source, signatures, table columns, DDL, searching code, or asking who uses what. The database is the only source of truth; repo dumps and exports drift and lie.
 ---
 
 # Exploring the Schema
 
-**Announce at start:** "Using plsql-explore — asking the database directly."
+**Announce at start:** "Using pythia-explore — asking the database directly."
 
 ## The principle: ask the database, never the dump
 

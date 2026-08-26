@@ -489,6 +489,75 @@ def test_preview_diff_ignores_the_create_header():
         assert "lines changed" not in out
 
 
+def test_apply_builds_plscope_index_by_default():
+    """The write session sets plscope_settings before the CREATE, so every
+    object applied through pythia carries the semantic index."""
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        code = pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql", yes=True),
+                                NEW_FILE)
+        assert code == 0
+        stmts = [s for s, _ in conn.executed]
+        alter = [i for i, s in enumerate(stmts) if "plscope_settings" in s.lower()]
+        create = [i for i, s in enumerate(stmts)
+                  if s.lstrip().lower().startswith("create")]
+        assert alter and create and alter[0] < create[0]
+
+
+def test_apply_plscope_opt_out_via_settings():
+    with tempfile.TemporaryDirectory() as td:
+        (pathlib.Path(td) / ".pythia").mkdir()
+        (pathlib.Path(td) / ".pythia" / "settings.json").write_text(
+            '{"plscope_on_apply": false}', encoding="utf-8")
+        conn = FakeConn(base_script())
+        code = pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql", yes=True),
+                                NEW_FILE)
+        assert code == 0
+        assert not any("plscope_settings" in s.lower()
+                       for s, _ in conn.executed)
+
+
+def test_privilege_warning_speaks_proxy():
+    """A proxy session inheriting ANY privileges: the warning must blame the
+    owner's grants, not the entrance; a clean proxy session warns not at all."""
+    dangerous = {"from session_privs": ([("PRIVILEGE",)],
+                                        [("DROP ANY TABLE",), ("SELECT ANY TABLE",)]),
+                 "proxy_user": ([("P",)], [("CORE_BH_AGENT",)])}
+    msg = pythia.privilege_warning(FakeConn(dangerous), "CORE_BH",
+                                   "core_bh_agent[core_bh]")
+    assert "Proxy session" in msg and "CORE_BH_AGENT" in msg
+    assert "owner holds" in msg and "DROP ANY TABLE" in msg
+    clean = {"from session_privs": ([("PRIVILEGE",)], []),
+             "proxy_user": ([("P",)], [("CORE_BH_AGENT",)])}
+    assert pythia.privilege_warning(FakeConn(clean), "CORE_BH",
+                                    "core_bh_agent[core_bh]") is None
+    # no proxy, direct owner: the original warning stands
+    direct = {"from session_privs": ([("PRIVILEGE",)], [])}
+    assert "schema owner" in pythia.privilege_warning(
+        FakeConn(direct), "APP", "APP")
+
+
+def test_journal_prune_keeps_applied_entries():
+    import argparse
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        base = datetime.datetime(2026, 8, 26, 12, 0, 0)
+        pythia.write_journal_entry(td, "PROCEDURE", "P_PREVIEW", "a", "b",
+                                   {"applied": False}, now=base)
+        kept = pythia.write_journal_entry(
+            td, "PROCEDURE", "P_APPLIED", "a", "b", {"applied": True},
+            now=base.replace(minute=1))
+        ns = argparse.Namespace(action="prune", project_root=td, json=False,
+                                id=None)
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_journal(None, None, ns)
+        assert "pruned 1" in buf.getvalue()
+        assert pythia.list_journal_entries(td) == [kept]
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

@@ -39,7 +39,7 @@ output on any command.
 
 - `scripts/pythia.py` — the CLI (stdlib + python-oracledb, thin mode)
 - `queries/*.sql` — every SQL statement the tool runs, reviewable in isolation
-- `skills/` — the seven workflow skills (`plsql-apply` is the write gate)
+- `skills/` — the seven workflow skills (`pythia-apply` is the write gate)
 - `examples/` — connection config and the least-privilege agent-user setup
 - `tests/` — four suites, no database required; run them before claiming done
 

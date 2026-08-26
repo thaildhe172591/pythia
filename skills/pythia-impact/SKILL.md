@@ -1,11 +1,11 @@
 ---
-name: plsql-impact
+name: pythia-impact
 description: Use before proposing or writing any change to an Oracle object - a procedure, package, function, trigger, view, or table. Impact analysis comes first, because what depends on an object decides how careful the change must be, and Oracle invalidates dependents in cascade.
 ---
 
 # Impact Before Change
 
-**Announce at start:** "Using plsql-impact to measure the blast radius first."
+**Announce at start:** "Using pythia-impact to measure the blast radius first."
 
 Changing an Oracle object recompiles or invalidates everything that depends
 on it — immediately, schema-wide, for every user of a shared database. The
@@ -51,6 +51,6 @@ program that would be invalidated by an `ALTER`.
 
 ## Hand-off
 
-Impact known and acceptable → `plsql-write` to write the change following
-the codebase's conventions → `plsql-apply` to land it with preview and
+Impact known and acceptable → `pythia-write` to write the change following
+the codebase's conventions → `pythia-apply` to land it with preview and
 verification.

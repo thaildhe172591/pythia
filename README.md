@@ -68,7 +68,8 @@ pythia check               # fill in connections.json first, then verify
 The pip package is the whole kit: with Node.js present, `pythia install`
 runs `npx skills add` (77 agents, symlinked updates; `--source <git-url>`
 for internal mirrors) — without Node it copies the bundled skill pack into
-`.claude/skills/` and `.agents/skills/`. Skills alone: `npx skills add
+`.agents/skills/`, the universal layout Claude Code, Codex and Cursor all
+read (one copy, so no skill shows up twice). Skills alone: `npx skills add
 thaildhe172591/pythia`, or `/plugin marketplace add thaildhe172591/pythia`.
 
 `pip install` is **once per machine**; `pythia install` is **once per
@@ -136,10 +137,10 @@ it audits every interaction in `DBTOOLS$MCP_LOG`. **Writes never do** — only
 
 Seven skills teach the agent the workflow — superpowers-style gates, not suggestions:
 
-`plsql-setup` · `plsql-explore` · `plsql-impact` (impact **before** any change) ·
-`plsql-write` (copy the codebase's conventions) · `plsql-apply` (the gate: the
+`pythia-setup` · `pythia-explore` · `pythia-impact` (impact **before** any change) ·
+`pythia-write` (copy the codebase's conventions) · `pythia-apply` (the gate: the
 developer sees the preview and approves in chat before anything is written) ·
-`plsql-review` (seven antipatterns) · `plsql-skill-author` (capture *your team's*
+`pythia-review` (seven antipatterns) · `pythia-skill-author` (capture *your team's*
 workflow as a new skill, mined from the live schema).
 
 ## Compatibility

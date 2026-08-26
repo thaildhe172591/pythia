@@ -1,11 +1,11 @@
 ---
-name: plsql-setup
+name: pythia-setup
 description: Use when setting pythia up for a project or a machine - writing connections.json, creating a least-privilege agent user, wiring the SQLcl MCP server, or diagnosing a connection that will not open. Also the place to start when check prints a privilege warning.
 ---
 
 # Setting Up
 
-**Announce at start:** "Using plsql-setup to configure the database access."
+**Announce at start:** "Using pythia-setup to configure the database access."
 
 Set up in this order: connection first (everything else needs it), the
 least-privilege user second (the only protection that cannot be bypassed),

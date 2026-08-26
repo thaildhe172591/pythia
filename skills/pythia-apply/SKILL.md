@@ -1,11 +1,11 @@
 ---
-name: plsql-apply
+name: pythia-apply
 description: Use when a PL/SQL change is ready to reach the database - applying a CREATE OR REPLACE, restoring from the journal, or any other write. Runs the six-step flow through pythia apply and enforces the gate - the developer sees the preview and approves in chat before anything is written, and a broken result is never reported as success.
 ---
 
 # Applying PL/SQL Changes
 
-**Announce at start:** "Using plsql-apply — I'll preview the change first."
+**Announce at start:** "Using pythia-apply — I'll preview the change first."
 
 DDL in Oracle commits itself. There is no transaction to roll back — the
 snapshot pythia takes before writing is the only undo that exists. This skill
@@ -24,7 +24,7 @@ dependents.
 ## The Workflow
 
 **Before step 1:** if this conversation has not yet seen a standalone impact
-analysis for this object, run `plsql-impact` first. The `impact:` line inside
+analysis for this object, run `pythia-impact` first. The `impact:` line inside
 apply's preview is confirmation of a number you already knew — if it is the
 first time anyone sees it, a step was skipped.
 
@@ -114,8 +114,8 @@ the stakes are highest.
 
 ## When NOT to use this skill
 
-- Reading or exploring — use `plsql-explore`.
-- Judging blast radius before editing — use `plsql-impact` (always run it
+- Reading or exploring — use `pythia-explore`.
+- Judging blast radius before editing — use `pythia-impact` (always run it
   before proposing a change; apply's preview is confirmation, not discovery).
 - Editing files the developer has not asked to land on the database yet.
 

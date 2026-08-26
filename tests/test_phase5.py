@@ -10,9 +10,9 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
 
-EXPECTED = {"plsql-setup", "plsql-explore", "plsql-impact",
-            "plsql-write", "plsql-apply", "plsql-review",
-            "plsql-skill-author"}
+EXPECTED = {"pythia-setup", "pythia-explore", "pythia-impact",
+            "pythia-write", "pythia-apply", "pythia-review",
+            "pythia-skill-author"}
 
 # spec: SKILL.md under 150 lines, detail pushed to reference/
 MAX_LINES = 150
@@ -65,19 +65,19 @@ def test_skill_bodies_stay_within_budget():
 
 
 def test_apply_skill_keeps_the_honest_rollback_table():
-    path = SKILLS / "plsql-apply" / "SKILL.md"
+    path = SKILLS / "pythia-apply" / "SKILL.md"
     if not path.is_file():
         return
     text = path.read_text(encoding="utf-8")
     for needle in ("Yes — completely", "Flashback Query", "Recycle Bin",
                    "Almost never", "exit 3", "run-sql"):
-        assert needle in text, f"plsql-apply: missing {needle!r}"
+        assert needle in text, f"pythia-apply: missing {needle!r}"
 
 
 def test_reference_files_exist_where_promised():
-    for rel in ("plsql-explore/reference/data-dictionary.md",
-                "plsql-write/reference/patterns.md",
-                "plsql-review/reference/antipatterns.md"):
+    for rel in ("pythia-explore/reference/data-dictionary.md",
+                "pythia-write/reference/patterns.md",
+                "pythia-review/reference/antipatterns.md"):
         assert (SKILLS / rel).is_file(), f"missing {rel}"
 
 

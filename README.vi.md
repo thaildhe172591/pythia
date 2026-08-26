@@ -69,8 +69,9 @@ pythia check               # điền connections.json trước, rồi kiểm tra
 
 Gói pip là trọn bộ kit: có Node.js thì `pythia install` chạy `npx skills add`
 (77 agent, cập nhật qua symlink; `--source <git-url>` cho mirror nội bộ) —
-không có Node thì nó tự copy bộ skills đóng gói sẵn vào `.claude/skills/` và
-`.agents/skills/`. Chỉ cần skills: `npx skills add thaildhe172591/pythia`,
+không có Node thì nó tự copy bộ skills đóng gói sẵn vào `.agents/skills/` —
+layout chuẩn chung mà Claude Code, Codex, Cursor đều đọc (một bản duy nhất,
+không skill nào hiện đôi trong menu). Chỉ cần skills: `npx skills add thaildhe172591/pythia`,
 hoặc `/plugin marketplace add thaildhe172591/pythia`.
 
 ### Máy cài một lần — mỗi dự án chạy một lần
@@ -147,10 +148,10 @@ không bao giờ** — chỉ `pythia apply` có snapshot, preview, verify và jo
 
 Bảy skill dạy agent quy trình — là cổng chặn kiểu superpowers, không phải gợi ý:
 
-`plsql-setup` · `plsql-explore` · `plsql-impact` (đo ảnh hưởng **trước** mọi
-thay đổi) · `plsql-write` (copy convention của codebase) · `plsql-apply`
+`pythia-setup` · `pythia-explore` · `pythia-impact` (đo ảnh hưởng **trước** mọi
+thay đổi) · `pythia-write` (copy convention của codebase) · `pythia-apply`
 (cổng chặn: developer thấy preview và duyệt trong chat trước khi bất cứ thứ
-gì được ghi) · `plsql-review` (bảy antipattern) · `plsql-skill-author` (đóng
+gì được ghi) · `pythia-review` (bảy antipattern) · `pythia-skill-author` (đóng
 gói cách làm việc *của team bạn* thành skill mới, đào từ schema đang sống).
 
 ## Tương thích

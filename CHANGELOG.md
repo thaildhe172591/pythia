@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0 — 2026-08-26
+
+- **Skills renamed `plsql-*` → `pythia-*`** for recognizability. The no-Node
+  installer cleans stale `plsql-*` copies; npx users: `npx skills remove`
+  the old names once.
+- **No more duplicate skills**: the bundled-pack fallback installs to
+  `.agents/skills/` only — Claude Code reads both conventional roots, so
+  the second copy in `.claude/skills/` doubled every skill in the menu.
+  The copy merges (your other skills are untouched), and connections.json
+  is never overwritten, as before.
+- **PL/Scope on apply** (from IDEAS): the write session compiles
+  `plsql_source` with `plscope_settings='IDENTIFIERS:ALL, STATEMENTS:ALL'`,
+  so applied objects always carry the semantic index `pythia plscope`
+  reads. Opt out: `{"plscope_on_apply": false}` in `.pythia/settings.json`.
+- **Proxy-aware privilege warning** (from IDEAS): a proxy session
+  inheriting `ANY` privileges is told the owner's grants are the problem;
+  a clean proxy session warns not at all.
+- **`journal prune`** (from IDEAS): removes preview-only entries; applied
+  entries — the real snapshots — are always kept.
+
 ## 0.1.3 — 2026-08-26
 
 - `pythia agent-user` — prints the least-privilege proxy-user SQL for the

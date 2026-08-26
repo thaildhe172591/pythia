@@ -1,11 +1,11 @@
 ---
-name: plsql-skill-author
+name: pythia-skill-author
 description: Use when the developer wants their own way of working captured as a new skill - "make a skill for how we do X", a house convention or preference worth teaching every future session, a team ritual, or the same correction arriving for the second time. Interviews the developer, mines the real conventions from the database, and writes a skill in this pack's format.
 ---
 
 # Authoring a New Skill
 
-**Announce at start:** "Using plsql-skill-author — let's capture how you actually work."
+**Announce at start:** "Using pythia-skill-author — let's capture how you actually work."
 
 A skill is a decision captured so it never has to be re-argued. Capture what
 the team *actually does* — with evidence from the database — not what anyone
