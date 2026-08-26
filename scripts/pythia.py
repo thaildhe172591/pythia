@@ -569,12 +569,25 @@ def open_pool(c):
                                 min=1, max=2)
 
 
-def acquire(pool):
+def session_should_be_readonly(command, action=""):
+    """Read commands get SET TRANSACTION READ ONLY as a second line of
+    defence. The write path must not: DML under a read-only transaction dies
+    with ORA-01456, and its defences are the classifier, the policy gate, the
+    token and the snapshot — not a transaction attribute."""
+    if command == "apply":
+        return False
+    if command == "journal" and action == "restore":
+        return False
+    return True
+
+
+def acquire(pool, readonly=True):
     conn = pool.acquire()
-    with conn.cursor() as cur:                    # defence 2: Oracle itself rejects
-        cur.execute("set transaction read only")  # DML/DDL in this transaction.
-    return conn                                   # NOT inherited by autonomous
-    #                                               transactions inside called PL/SQL.
+    if readonly:
+        with conn.cursor() as cur:                    # defence 2: Oracle itself rejects
+            cur.execute("set transaction read only")  # DML/DDL in this transaction.
+    return conn                                       # NOT inherited by autonomous
+    #                                                   transactions inside called PL/SQL.
 
 
 def cell(v):
@@ -1188,7 +1201,8 @@ def main(argv=None):
         sys.exit("The 'oracledb' package is required to connect: pip install oracledb")
     try:
         pool = open_pool(c)
-        conn = acquire(pool)
+        conn = acquire(pool, session_should_be_readonly(
+            ns.command, getattr(ns, "action", "") or ""))
     except (oracledb.Error, OSError) as e:
         # OSError too: a DNS or socket failure arrives raw from the socket layer,
         # not wrapped as an oracledb.Error.

@@ -354,6 +354,17 @@ def test_docstring_no_longer_claims_readonly_build():
     assert "SELECT/WITH" in doc
 
 
+def test_write_path_skips_readonly_transaction():
+    """Read commands keep SET TRANSACTION READ ONLY as defence 2. The write
+    path must not get it: DML under a read-only transaction dies with
+    ORA-01456; its defences are the classifier, policy, token and snapshot."""
+    assert pythia.session_should_be_readonly("check")
+    assert pythia.session_should_be_readonly("sql")
+    assert pythia.session_should_be_readonly("journal", "list")
+    assert not pythia.session_should_be_readonly("apply")
+    assert not pythia.session_should_be_readonly("journal", "restore")
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
