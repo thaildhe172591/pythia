@@ -31,6 +31,7 @@ you always know whether you saw everything.
   pythia invalid
   pythia errors MY_PACKAGE
   pythia deps MY_PACKAGE --depth 2
+  pythia impact MY_TABLE
 """
 import argparse
 import json
@@ -53,6 +54,7 @@ QUERY_BINDS = {
     "invalid-objects.sql": {"s"},
     "compile-errors.sql": {"s", "n"},
     "dependencies.sql": {"s", "n", "depth"},
+    "impact.sql": {"s", "n", "depth"},
 }
 
 
@@ -219,6 +221,18 @@ def render_tree(rows, root):
         lvl, owner, name, otype = row[:4]
         out.append(f"{'  ' * int(lvl)}{owner}.{name} ({otype})\n")
     return "".join(out)
+
+
+def impact_summary(rows):
+    """rows: (lvl, owner, name, type, status, dependency_type). Counts distinct
+    objects — one object reached by three paths is still one object that has to
+    recompile."""
+    seen = {}
+    for row in rows:
+        _lvl, owner, name, otype, status = row[:5]
+        seen[(owner, name, otype)] = status
+    valid = sum(1 for s in seen.values() if s == "VALID")
+    return f"-- impact: {len(seen)} dependent objects, {valid} currently VALID"
 
 
 def json_envelope(command, connection, schema, cols, rows, truncated, **extra):
@@ -438,9 +452,28 @@ def cmd_deps(conn, schema, ns):
         print(f"-- truncated at {len(rows)} rows (raise --limit, or --limit 0 for no cap)")
 
 
+def cmd_impact(conn, schema, ns):
+    cols, rows = run_query(conn, load_query("impact.sql"),
+                           {"s": schema, "n": ns.name, "depth": ns.depth})
+    shown, truncated = clip(rows, ns.limit)
+    if ns.json:
+        print(json_envelope(ns.command, ns.conn_name, ns.schema, cols, shown, truncated,
+                            summary=impact_summary(rows)))
+        return
+    if not rows:
+        print(f"-- nothing depends on {ns.name.upper()} "
+              f"(within {schema}, depth {ns.depth})")
+        return
+    sys.stdout.write(render_tree(shown, f"{schema}.{ns.name.upper()}"))
+    if truncated:
+        print(f"-- truncated at {len(shown)} rows (raise --limit, or --limit 0 for no cap)")
+    print(impact_summary(rows))
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
-            "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps}
+            "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
+            "impact": cmd_impact}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -490,6 +523,11 @@ def build_parser():
                    help="object name; omit for every object in the schema")
     s = sub.add_parser("deps", parents=[common],
                        help="what an object depends on")
+    s.add_argument("name")
+    s.add_argument("--depth", type=int, default=3,
+                   help="levels to walk (default 3)")
+    s = sub.add_parser("impact", parents=[common],
+                       help="what depends on an object — run this before changing it")
     s.add_argument("name")
     s.add_argument("--depth", type=int, default=3,
                    help="levels to walk (default 3)")

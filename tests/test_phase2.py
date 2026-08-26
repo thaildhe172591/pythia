@@ -65,6 +65,16 @@ def test_render_tree_indents_by_level():
         "  APP.P_SETTLE (PROCEDURE)"
 
 
+def test_impact_summary_counts_unique_objects():
+    rows = [(1, "APP", "P_SETTLE", "PROCEDURE", "VALID", "HARD"),
+            (2, "APP", "P_REPORT", "PROCEDURE", "INVALID", "HARD"),
+            (2, "APP", "P_SETTLE", "PROCEDURE", "VALID", "HARD")]  # second path
+    assert pythia.impact_summary(rows) == \
+        "-- impact: 2 dependent objects, 1 currently VALID"
+    assert pythia.impact_summary([]) == \
+        "-- impact: 0 dependent objects, 0 currently VALID"
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
