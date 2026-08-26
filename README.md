@@ -6,7 +6,7 @@
 
 > Oracle's MCP gives your agent a connection. **pythia gives it the judgment to use it.**
 
-**English** · [Tiếng Việt](README.vi.md)
+**English** · [Tiếng Việt](README.vi.md) · **[The Complete Guide →](GUIDE.md)**
 
 [![ci](https://github.com/thaildhe172591/pythia/actions/workflows/ci.yml/badge.svg)](https://github.com/thaildhe172591/pythia/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

@@ -1,0 +1,342 @@
+# pythia — The Complete Guide
+
+**English** · [Tiếng Việt](GUIDE.vi.md) · Short version: [README.md](README.md)
+
+From install to daily workflow, the security model and troubleshooting.
+Every command pastes as written.
+
+## Contents
+
+1. [Installing](#1-installing)
+2. [Per-project connections](#2-per-project-connections)
+3. [The least-privilege agent user](#3-the-least-privilege-agent-user)
+4. [Reading and understanding a schema](#4-reading-and-understanding-a-schema)
+5. [The write path: apply](#5-the-write-path-apply)
+6. [The journal — snapshots and restore](#6-the-journal--snapshots-and-restore)
+7. [Policy, settings, conventions](#7-policy-settings-conventions)
+8. [Exact non-ASCII literals: unistr](#8-exact-non-ascii-literals-unistr)
+9. [The agent skill pack](#9-the-agent-skill-pack)
+10. [Troubleshooting](#10-troubleshooting)
+
+---
+
+## 1. Installing
+
+### One command, everything
+
+```bash
+npx pythia-plsql
+```
+
+Finds Python → `pip install pythia-plsql` (CLI + queries + bundled skills) →
+`pythia install` (skills + config scaffold).
+
+### Piecewise, same result
+
+```bash
+pip install pythia-plsql   # the CLI, thin driver — no Oracle Instant Client
+pythia install -g          # skills GLOBALLY: once per machine, serves every project
+cd my-project && pythia install   # per project: scaffolds .pythia/connections.json only
+pythia check               # fill in connections.json, then verify
+```
+
+**Global-first**: the skill pack lives in `~/.claude/skills` — one copy. A
+project `pythia install` that detects the global pack **skips the skills
+step** — a second copy doubles every entry in the agent's menu. Want skills
+committed with a repo instead? Remove the global pack, then run
+`pythia install` in the project.
+
+- With Node.js the skills step runs `npx skills add` (77 agents; at a TTY you
+  get the interactive agent picker). `--source <git-url>` installs the pack
+  from an internal mirror.
+- Without Node the bundled pack is copied directly — the pip package is the
+  whole kit.
+
+### Updating
+
+```bash
+pip install --upgrade pythia-plsql   # new CLI (once per machine)
+pythia install -g                    # refresh the global skill pack
+```
+
+Config is never touched by updates. Skills installed via npx:
+`npx skills update`.
+
+### Running from a clone (contributors)
+
+```bash
+git clone https://github.com/thaildhe172591/pythia && cd pythia
+pip install oracledb
+python scripts/pythia.py check
+```
+
+Printed follow-up commands always match how you invoked the tool.
+
+## 2. Per-project connections
+
+`.pythia/connections.json` — scaffolded by `pythia install`, **gitignored,
+holds credentials, keep it out of chat and screenshots**:
+
+```json
+{
+  "default": "dev",
+  "dev":     { "host": "db-dev", "port": 1521, "service_name": "orclpdb",
+               "user": "app_agent[app_owner]", "password": "...",
+               "schema": "APP_OWNER" },
+  "staging": { "host": "db-stg", "port": 1521, "service_name": "orclpdb",
+               "user": "app_agent[app_owner]", "password": "...",
+               "schema": "APP_OWNER" }
+}
+```
+
+Connection resolution order (never a guess):
+
+1. `--conn NAME` on the command
+2. `PYTHIA_CONNECTION` (names an entry)
+3. `PYTHIA_USER` / `PYTHIA_PASSWORD` / `PYTHIA_DSN` (+ `PYTHIA_SCHEMA`) —
+   bypasses the file entirely; handy for testing one credential
+4. The file, searched **upward from the current directory** (`PYTHIA_CONFIG`
+   points at another file): one entry → used as-is; several → the path
+   segment directly under the project root picks (`root/DEV/...` → entry
+   `DEV`), then the top-level `"default"`; still ambiguous → an error
+   listing the options
+
+**No global fallback** — a globally installed CLI can never mix up
+databases between projects; outside any project it errors plainly.
+
+## 3. The least-privilege agent user
+
+**The database account is the real security layer** — the policy file is an
+application-side fence. The pattern is **proxy authentication**: the agent
+has its own credential and connects *through* the schema owner — it never
+learns the owner's password, revocation is one statement, the audit trail
+shows who really connected, and the blast radius is one dev schema.
+
+```bash
+pythia agent-user --save   # ONE run, exactly once
+```
+
+Prints the three-statement SQL and saves the matching credential to
+`connections.json` (entry `<conn>_agent`, new default; the owner entry is
+untouched — switch back with `--conn <old-name>`). The command **asks the
+database before writing SQL**:
+
+- The agent user already exists → the `ALTER USER ... IDENTIFIED BY ...
+  ACCOUNT UNLOCK` form (avoids ORA-01920, clears ORA-28000 locks)
+- The owner's grants are inspected → the output **states up front** whether
+  `check` will come back clean or still warn
+- `--json` returns a machine payload: `sql`, `password`,
+  `saved_connection`, `check_will_warn`, `owner_dangerous_privs`, `next`
+
+**The one-run rule**: the password is regenerated on every run — the SQL
+handed to the DBA and the saved config must come from the **same** `--save`
+run. Never preview first and save later.
+
+Hand the SQL to a DBA, then:
+
+```bash
+pythia check   # goal: the object table, and NO yellow warning
+pythia sql "select sys_context('userenv','proxy_user') proxy, user connected_as from dual"
+# expected:  <AGENT> | <OWNER>
+```
+
+### Owner holding DBA? Trim it
+
+A proxy session inherits the owner's power — an owner with DBA makes every
+agent instance-wide DBA. `check` says so. The cleanup (run as a DBA,
+**grant first, revoke second**, on dev first):
+
+```sql
+GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE SEQUENCE,
+      CREATE PROCEDURE, CREATE TRIGGER, CREATE TYPE, CREATE SYNONYM
+  TO app_owner;
+ALTER USER app_owner QUOTA UNLIMITED ON users;
+-- + explicit grants the code really uses (e.g. EXECUTE ON sys.dbms_crypto)
+REVOKE DBA FROM app_owner;
+REVOKE RESOURCE FROM app_owner;
+```
+
+Check first what the code touches outside its schema / in SYS:
+
+```bash
+pythia sql "select distinct referenced_owner from all_dependencies where owner='APP_OWNER' and referenced_owner not in ('SYS','PUBLIC','APP_OWNER')"
+pythia sql "select referenced_name, count(*) n from all_dependencies where owner='APP_OWNER' and referenced_owner='SYS' and referenced_name like 'DBMS_%' group by referenced_name"
+```
+
+After the revoke: `pythia invalid` + `pythia errors` — grant exactly what
+broke, never hand DBA back. Manual alternative:
+[`examples/agent-user-setup.example.sql`](examples/agent-user-setup.example.sql).
+
+## 4. Reading and understanding a schema
+
+The principle: **ask the database, never a dump** — dumps drift (a real
+audit: all types and packages missing, 89% of indexes).
+
+```bash
+pythia check                  # connectivity + object counts + privilege warning
+pythia ls "PKG_%"             # find objects by LIKE pattern
+pythia src PKG_ORDER --body   # source with the COMPILER's line numbers
+pythia args P_CREATE_ORDER    # signature: names, order, types, defaults
+pythia cols T_ORDER           # columns + types — anchor %TYPE/%ROWTYPE here
+pythia ddl TABLE T_ORDER      # DDL via DBMS_METADATA
+pythia grep "partner_id"      # search all PL/SQL source
+pythia sql "select ..."       # free query — SELECT/WITH ONLY
+```
+
+Relationships and health:
+
+```bash
+pythia impact T_ORDER          # what depends on it — MANDATORY before any change
+pythia deps PKG_ORDER          # what it depends on (--with-sys includes SYS)
+pythia invalid                 # every INVALID object
+pythia errors PKG_ORDER        # compile errors, line:column
+pythia plscope T_ORDER         # exact identifier usages (PL/Scope)
+pythia similar PKG_ORDER_LIST  # similarly named programs — the convention mine
+```
+
+Output: `--json` on every command; `--limit` / `--max-lines` / `--offset`
+(0 = no cap); **every cut carries a marker** `-- truncated ...` — no marker
+means you saw everything. Color is for humans only (`NO_COLOR` /
+`FORCE_COLOR`); pipes and `--json` stay plain.
+
+## 5. The write path: apply
+
+**One door for writes**: `pythia apply` — never `sqlplus`, never SQLcl MCP
+`run-sql`, never a driver script. DDL in Oracle **self-commits**: a snapshot
+taken before the write is the only real undo there is.
+
+```bash
+pythia apply PKG_ORDER_BODY.sql            # preview: diff + impact + warnings + token
+pythia apply PKG_ORDER_BODY.sql --confirm a1b2c3   # write exactly what was previewed
+```
+
+Six steps, none removable: **snapshot → impact → preview → apply → verify →
+report**.
+
+- One statement per file; anonymous PL/SQL blocks are refused outright;
+  unclassifiable statements are refused, never guessed
+- The 6-hex token binds the write to the previewed content — if the file or
+  the database object changed, the token is stale and you preview again
+- Type-changing applies (function → procedure of the same name…) are
+  refused at preview
+- `--yes` skips the stop, but the full preview still prints and journals
+- The preview warns when a new object's name drifts from the project's
+  naming conventions
+
+**Exit codes are the verdict, machine-readable:**
+
+| Code | Meaning | What an agent must do |
+|---|---|---|
+| `0` | clean | report success |
+| `1` | refused | relay the reason verbatim, never route around it |
+| `3` | **written but broken** | NEVER report success — show the errors and the printed restore command |
+
+## 6. The journal — snapshots and restore
+
+```bash
+pythia journal list            # every entry, [applied] / [preview]
+pythia journal show <id>       # metadata
+pythia journal diff <id>       # before vs after
+pythia journal export <id> --what before|after|restore
+pythia journal restore <id>    # a WRITE — runs the same six steps, preview + approval
+pythia journal prune           # drops preview-only entries; applied entries are always kept
+```
+
+A restore is a write like any other — no silent shortcut. If the object did
+not exist before, restore means `DROP`, and the report says so plainly.
+
+## 7. Policy, settings, conventions
+
+### `.pythia/policy.json` — per-group write policy
+
+```bash
+pythia policy                        # effective policy + the honest rollback table
+pythia policy set structural confirm # change one group
+```
+
+| Group | Default | Is rollback real? |
+|---|---|---|
+| `plsql_source` | `confirm` | **Yes — completely** (ALL_SOURCE) |
+| `data_dml` | `deny` | **No.** After commit only Flashback Query remains |
+| `structural` | `deny` | **Almost never.** `DROP COLUMN` is permanent |
+| `grants` | `deny` | Yes, but by hand |
+| `session` | `allow` | Not needed |
+
+The groups that cannot be snapshotted default to `deny` — and the refusal
+says that, not "policy forbids it".
+
+### `.pythia/settings.json`
+
+```json
+{ "plscope_on_apply": false }
+```
+
+Default **on**: every object applied through pythia compiles with PL/Scope,
+so `pythia plscope` always has a complete index on the dev schema.
+
+### Conventions — house style as config
+
+- `.pythia/conventions.json`: machine-checked naming patterns — apply
+  previews warn on drift (see `examples/conventions.example.json`)
+- `.pythia/conventions.md`: the prose rules — the skills make agents read
+  them first
+- `pythia conventions` shows both
+
+## 8. Exact non-ASCII literals: unistr
+
+Raw non-ASCII literals break with client/DB charsets. The rule (enforced by
+the `pythia-write` skill): **every non-ASCII literal goes through
+`pythia unistr`**:
+
+```bash
+pythia unistr "Nhóm không được để trống"
+# → unistr('Nh\00F3m kh\00F4ng \0111\01B0\1EE3c \0111\1EC3 tr\1ED1ng')
+
+pythia unistr --loi "Bạn chưa nhập mã"
+# → 'loi:'||unistr('B\1EA1n ch\01B0a nh\1EADp m\00E3')||':loi'
+
+echo "text" | pythia unistr    # stdin works; no database needed
+```
+
+Single quote → `''` per SQL (never `\'` — ORA-01756), backslash → `\\`,
+beyond the BMP → `\U` + 8 hex.
+
+## 9. The agent skill pack
+
+Seven skills, superpowers-style gates — not suggestions:
+
+| Skill | Triggers when | Core job |
+|---|---|---|
+| `pythia-setup` | configuring a machine/project, connection failures, privilege warnings | connections, agent-user, SQLcl MCP |
+| `pythia-explore` | understanding anything in a schema | ask the database, never a dump |
+| `pythia-impact` | **before** proposing any change | ≥10 dependents or cross-schema → show the developer first |
+| `pythia-write` | writing/modifying PL/SQL once impact is known | copy conventions, anchor types to the DB, unistr |
+| `pythia-apply` | a change is ready to reach the database | the developer sees the preview and approves in chat; exit 3 ≠ success |
+| `pythia-review` | reviewing PL/SQL | the database's signals + seven antipatterns, line-anchored findings |
+| `pythia-skill-author` | "make a skill for how we do X" | interviews + mines the live schema → a new skill in this pack's format |
+
+Reads may flow through Oracle's SQLcl MCP server (optional, reads only):
+`sql -mcp`, keep `-R 4`; it audits into `DBTOOLS$MCP_LOG`. **Writes never
+go through MCP.**
+
+## 10. Troubleshooting
+
+| Symptom | Cause → fix |
+|---|---|
+| `ORA-01017` on check | wrong user/password — after `agent-user`, re-read the one-run rule (§3) |
+| `ORA-28000` account locked | failed attempts → `agent-user` emits `ALTER ... ACCOUNT UNLOCK` for the DBA, or `ALTER USER x ACCOUNT UNLOCK` |
+| `ORA-01920` creating the user | user exists — ≥0.2.2 switches to the ALTER form automatically; run `agent-user` with the DB reachable |
+| `ORA-01749` grant to yourself | the grants script runs as the schema being changed — run as SYSTEM/another DBA |
+| `ORA-28150/28154` | missing `ALTER USER owner GRANT CONNECT THROUGH agent` |
+| Skills doubled in the `/` menu | the pack exists in two places (global + project, or two dirs) → keep global, remove project copies; ≥0.2.4 avoids this |
+| Skills not showing | the pack sits only in a project `.agents/skills` your Claude Code doesn't read → `pythia install -g` |
+| Yellow warning from `check` | see §3 — proxy not used yet, or the owner over-granted |
+| Token refused on `--confirm` | file or DB changed since the preview — previewing again is the design |
+| Exit 3 after apply | written but new errors/invalids — read them, run the printed `journal restore` |
+| Output cut short | a `-- truncated` marker is present — raise `--limit`/`--max-lines`, or `--offset` to continue |
+
+---
+
+Security details, the dump-vs-database table, star history:
+[README.md](README.md). Contributing — TDD, the bind-contract lint, the
+skill lint: [CONTRIBUTING.md](CONTRIBUTING.md).

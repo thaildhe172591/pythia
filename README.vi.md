@@ -6,7 +6,7 @@
 
 > MCP của Oracle cho agent một kết nối. **pythia cho nó sự phán đoán để dùng kết nối đó.**
 
-[English](README.md) · **Tiếng Việt**
+[English](README.md) · **Tiếng Việt** · **[Hướng dẫn chi tiết →](GUIDE.vi.md)**
 
 [![ci](https://github.com/thaildhe172591/pythia/actions/workflows/ci.yml/badge.svg)](https://github.com/thaildhe172591/pythia/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
