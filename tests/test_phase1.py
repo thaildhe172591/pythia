@@ -174,6 +174,30 @@ def test_connect_failure_message_names_the_connection():
     assert "Traceback" not in msg
 
 
+def test_color_enabled_respects_humans_and_pipes():
+    class Tty:
+        def isatty(self):
+            return True
+
+    class Pipe:
+        def isatty(self):
+            return False
+
+    assert pythia.color_enabled(Tty(), {}) is True
+    assert pythia.color_enabled(Pipe(), {}) is False          # agents get plain text
+    assert pythia.color_enabled(Tty(), {"NO_COLOR": "1"}) is False   # ambient opt-out
+    assert pythia.color_enabled(Pipe(), {"FORCE_COLOR": "1"}) is True
+    # an explicit opt-in outranks the ambient opt-out (per no-color.org,
+    # explicit configuration overrides NO_COLOR)
+    assert pythia.color_enabled(Pipe(), {"NO_COLOR": "1", "FORCE_COLOR": "1"}) is True
+
+
+def test_paint_wraps_only_when_enabled():
+    assert pythia.paint("hi", "green", True) == "\x1b[32mhi\x1b[0m"
+    assert pythia.paint("hi", "green", False) == "hi"
+    assert pythia.paint("hi", None, True) == "hi"
+
+
 def test_clip_rows():
     rows = [0, 1, 2, 3, 4]
     assert pythia.clip(rows, 5) == (rows, False)          # exactly at limit -> complete

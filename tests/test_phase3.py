@@ -366,10 +366,11 @@ def test_write_path_skips_readonly_transaction():
 
 
 def test_invocation_reflects_how_the_tool_was_run():
+    interp = pathlib.Path(sys.executable).stem   # python / python3 / python3.13
     old = sys.argv[0]
     try:
         sys.argv[0] = "scripts/pythia.py"        # run from source
-        assert pythia.invocation() == "python scripts/pythia.py"
+        assert pythia.invocation() == f"{interp} scripts/pythia.py"
         sys.argv[0] = r"C:\somewhere\pythia.exe"  # packaged entry point
         assert pythia.invocation() == "pythia.exe"
     finally:
@@ -391,7 +392,8 @@ def test_preview_hint_is_pasteable():
                 pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql"), NEW_FILE)
         finally:
             sys.argv[0] = old
-        assert "python scripts/pythia.py apply f.sql --confirm " in buf.getvalue()
+        interp = pathlib.Path(sys.executable).stem
+        assert f"{interp} scripts/pythia.py apply f.sql --confirm " in buf.getvalue()
 
 
 def test_preview_diff_ignores_the_create_header():

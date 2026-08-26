@@ -80,13 +80,62 @@ def is_readonly_sql(stmt):
     return bool(READONLY.match(stmt))
 
 
+# --- terminal presentation ---------------------------------------------------
+
+ANSI = {"red": "31", "green": "32", "yellow": "33", "cyan": "36",
+        "bold": "1", "dim": "2"}
+
+
+def color_enabled(stream=None, env=None):
+    """ANSI color only for a human at a TTY. NO_COLOR (the standard) always
+    wins; FORCE_COLOR opts back in; pipes stay plain so agents parse exactly
+    what they saw."""
+    env = os.environ if env is None else env
+    if env.get("FORCE_COLOR"):
+        return True    # explicit opt-in outranks the ambient opt-out below
+    if env.get("NO_COLOR"):
+        return False
+    stream = sys.stdout if stream is None else stream
+    return bool(getattr(stream, "isatty", lambda: False)())
+
+
+def paint(text, color, enabled):
+    if not enabled or not color:
+        return text
+    return f"\x1b[{ANSI[color]}m{text}\x1b[0m"
+
+
+def banner(enabled):
+    """A small hello on `check`, TTY only — agents piping output never see it."""
+    if not enabled:
+        return ""
+    line = paint("─" * 46, "dim", enabled)
+    name = paint("PYTHIA", "cyan", enabled) + "  " + \
+        paint("judgment for your agent's Oracle connection", "dim", enabled)
+    return f"{line}\n  {name}\n{line}\n"
+
+
+def paint_diff_line(ln, enabled):
+    if ln.startswith(("+++", "---")):
+        return paint(ln, "dim", enabled)
+    if ln.startswith("+"):
+        return paint(ln, "green", enabled)
+    if ln.startswith("-"):
+        return paint(ln, "red", enabled)
+    if ln.startswith("@@"):
+        return paint(ln, "cyan", enabled)
+    return ln
+
+
 def invocation():
     """How to invoke this tool, exactly as the user actually ran it. Every
     printed command must be paste-able: a bare `pythia ...` is
     CommandNotFound for anyone running from source."""
     prog = sys.argv[0] or "pythia"
     if prog.lower().endswith(".py"):
-        return f"python {prog}"
+        # the interpreter actually running us: "python3" on most Linux/macOS,
+        # "python" on Windows — a hardcoded "python" would not paste on Ubuntu
+        return f"{pathlib.Path(sys.executable).stem} {prog}"
     return pathlib.Path(prog).name
 
 
@@ -648,6 +697,9 @@ def emit_source(ns, rows, truncated, total):
 # --- subcommands (SQL kept verbatim from the field-proven v1 tool) -----------
 
 def cmd_check(conn, schema, ns):
+    en = getattr(ns, "color", False)
+    if en:
+        sys.stdout.write(banner(en))
     cols, rows = run_query(conn, """
         select user connected_as, :s owner_used,
                sys_context('userenv','db_name') db,
@@ -660,7 +712,8 @@ def cmd_check(conn, schema, ns):
     emit_table(ns, cols, rows, False)
     warn = privilege_warning(conn, schema, ns.conn_user)
     if warn:
-        print(f"\n{warn}", file=sys.stderr)
+        print("\n" + paint(warn, "yellow", color_enabled(sys.stderr)),
+              file=sys.stderr)
 
 
 def cmd_ls(conn, schema, ns):
@@ -936,24 +989,28 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                           "summary": summary, "warning": warn, "token": token,
                           "journal": entry, "will_apply": confirmed}))
     else:
+        en = getattr(ns, "color", False)
         if created:
             head = "new object"
         elif changed == 0:
             head = "no source change (recompile)"
         else:
             head = f"{changed} lines changed"
-        print(f"\n  {name} ({otype}) in {schema} — {head}")
+        print(f"\n  {paint(f'{name} ({otype})', 'bold', en)} in {schema} — {head}")
         if summary:
             print(f"  {summary.lstrip('- ')}")
         if warn:
-            print(f"\n  {warn}")
+            print(f"\n  {paint(warn, 'yellow', en)}")
         if diff_text:
             print()
             for ln in diff_text.splitlines():
-                print(f"  {ln}")
-        print(f"\n  Snapshot saved: {journal_root(ns.project_root) / entry}")
+                print(f"  {paint_diff_line(ln, en)}")
+        print(paint(f"\n  Snapshot saved: {journal_root(ns.project_root) / entry}",
+                    "dim", en))
         if not confirmed:
-            print(f"\n  To apply:\n    {invocation()} apply {ns.file} --confirm {token}")
+            print(f"\n  To apply:\n    "
+                  + paint(f"{invocation()} apply {ns.file} --confirm {token}",
+                          "cyan", en))
     if not confirmed:
         return 0
 
@@ -989,24 +1046,27 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                           "restore": f"{invocation()} journal restore {entry}",
                           "exit": 0 if ok else 3}))
     else:
+        en = getattr(ns, "color", False)
         if ok:
-            print(f"\n  Applied {name} ({otype}).")
-            print("  Compiled clean. No new INVALID objects.")
+            print(paint(f"\n  Applied {name} ({otype}).", "green", en))
+            print(paint("  Compiled clean. No new INVALID objects.", "green", en))
         else:
             if own_errors:
-                print(f"\n  Applied {name} ({otype}) — but it did not compile cleanly:")
+                print(paint(f"\n  Applied {name} ({otype}) — but it did not "
+                            "compile cleanly:", "red", en))
                 for r in own_errors:
-                    print(f"    {r[3]}:{r[4]} {r[5]} {str(r[6]).strip()}")
+                    print(paint(f"    {r[3]}:{r[4]} {r[5]} {str(r[6]).strip()}",
+                                "red", en))
             else:
-                print(f"\n  Applied {name} ({otype}) — it compiled, but broke "
-                      "other objects:")
+                print(paint(f"\n  Applied {name} ({otype}) — it compiled, but "
+                            "broke other objects:", "red", en))
             if broke:
                 print(f"  {len(broke)} objects were VALID before and are INVALID now:")
                 for n2, t2 in broke:
-                    print(f"    {n2} ({t2})")
+                    print(paint(f"    {n2} ({t2})", "red", en))
         undo = "dropping it (it did not exist before)" if created else None
         print(f"\n  To undo{' — note: undo means ' + undo if undo else ''}:")
-        print(f"    {invocation()} journal restore {entry}")
+        print("    " + paint(f"{invocation()} journal restore {entry}", "cyan", en))
     return 0 if ok else 3
 
 
@@ -1201,6 +1261,12 @@ def main(argv=None):
         except AttributeError:
             pass
     ns = build_parser().parse_args(argv)
+    ns.color = color_enabled() and not ns.json
+    if ns.color and os.name == "nt":
+        # Constant empty string, never user input — safe from injection. This
+        # no-op shell call is the stdlib idiom that flips on ANSI (VT) escape
+        # processing in legacy Windows consoles; Windows Terminal needs nothing.
+        os.system("")
     cwd = pathlib.Path.cwd()
     cfg, root = find_config(cwd, os.environ)
     ns.project_root = root if root is not None else cwd
