@@ -62,6 +62,9 @@ QUERY_BINDS = {
     "plscope-usages.sql": {"s", "n"},
     "plscope-statements.sql": {"s", "n"},
     "plscope-enabled.sql": {"s"},
+    "source.sql": {"s", "n"},
+    "object-source.sql": {"s", "n", "t"},
+    "session-privileges.sql": set(),
 }
 
 
@@ -402,6 +405,60 @@ def prepare_statement(sql, group):
     return text
 
 
+POLICY_DEFAULTS = {"plsql_source": "confirm", "data_dml": "deny",
+                   "structural": "deny", "grants": "deny", "session": "allow"}
+
+ROLLBACK_TABLE = """\
+Is rollback real?  (this table also appears in README.md and plsql-apply)
+  plsql_source  Yes - completely. Source is recoverable from ALL_SOURCE.
+  data_dml      No. After commit only Flashback Query remains, within undo retention.
+  structural    Almost never. DROP COLUMN is permanent; a dropped table may be in the Recycle Bin.
+  grants        Yes, but by hand.
+  session       Not needed."""
+
+
+def apply_token(object_type, name, file_text, db_source):
+    """6 hex chars binding the write to what was previewed: file or database
+    changing since the preview yields a different token, so what gets applied
+    is exactly what was seen. A consistency check, not a secret — it is
+    compared against one recomputed value, so length would cost usability and
+    buy nothing."""
+    import hashlib
+    payload = "\n".join([object_type, name,
+                         file_text.replace("\r\n", "\n"),
+                         db_source.replace("\r\n", "\n")])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:6]
+
+
+def effective_policy(raw):
+    """Merge policy.json over the defaults, remembering where each value came
+    from. Config is a trust boundary: unknown groups and values are refused
+    with the accepted spelling, not ignored."""
+    eff = {g: (v, "default") for g, v in POLICY_DEFAULTS.items()}
+    for k, v in (raw or {}).items():
+        if k not in POLICY_DEFAULTS:
+            sys.exit(f"Unknown policy group {k!r} in policy.json. "
+                     f"Groups: {', '.join(POLICY_DEFAULTS)}.")
+        if v not in ("allow", "confirm", "deny"):
+            sys.exit(f"Policy {k!r} must be allow, confirm or deny — got {v!r}.")
+        eff[k] = (v, "policy.json")
+    return eff
+
+
+def policy_path(root):
+    return pathlib.Path(root) / CONFIG_DIR / "policy.json"
+
+
+def load_policy(root):
+    path = policy_path(root)
+    if not path.is_file():
+        return effective_policy(None)
+    try:
+        return effective_policy(json.loads(path.read_text(encoding="utf-8")))
+    except ValueError as e:
+        sys.exit(f"Cannot parse {path}: {e}")
+
+
 def json_envelope(command, connection, schema, cols, rows, truncated, **extra):
     payload = {"ok": True, "command": command, "connection": connection,
                "schema": schema, "rows": [dict(zip(cols, r)) for r in rows],
@@ -513,10 +570,7 @@ def cmd_ls(conn, schema, ns):
 
 
 def cmd_src(conn, schema, ns):
-    _, rows = run_query(conn, """
-        select type, line, text from all_source
-        where owner = :s and name = upper(:n)
-        order by type, line""", {"s": schema, "n": ns.name})
+    _, rows = run_query(conn, load_query("source.sql"), {"s": schema, "n": ns.name})
     rows = [(t, ln, cell(x)) for t, ln, x in rows]
     rows = filter_units(rows, ns.body, ns.spec)
     if not rows:
@@ -677,10 +731,38 @@ def cmd_plscope(conn, schema, ns):
         emit_table(ns, stmt_cols, *clip(stmt_rows, ns.limit))
 
 
+def cmd_policy(conn, schema, ns):
+    if ns.action == "set" and (not ns.group or not ns.value):
+        sys.exit("Usage: pythia policy set <group> <value>\n"
+                 f"Groups: {', '.join(sorted(POLICY_DEFAULTS))}; "
+                 "values: allow, confirm, deny.")
+    if ns.action == "set":
+        eff = load_policy(ns.project_root)
+        eff[ns.group] = (ns.value, "policy.json")   # validated by argparse choices
+        path = policy_path(ns.project_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({g: v for g, (v, _) in eff.items()}, indent=2)
+                        + "\n", encoding="utf-8")
+        print(f"Wrote {path}")
+    eff = load_policy(ns.project_root)
+    if ns.json:
+        print(json.dumps({g: {"value": v, "source": src}
+                          for g, (v, src) in eff.items()}))
+        return
+    print("Effective write policy:")
+    for g, (v, src) in eff.items():
+        print(f"  {g:<13} {v:<8} ({src})")
+    print()
+    print(ROLLBACK_TABLE)
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
-            "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope}
+            "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
+            "policy": cmd_policy}
+
+NO_DB_COMMANDS = {"policy"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -752,6 +834,11 @@ def build_parser():
     s = sub.add_parser("plscope", parents=[common()],
                        help="exact identifier usages from PL/Scope")
     s.add_argument("name")
+    s = sub.add_parser("policy", parents=[common()],
+                       help="show or change the write policy")
+    s.add_argument("action", nargs="?", choices=["show", "set"], default="show")
+    s.add_argument("group", nargs="?", choices=sorted(POLICY_DEFAULTS))
+    s.add_argument("value", nargs="?", choices=["allow", "confirm", "deny"])
     return p
 
 
@@ -766,8 +853,13 @@ def main(argv=None):
     ns = build_parser().parse_args(argv)
     cwd = pathlib.Path.cwd()
     cfg, root = find_config(cwd, os.environ)
+    ns.project_root = root if root is not None else cwd
+    if ns.command in NO_DB_COMMANDS:
+        COMMANDS[ns.command](None, None, ns)
+        return
     name, c = resolve_connection(cfg, ns.conn, os.environ, cwd, root)
     ns.conn_name = name
+    ns.conn_user = c.get("user", "")
     ns.schema = (c.get("schema") or c["user"]).upper()
     print(f"-- connection={name} schema={ns.schema}", file=sys.stderr)
     try:

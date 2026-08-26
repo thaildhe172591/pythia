@@ -67,6 +67,32 @@ def test_prepare_statement_terminators():
         "truncate table a; truncate table b;", "structural"), "one statement")
 
 
+def test_apply_token_is_content_bound():
+    t1 = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "create...", "old src")
+    assert len(t1) == 6 and all(c in "0123456789abcdef" for c in t1)
+    assert pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "create...", "old src") == t1
+    # any ingredient changing invalidates the token
+    assert pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "create!!!", "old src") != t1
+    assert pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "create...", "NEW src") != t1
+    assert pythia.apply_token("PACKAGE", "PKG_ORDER", "create...", "old src") != t1
+    # CRLF normalization: a Windows checkout is not an edit
+    assert pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "create...\r\n", "old src") == \
+           pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "create...\n", "old src")
+
+
+def test_effective_policy_defaults_and_overrides():
+    eff = pythia.effective_policy(None)
+    assert eff["plsql_source"] == ("confirm", "default")
+    assert eff["data_dml"] == ("deny", "default")
+    assert eff["session"] == ("allow", "default")
+    eff = pythia.effective_policy({"data_dml": "confirm"})
+    assert eff["data_dml"] == ("confirm", "policy.json")
+    assert eff["plsql_source"] == ("confirm", "default")
+    expect_exit(lambda: pythia.effective_policy({"data_dml": "yolo"}),
+                "data_dml", "allow", "confirm", "deny")
+    expect_exit(lambda: pythia.effective_policy({"typo_group": "deny"}), "typo_group")
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
