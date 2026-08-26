@@ -131,6 +131,189 @@ def test_newly_invalid_and_diff():
     assert "-b" in text and "+X" in text and changed == 2
 
 
+class FakeCursor:
+    def __init__(self, script, executed):
+        self.script, self.executed = script, executed
+        self.description, self._rows = None, []
+
+    def execute(self, sql, binds=None):
+        self.executed.append((sql, dict(binds or {})))
+        low = " ".join(sql.lower().split())
+        for key, value in self.script.items():
+            if key in low:
+                if isinstance(value, list):   # sequenced responses, e.g. the
+                    cols, rows = value[0]     # INVALID set before vs after the
+                    if len(value) > 1:        # write; the last response sticks
+                        value.pop(0)
+                else:
+                    cols, rows = value
+                self.description = [(c,) for c in cols]
+                self._rows = rows
+                return
+        self.description, self._rows = None, []   # DDL/DML: no result set
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class FakeConn:
+    def __init__(self, script):
+        self.script, self.executed = script, []
+
+    def cursor(self):
+        return FakeCursor(self.script, self.executed)
+
+
+OLD_SRC = "PACKAGE BODY pkg_order AS\n  old line;\nEND;\n"
+NEW_FILE = "CREATE OR REPLACE PACKAGE BODY pkg_order AS\n  new line;\nEND;\n/\n"
+
+
+def base_script(errors=(), invalid_after=None, db_source=OLD_SRC):
+    invalid_before = [("X_ALREADY_BROKEN", "PROCEDURE")]
+    return {
+        "from all_source": ([("TEXT",)], [(ln + "\n",) for ln in db_source.splitlines()]),
+        "from all_dependencies": ([("LVL", "OWNER", "NAME", "TYPE", "STATUS",
+                                    "DEPENDENCY_TYPE")],
+                                  [(1, "APP", "P_USES_ORDER", "PROCEDURE",
+                                    "VALID", "HARD")]),
+        "status = 'invalid'": (
+            [(("OBJECT_NAME", "OBJECT_TYPE", "LAST_DDL"),
+              [(n, t, "2026-01-01") for n, t in invalid_before])]
+            + ([(("OBJECT_NAME", "OBJECT_TYPE", "LAST_DDL"),
+                 [(n, t, "2026-01-01") for n, t in invalid_after])]
+               if invalid_after is not None else [])),
+        "from all_errors": ([("NAME", "TYPE", "SEQUENCE", "LINE", "POSITION",
+                              "ATTRIBUTE", "TEXT")], list(errors)),
+        "from session_privs": ([("PRIVILEGE",)], []),
+    }
+
+
+def apply_ns(root, **kw):
+    import argparse
+    ns = argparse.Namespace(file=None, confirm=None, yes=False, json=False,
+                            depth=3, limit=200, max_lines=2000, offset=0,
+                            raw=False, command="apply", conn_name="DEV",
+                            conn_user="app", schema="APP", project_root=root)
+    for k, v in kw.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def wrote_ddl(conn):
+    return [s for s, _ in conn.executed if s.lstrip().lower().startswith("create")]
+
+
+def test_apply_preview_writes_nothing_and_gives_token():
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        code = pythia.run_apply(conn, "APP", apply_ns(td), NEW_FILE)
+        assert code == 0
+        assert wrote_ddl(conn) == []                      # preview never writes
+        ids = pythia.list_journal_entries(td)
+        assert len(ids) == 1                              # snapshot persisted
+        assert pythia.read_journal_entry(td, ids[0])["meta"]["applied"] is False
+
+
+def test_apply_correct_token_writes_and_verifies_clean():
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        conn = FakeConn(base_script())
+        code = pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
+        assert code == 0
+        assert len(wrote_ddl(conn)) == 1
+        # snapshot precedes the write: entry exists with the pre-write source
+        eid = pythia.list_journal_entries(td)[0]
+        e = pythia.read_journal_entry(td, eid)
+        assert e["before"].rstrip() == OLD_SRC.rstrip()
+        assert e["meta"]["applied"] is True
+
+
+def test_apply_stale_token_refused():
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "something else", OLD_SRC)
+        conn = FakeConn(base_script())
+        expect_exit(lambda: pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok),
+                                             NEW_FILE),
+                    "changed", "preview")
+        assert wrote_ddl(conn) == []
+
+
+def test_apply_policy_deny_refuses_without_touching_db():
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        expect_exit(lambda: pythia.run_apply(conn, "APP", apply_ns(td),
+                                             "delete from t_order"),
+                    "data_dml", "deny", "no snapshot")
+        assert conn.executed == []                        # not even a read
+        expect_exit(lambda: pythia.run_apply(conn, "APP", apply_ns(td),
+                                             "BEGIN evil; END;"), "anonymous")
+        assert conn.executed == []
+
+
+def test_apply_broken_compile_exits_3_with_restore_hint():
+    errors = [("PKG_ORDER", "PACKAGE BODY", 1, 47, 12, "ERROR",
+               "PLS-00201: identifier 'CALC_TAX' must be declared")]
+    invalid_after = [("X_ALREADY_BROKEN", "PROCEDURE"),
+                     ("P_USES_ORDER", "PROCEDURE")]
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        conn = FakeConn(base_script(errors=errors, invalid_after=invalid_after))
+        code = pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
+        assert code == 3                                  # applied but broken
+        eid = pythia.list_journal_entries(td)[0]
+        meta = pythia.read_journal_entry(td, eid)["meta"]
+        assert meta["applied"] is True
+        assert ["P_USES_ORDER", "PROCEDURE"] in [list(x) for x in meta["newly_invalid"]]
+
+
+def test_apply_yes_previews_and_writes_in_one_run():
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        code = pythia.run_apply(conn, "APP", apply_ns(td, yes=True), NEW_FILE)
+        assert code == 0 and len(wrote_ddl(conn)) == 1
+
+
+def test_apply_snapshot_survives_failed_execute():
+    class Exploding(FakeConn):
+        def cursor(self):
+            outer = self
+
+            class C(FakeCursor):
+                def execute(self, sql, binds=None):
+                    if sql.lstrip().lower().startswith("create"):
+                        outer.executed.append((sql, {}))
+                        raise RuntimeError("ORA-00600 simulated")
+                    return super().execute(sql, binds)
+            return C(self.script, self.executed)
+
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        conn = Exploding(base_script())
+        try:
+            pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
+        except RuntimeError:
+            pass
+        ids = pythia.list_journal_entries(td)
+        assert len(ids) == 1                              # snapshot was already on disk
+        assert pythia.read_journal_entry(td, ids[0])["before"].rstrip() == OLD_SRC.rstrip()
+
+
+def test_apply_schema_mismatch_refused():
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        expect_exit(lambda: pythia.run_apply(
+            conn, "APP", apply_ns(td),
+            "CREATE OR REPLACE PROCEDURE other_schema.p AS BEGIN NULL; END;"),
+            "OTHER_SCHEMA", "APP")
+        assert conn.executed == []
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

@@ -803,6 +803,182 @@ def cmd_plscope(conn, schema, ns):
         emit_table(ns, stmt_cols, *clip(stmt_rows, ns.limit))
 
 
+def privilege_warning(conn, schema, conn_user):
+    """One line, only when true. The policy file is an application-side fence;
+    Oracle grants are the only layer that cannot be walked around, so say when
+    this session is running with more power than the task needs."""
+    _, rows = run_query(conn, load_query("session-privileges.sql"))
+    dangerous = [r[0] for r in rows]
+    owner = bool(conn_user) and conn_user.upper() == schema
+    if not owner and not dangerous:
+        return None
+    what = ("the schema owner" if owner else
+            f"a user holding {', '.join(dangerous[:3])}"
+            + ("…" if len(dangerous) > 3 else ""))
+    return (f"! Connected as {what}: this account can do far more than apply "
+            "PL/SQL.\n  A least-privilege account is safer — pythia policy "
+            "explains what is at stake.")
+
+
+def run_apply(conn, schema, ns, file_text, origin=None):
+    """The six steps: SNAPSHOT, IMPACT, PREVIEW, APPLY, VERIFY, REPORT.
+    Returns the exit code. Refusals raise SystemExit (exit 1)."""
+    group = classify(file_text)
+    if group == "anonymous":
+        sys.exit("Anonymous PL/SQL blocks are refused: a BEGIN...END block can "
+                 "EXECUTE IMMEDIATE anything, so no policy group honestly fits.\n"
+                 "Wrap the logic in a named procedure and apply that instead.")
+    if group is None:
+        sys.exit("Cannot classify this statement, so it is refused rather than "
+                 "guessed at. pythia apply takes one CREATE OR REPLACE / DML / "
+                 "DDL / GRANT statement per file.")
+    action = load_policy(ns.project_root)[group][0]
+    if action == "deny":
+        extra = ("no snapshot can undo it after commit"
+                 if group in ("data_dml", "structural", "grants")
+                 else "policy forbids it")
+        sys.exit(f"Refused: {group} is set to deny — {extra}.\n"
+                 f"To allow it once you have weighed that: "
+                 f"pythia policy set {group} confirm")
+    stmt = prepare_statement(file_text, group)
+
+    if group == "session":
+        # Nothing persistent changes; and the setting dies with this process's
+        # connection, so say so instead of pretending it did something lasting.
+        with conn.cursor() as cur:
+            cur.execute(stmt)
+        print("Session parameter set — note it lasts only for this "
+              "invocation's connection, which is now over.")
+        return 0
+
+    if group == "plsql_source":
+        otype, name, file_schema = parse_object(file_text)
+        if file_schema and file_schema.upper() != schema:
+            sys.exit(f"The file names schema {file_schema.upper()!r} but this "
+                     f"connection targets {schema!r}. Refused: applying across "
+                     "schemas hides which database object actually changes.\n"
+                     f"Use --conn to select the {file_schema.upper()!r} connection.")
+    else:
+        # confirm-mode DML/DDL/grants: no object identity, no snapshot — the
+        # journal records the statement itself so at least *what ran* is kept.
+        otype, name = group.upper(), "STATEMENT"
+
+    # 1. SNAPSHOT — before anything else, unconditionally.
+    db_source = ""
+    if group == "plsql_source":
+        _, rows = run_query(conn, load_query("object-source.sql"),
+                            {"s": schema, "n": name, "t": otype})
+        db_source = "".join(cell(r[0]) for r in rows)
+    token = apply_token(otype, name, file_text, db_source)
+    confirmed = bool(ns.yes) or ns.confirm == token
+    if ns.confirm and ns.confirm != token:
+        sys.exit("The confirmation token does not match: the file or the "
+                 "database object changed since that preview. Preview again:\n"
+                 f"  pythia apply {ns.file}")
+
+    _, inv_rows = run_query(conn, load_query("invalid-objects.sql"), {"s": schema})
+    invalid_before = [(r[0], r[1]) for r in inv_rows]
+    meta = {"schema": schema, "connection": ns.conn_name, "group": group,
+            "token": token, "applied": False,
+            "invalid_before": invalid_before, **(origin or {})}
+    entry = write_journal_entry(ns.project_root, otype, name, db_source,
+                                file_text, meta)
+    created = not db_source.strip()
+
+    # 2. IMPACT
+    summary = ""
+    if group == "plsql_source":
+        _, dep_rows = run_query(conn, load_query("impact.sql"),
+                                {"s": schema, "n": name, "depth": ns.depth})
+        summary = impact_summary(dep_rows)
+
+    # 3. PREVIEW
+    diff_text, changed = render_diff(db_source, stmt)
+    warn = privilege_warning(conn, schema, ns.conn_user)
+    if ns.json:
+        print(json.dumps({"ok": True, "object": name, "type": otype,
+                          "created": created, "changed_lines": changed,
+                          "summary": summary, "warning": warn, "token": token,
+                          "journal": entry, "will_apply": confirmed}))
+    else:
+        head = "new object" if created else f"{changed} lines changed"
+        print(f"\n  {name} ({otype}) in {schema} — {head}")
+        if summary:
+            print(f"  {summary.lstrip('- ')}")
+        if warn:
+            print(f"\n  {warn}")
+        if diff_text:
+            print()
+            for ln in diff_text.splitlines():
+                print(f"  {ln}")
+        print(f"\n  Snapshot saved: {journal_root(ns.project_root) / entry}")
+        if not confirmed:
+            print(f"\n  To apply:\n    pythia apply {ns.file} --confirm {token}")
+    if not confirmed:
+        return 0
+
+    # 4. APPLY
+    with conn.cursor() as cur:
+        cur.execute(stmt)
+
+    # 5. VERIFY
+    err_rows = []
+    invalid_after = invalid_before
+    if group == "plsql_source":
+        _, err_rows = run_query(conn, load_query("compile-errors.sql"),
+                                {"s": schema, "n": name})
+        _, inv_rows = run_query(conn, load_query("invalid-objects.sql"), {"s": schema})
+        invalid_after = [(r[0], r[1]) for r in inv_rows]
+    broke = newly_invalid(invalid_before, invalid_after)
+    meta.update(applied=True, invalid_after=invalid_after, newly_invalid=broke,
+                compile_errors=[list(r) for r in err_rows])
+    # update the SAME entry in place — a second write_journal_entry would race
+    # the timestamp and either collide or split one apply across two entries
+    (journal_root(ns.project_root) / entry / "meta.json").write_text(
+        json.dumps({"object": name, "type": otype, "created": created,
+                    "entry": entry, **meta}, indent=2, default=str) + "\n",
+        encoding="utf-8")
+
+    # 6. REPORT
+    own_errors = [r for r in err_rows if str(r[0]).upper() == name.upper()]
+    ok = not own_errors and not broke
+    if ns.json:
+        print(json.dumps({"ok": ok, "applied": True, "object": name,
+                          "type": otype, "errors": [list(r) for r in own_errors],
+                          "newly_invalid": [list(x) for x in broke],
+                          "restore": f"pythia journal restore {entry}",
+                          "exit": 0 if ok else 3}))
+    else:
+        if ok:
+            print(f"\n  Applied {name} ({otype}).")
+            print("  Compiled clean. No new INVALID objects.")
+        else:
+            if own_errors:
+                print(f"\n  Applied {name} ({otype}) — but it did not compile cleanly:")
+                for r in own_errors:
+                    print(f"    {r[3]}:{r[4]} {r[5]} {str(r[6]).strip()}")
+            else:
+                print(f"\n  Applied {name} ({otype}) — it compiled, but broke "
+                      "other objects:")
+            if broke:
+                print(f"  {len(broke)} objects were VALID before and are INVALID now:")
+                for n2, t2 in broke:
+                    print(f"    {n2} ({t2})")
+        undo = "dropping it (it did not exist before)" if created else None
+        print(f"\n  To undo{' — note: undo means ' + undo if undo else ''}:")
+        print(f"    pythia journal restore {entry}")
+    return 0 if ok else 3
+
+
+def cmd_apply(conn, schema, ns):
+    path = pathlib.Path(ns.file)
+    if not path.is_file():
+        sys.exit(f"No such file: {path}")
+    code = run_apply(conn, schema, ns, path.read_text(encoding="utf-8"))
+    if code:
+        sys.exit(code)
+
+
 def cmd_policy(conn, schema, ns):
     if ns.action == "set" and (not ns.group or not ns.value):
         sys.exit("Usage: pythia policy set <group> <value>\n"
@@ -865,7 +1041,7 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
-            "policy": cmd_policy, "journal": cmd_journal}
+            "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply}
 
 NO_DB_COMMANDS = {"policy", "journal"}
 
@@ -952,6 +1128,18 @@ def build_parser():
     s.add_argument("id", nargs="?")
     s.add_argument("--what", choices=["after", "before", "restore"],
                    default="after", help="which file export writes (default after)")
+    s.add_argument("--confirm", metavar="TOKEN")
+    s.add_argument("--yes", action="store_true")
+    s.add_argument("--depth", type=int, default=3)
+    s = sub.add_parser("apply", parents=[common()],
+                       help="preview and apply one statement with snapshot and verify")
+    s.add_argument("file", help="file containing exactly one statement")
+    s.add_argument("--confirm", metavar="TOKEN",
+                   help="token printed by the preview; applies only if nothing changed since")
+    s.add_argument("--yes", action="store_true",
+                   help="apply without stopping; the full preview still prints and journals")
+    s.add_argument("--depth", type=int, default=3,
+                   help="impact depth for the preview (default 3)")
     return p
 
 
