@@ -459,6 +459,78 @@ def load_policy(root):
         sys.exit(f"Cannot parse {path}: {e}")
 
 
+def journal_root(root):
+    return pathlib.Path(root) / CONFIG_DIR / "journal"
+
+
+def render_restore(obj_type, name, before_text):
+    """The statement that puts things back. For an object that did not exist,
+    undo means DROP — a genuinely different promise than restoring source, so
+    the caller records created=True and the report says it plainly."""
+    if before_text.strip():
+        return "CREATE OR REPLACE " + before_text.rstrip() + "\n"
+    return f"DROP {obj_type} {name}\n"
+
+
+def write_journal_entry(root, obj_type, name, before, after, meta, now=None):
+    """Snapshot on disk before anything touches the database. Nothing can turn
+    this off: DDL commits itself, so this directory is the only undo there is."""
+    import datetime
+    now = now or datetime.datetime.now()
+    eid = (now.strftime("%Y-%m-%dT%H-%M-%S")
+           + f"_{name}_{obj_type.replace(' ', '-')}")
+    d = journal_root(root) / eid
+    n = 1
+    while d.exists():          # apply + restore can land in the same second;
+        n += 1                 # overwriting the previous entry would destroy
+        d = journal_root(root) / f"{eid}-{n}"   # the only undo there is
+    eid = d.name
+    d.mkdir(parents=True)
+    (d / "before.sql").write_text(before, encoding="utf-8")
+    (d / "after.sql").write_text(after, encoding="utf-8")
+    (d / "restore.sql").write_text(render_restore(obj_type, name, before),
+                                   encoding="utf-8")
+    full = {"object": name, "type": obj_type, "created": not before.strip(),
+            "entry": eid, **meta}
+    (d / "meta.json").write_text(json.dumps(full, indent=2, default=str) + "\n",
+                                 encoding="utf-8")
+    return eid
+
+
+def read_journal_entry(root, entry_id):
+    d = journal_root(root) / entry_id
+    if not d.is_dir():
+        available = ", ".join(list_journal_entries(root)[:5]) or "none"
+        sys.exit(f"No journal entry {entry_id!r}. Recent: {available}. "
+                 "Use: pythia journal list")
+    return {"before": (d / "before.sql").read_text(encoding="utf-8"),
+            "after": (d / "after.sql").read_text(encoding="utf-8"),
+            "restore": (d / "restore.sql").read_text(encoding="utf-8"),
+            "meta": json.loads((d / "meta.json").read_text(encoding="utf-8"))}
+
+
+def list_journal_entries(root):
+    d = journal_root(root)
+    if not d.is_dir():
+        return []
+    return sorted((p.name for p in d.iterdir() if p.is_dir()), reverse=True)
+
+
+def newly_invalid(before_rows, after_rows):
+    """(name, type) pairs INVALID now that were not before. The whole point of
+    step 5: the agent must not report success while this list is non-empty."""
+    return sorted(set(map(tuple, after_rows)) - set(map(tuple, before_rows)))
+
+
+def render_diff(before, after):
+    import difflib
+    lines = list(difflib.unified_diff(before.splitlines(), after.splitlines(),
+                                      lineterm=""))
+    changed = sum(1 for ln in lines
+                  if ln[:1] in "+-" and not ln.startswith(("+++", "---")))
+    return "\n".join(lines), changed
+
+
 def json_envelope(command, connection, schema, cols, rows, truncated, **extra):
     payload = {"ok": True, "command": command, "connection": connection,
                "schema": schema, "rows": [dict(zip(cols, r)) for r in rows],
@@ -756,13 +828,46 @@ def cmd_policy(conn, schema, ns):
     print(ROLLBACK_TABLE)
 
 
+def cmd_journal(conn, schema, ns):
+    root = ns.project_root
+    if ns.action == "list":
+        ids = list_journal_entries(root)
+        if ns.json:
+            print(json.dumps(ids))
+            return
+        if not ids:
+            print(f"-- journal is empty ({journal_root(root)})")
+            return
+        for eid in ids:
+            meta = read_journal_entry(root, eid)["meta"]
+            state = "applied" if meta.get("applied") else "preview"
+            print(f"{eid}  [{state}]")
+        return
+    if not ns.id:
+        sys.exit("Usage: pythia journal {list | show <id> | diff <id> | export <id> "
+                 "| restore <id>}")
+    e = read_journal_entry(root, ns.id)
+    if ns.action == "show":
+        print(json.dumps(e["meta"], indent=2))
+    elif ns.action == "diff":
+        text, changed = render_diff(e["before"], e["after"])
+        print(text or "-- no difference")
+        print(f"-- {changed} lines changed", file=sys.stderr)
+    elif ns.action == "export":
+        out = pathlib.Path(f"{ns.id}_{ns.what}.sql")
+        out.write_text(e[ns.what], encoding="utf-8")
+        print(f"Wrote {out}")
+    else:
+        sys.exit("unreachable: restore is dispatched with a connection in main")
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
-            "policy": cmd_policy}
+            "policy": cmd_policy, "journal": cmd_journal}
 
-NO_DB_COMMANDS = {"policy"}
+NO_DB_COMMANDS = {"policy", "journal"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -839,6 +944,14 @@ def build_parser():
     s.add_argument("action", nargs="?", choices=["show", "set"], default="show")
     s.add_argument("group", nargs="?", choices=sorted(POLICY_DEFAULTS))
     s.add_argument("value", nargs="?", choices=["allow", "confirm", "deny"])
+    s = sub.add_parser("journal", parents=[common()],
+                       help="list, inspect, export and restore write snapshots")
+    s.add_argument("action", nargs="?",
+                   choices=["list", "show", "diff", "export", "restore"],
+                   default="list")
+    s.add_argument("id", nargs="?")
+    s.add_argument("--what", choices=["after", "before", "restore"],
+                   default="after", help="which file export writes (default after)")
     return p
 
 

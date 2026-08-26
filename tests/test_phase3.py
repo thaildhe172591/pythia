@@ -93,6 +93,44 @@ def test_effective_policy_defaults_and_overrides():
     expect_exit(lambda: pythia.effective_policy({"typo_group": "deny"}), "typo_group")
 
 
+def test_journal_entry_roundtrip():
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        now = datetime.datetime(2026, 8, 26, 14, 2, 11)
+        eid = pythia.write_journal_entry(
+            td, "PACKAGE BODY", "PKG_ORDER",
+            before="PACKAGE BODY pkg_order AS\nold\nEND;",
+            after="CREATE OR REPLACE PACKAGE BODY pkg_order AS\nnew\nEND;",
+            meta={"connection": "DEV"}, now=now)
+        assert eid == "2026-08-26T14-02-11_PKG_ORDER_PACKAGE-BODY"   # no colons: Windows-safe
+        e = pythia.read_journal_entry(td, eid)
+        assert e["before"].startswith("PACKAGE BODY")
+        assert e["restore"].startswith("CREATE OR REPLACE PACKAGE BODY")
+        assert e["meta"]["connection"] == "DEV" and e["meta"]["created"] is False
+        # a new object: empty before, restore is a DROP, created is recorded
+        eid2 = pythia.write_journal_entry(td, "PROCEDURE", "P_NEW", "",
+                                          "CREATE OR REPLACE PROCEDURE p_new...",
+                                          {}, now=now)
+        e2 = pythia.read_journal_entry(td, eid2)
+        assert e2["restore"].strip() == "DROP PROCEDURE P_NEW"
+        assert e2["meta"]["created"] is True
+        ids = pythia.list_journal_entries(td)
+        assert eid in ids and eid2 in ids
+        # same object, same second: the id is unique-ified, never overwritten
+        eid3 = pythia.write_journal_entry(td, "PACKAGE BODY", "PKG_ORDER",
+                                          "b", "a", {}, now=now)
+        assert eid3 != eid and eid3.startswith(eid)
+
+
+def test_newly_invalid_and_diff():
+    before = [("A", "PROCEDURE"), ("B", "PACKAGE BODY")]
+    after = [("A", "PROCEDURE"), ("B", "PACKAGE BODY"), ("C", "PROCEDURE")]
+    assert pythia.newly_invalid(before, after) == [("C", "PROCEDURE")]
+    assert pythia.newly_invalid(after, before) == []
+    text, changed = pythia.render_diff("a\nb\nc\n", "a\nX\nc\n")
+    assert "-b" in text and "+X" in text and changed == 2
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
