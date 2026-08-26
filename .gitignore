@@ -1,0 +1,16 @@
+# Credentials & local config — never commit
+connections.json
+*.local.json
+.env
+.pythia/
+
+# Internal planning material (contains company-specific data) — not part of the
+# public repo. docs/* (not docs/) so docs/superpowers/ can be re-included below.
+docs/*
+!docs/superpowers/
+tool-oracle-v1/
+NOTES-research.md
+
+# Python
+__pycache__/
+*.pyc
