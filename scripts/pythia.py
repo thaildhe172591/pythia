@@ -1588,14 +1588,23 @@ def copy_bundled_skills(root):
 
 def clean_legacy_skills(root):
     """Remove stale copies under the pack's old plsql-* names from both
-    conventional roots — real directories only, never symlinks (those
-    belong to the skills CLI)."""
+    conventional roots. Windows junctions defeat is_symlink(), so remove
+    link-first: unlink/rmdir take out a symlink, junction or empty dir
+    without touching its target; only a real populated directory needs
+    rmtree."""
     import shutil
     for rel in (".agents/skills", ".claude/skills"):
         for old_name in LEGACY_SKILLS:
             legacy = pathlib.Path(root) / rel / old_name
-            if legacy.is_dir() and not legacy.is_symlink():
-                shutil.rmtree(legacy)
+            if not os.path.lexists(legacy):
+                continue
+            try:
+                legacy.unlink()          # file or true symlink
+            except OSError:
+                try:
+                    os.rmdir(legacy)     # junction or empty dir: link only
+                except OSError:
+                    shutil.rmtree(legacy)
 
 
 def cmd_install(conn, schema, ns):
