@@ -1,6 +1,6 @@
 ---
 name: pythia-explore
-description: Use when you need to understand anything in an Oracle schema - finding objects, reading PL/SQL source, signatures, table columns, DDL, searching code, or asking who uses what. The database is the only source of truth; repo dumps and exports drift and lie.
+description: Use when you need to understand anything in an Oracle schema - finding objects, reading PL/SQL source, signatures, table columns, DDL, searching code, or asking who uses what. ALSO use when a .sql file, dump, export, migration script or repo copy of an object appears to answer the question already, including when the developer points you at one: those files drift from the database and are wrong in ways that read as correct. The database is the only source of truth.
 ---
 
 # Exploring the Schema
@@ -22,8 +22,17 @@ database:
 | **Indexes** | **116** | **1,016** | **~89% missing** |
 
 Code that "reads fine" against the dump can reference types and packages the
-dump never heard of. Read files only when the database is unreachable, or to
-compare a repo version against the live one.
+dump never heard of.
+
+**When the developer hands you a `.sql` file** — "explain this procedure",
+"here is the export, what does it do" — the file is a claim, not the truth.
+Read it, then run `pythia src <NAME>` and answer from the database. If the
+two differ, say so first: which is newer is exactly what the developer needs
+to know, and it is invisible from the file alone. Never answer about a
+database object from a file alone while the database is reachable.
+
+Read files as the answer only when the database is unreachable — and say
+that is what you are doing.
 
 ## What you need → what you run
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.3 — 2026-08-27
+
+- **pythia-explore now fires when a `.sql` file looks like the answer.**
+  Conformance scenario A1 failed against a real agent: asked to explain a
+  procedure "based on this repo file", it read the file and never touched
+  the database. The skill body already argued against exactly that — but
+  the trigger described "understanding an Oracle schema", and the prompt
+  read as file-reading, so the skill never loaded. The description now
+  names the trap (a file, dump, export or migration script that appears to
+  answer already, including one the developer points at), and the body
+  says what to do when handed one: read it, then ask the database, and
+  report any difference first.
+
 ## 0.3.2 — 2026-08-27
 
 Both fixes come from running the kit against a real 1,516-object schema.
