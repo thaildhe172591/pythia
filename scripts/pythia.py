@@ -29,6 +29,7 @@ you always know whether you saw everything.
   pythia grep "some_identifier"
   pythia sql  "select count(*) from all_views where owner = user"
   pythia invalid
+  pythia errors MY_PACKAGE
 """
 import argparse
 import json
@@ -49,6 +50,7 @@ QUERY_DIR = pathlib.Path(__file__).resolve().parent.parent / "queries"
 # by PR without a database.
 QUERY_BINDS = {
     "invalid-objects.sql": {"s"},
+    "compile-errors.sql": {"s", "n"},
 }
 
 
@@ -191,6 +193,18 @@ def format_source(rows, raw):
             seen = unit
         s = str(text).rstrip("\n")
         out.append(f"{line:>6}  {s}\n")
+    return "".join(out)
+
+
+def format_errors(rows):
+    """rows: (name, type, sequence, line, position, attribute, text).
+    One header per object, then 'line:col SEVERITY message' per error."""
+    out, seen = [], None
+    for name, otype, _seq, line, pos, attr, text in rows:
+        if (name, otype) != seen:
+            out.append(f"{name} ({otype})\n")
+            seen = (name, otype)
+        out.append(f"  {line}:{pos} {attr} {str(text).strip()}\n")
     return "".join(out)
 
 
@@ -380,9 +394,25 @@ def cmd_invalid(conn, schema, ns):
     emit_table(ns, cols, rows, truncated)
 
 
+def cmd_errors(conn, schema, ns):
+    cols, rows = run_query(conn, load_query("compile-errors.sql"),
+                           {"s": schema, "n": ns.name})
+    rows, truncated = clip(rows, ns.limit)
+    if ns.json:
+        print(json_envelope(ns.command, ns.conn_name, ns.schema, cols, rows, truncated))
+        return
+    if not rows:
+        target = ns.name or f"schema {schema}"
+        print(f"-- no compilation errors for {target}")
+        return
+    sys.stdout.write(format_errors(rows))
+    if truncated:
+        print(f"-- truncated at {len(rows)} rows (raise --limit, or --limit 0 for no cap)")
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
-            "invalid": cmd_invalid}
+            "invalid": cmd_invalid, "errors": cmd_errors}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -426,6 +456,10 @@ def build_parser():
     s.add_argument("statement", nargs="+")
     sub.add_parser("invalid", parents=[common],
                    help="every INVALID object in the schema")
+    s = sub.add_parser("errors", parents=[common],
+                       help="compilation errors with line and column")
+    s.add_argument("name", nargs="?", default=None,
+                   help="object name; omit for every object in the schema")
     return p
 
 

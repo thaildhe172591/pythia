@@ -35,6 +35,21 @@ def test_every_query_has_a_header_comment():
             assert field in text, f"{name} is missing a '{field}' header line"
 
 
+def test_format_errors_groups_by_object():
+    rows = [("PKG_ORDER", "PACKAGE BODY", 1, 12, 3, "ERROR",
+             "PLS-00201: identifier 'CALC_TAX' must be declared\n"),
+            ("PKG_ORDER", "PACKAGE BODY", 2, 40, 1, "ERROR",
+             "PL/SQL: Statement ignored"),
+            ("P_SETTLE", "PROCEDURE", 1, 5, 9, "WARNING",
+             "PLW-06002: Unreachable code")]
+    out = pythia.format_errors(rows)
+    assert out.count("PKG_ORDER (PACKAGE BODY)") == 1   # one header per object
+    assert "  12:3 ERROR PLS-00201" in out              # line:col Oracle reported
+    assert "  40:1 ERROR PL/SQL: Statement ignored" in out
+    assert "P_SETTLE (PROCEDURE)" in out
+    assert pythia.format_errors([]) == ""
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
