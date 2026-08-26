@@ -127,9 +127,15 @@ workflow as a new skill, mined from the live schema).
 | Oracle | core works broadly; PL/Scope statement capture needs 12.2+; license-safe views only |
 | Agents | any `npx skills` agent (76) · native Claude Code plugin |
 
-## Star history
+## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=thaildhe172591/pythia&type=Date)](https://www.star-history.com/#thaildhe172591/pythia&Date)
+<a href="https://www.star-history.com/?repos=thaildhe172591%2Fpythia&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=thaildhe172591/pythia&type=date&theme=dark&legend=top-left&sealed_token=OnPCuXPZZEbpQk5_Eor5ZB0fTeMzMN1nmrsDJ8qqahouiJt4-IoDvjONdD05i2D2PhfDC5kwd6CUQeBsWGNV20gt2-4HSD-RygX3h0Ni0lrbQnRh60EN3A" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=thaildhe172591/pythia&type=date&legend=top-left&sealed_token=OnPCuXPZZEbpQk5_Eor5ZB0fTeMzMN1nmrsDJ8qqahouiJt4-IoDvjONdD05i2D2PhfDC5kwd6CUQeBsWGNV20gt2-4HSD-RygX3h0Ni0lrbQnRh60EN3A" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=thaildhe172591/pythia&type=date&legend=top-left&sealed_token=OnPCuXPZZEbpQk5_Eor5ZB0fTeMzMN1nmrsDJ8qqahouiJt4-IoDvjONdD05i2D2PhfDC5kwd6CUQeBsWGNV20gt2-4HSD-RygX3h0Ni0lrbQnRh60EN3A" />
+ </picture>
+</a>
 
 ## Contributing
 
