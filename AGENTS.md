@@ -31,7 +31,8 @@ output on any command.
    proposal, never auto-fixed.
 6. **Exit codes are the verdict:** `0` clean · `1` refused (relay the reason,
    do not route around it) · `3` written but broken — never report success;
-   show the errors and the printed restore command.
+   show the errors and the printed restore command. Never read `$?` through
+   a pipe: `pythia … | tail` returns tail's code, always 0.
 7. **Truncation is always announced.** If output lacks a truncation marker,
    you saw everything; if it has one, say so or fetch the rest.
 8. **Restores are writes.** `journal restore` goes through the same preview

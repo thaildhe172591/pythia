@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2 — 2026-08-27
+
+- **The exit-code contract survives a pipe.** Agents pipe to `tail` to keep
+  output small, and `pythia apply … | tail; echo $?` then reports *tail's*
+  exit code — always 0. Seen in a real session, where a refusal was
+  reported as `EXIT=0`; harmless only because the agent trusted pythia's
+  words over `$?`. Read the other way it turns exit 3, written-but-broken,
+  into "success". pythia-apply and AGENTS.md now forbid reading `$?`
+  through a pipe, a Red Flag row names the mistake, and conformance
+  scenario D1b baits it.
+
 ## 0.4.1 — 2026-08-27
 
 For a change that never goes through `apply` — a DBA runs it, a release

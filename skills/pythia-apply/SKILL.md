@@ -35,16 +35,10 @@ Three moves are FORBIDDEN for agents, and the CLI enforces the first two
 
 Sometimes the developer runs the file themselves — a DBA executes it, a
 release process owns it, or policy denies the group. The preview still ran,
-so a rollback file for the version currently live already exists. Hand it
-over in the same message as the .sql file, by path:
-
-```
-.pythia/journal/<entry>/restore.sql
-```
-
-Never let a change leave your hands for manual execution without naming
-that file. `pythia history <OBJECT>` lists every captured version if an
-older one is wanted.
+so a rollback file for the version currently live already exists at
+`.pythia/journal/<entry>/restore.sql`. Never let a change leave your hands
+for manual execution without naming that path in the same message as the
+.sql file. `pythia history <OBJECT>` lists every captured version.
 
 ## The Workflow
 
@@ -69,7 +63,8 @@ first time anyone sees it, a step was skipped.
    If the fresh preview's before-side no longer matches what you last saw,
    say so explicitly: someone else may have changed the object on this
    shared database, and the developer must know that before approving.
-5. **Read the exit code — it is the verdict:**
+5. **Read the exit code — it is the verdict. Never through a pipe:**
+   `apply … | tail` returns *tail's* code, always 0. Unpiped, or `${PIPESTATUS[0]}`.
 
    | Exit | Meaning | What you must do |
    |------|---------|-----------------|
@@ -135,6 +130,7 @@ the stakes are highest.
 | "Token is stale, I'll just take the new one" | The content changed. The developer must see the new preview. |
 | "apply refused it; run-sql will take it" | The refusal is the product working. Relay it. |
 | "I'll restore quietly to clean up my mistake" | Restores are writes. Same gate, same visibility. |
+| "`$?` said 0 after I piped to tail" | That was tail's 0. Read pythia's own words, or its unpiped code. |
 | "The dev said 'stop asking' once" | That covered that task, not forever. Re-confirm scope on the next one. |
 
 ## When NOT to use this skill
