@@ -1,6 +1,6 @@
 ---
 name: pythia-explore
-description: Use when you need to understand anything in an Oracle schema - finding objects, reading PL/SQL source, signatures, table columns, DDL, searching code, or asking who uses what. ALSO use when a .sql file, dump, export, migration script or repo copy of an object appears to answer the question already, including when the developer points you at one: those files drift from the database and are wrong in ways that read as correct. The database is the only source of truth.
+description: Use when you need to understand anything in an Oracle schema - finding objects, reading PL/SQL source, signatures, table columns, DDL, searching code, or asking who uses what. ALSO use when a .sql file, dump, export, migration script or repo copy of an object appears to answer the question already, including one the developer points you at - because those files drift from the database and are wrong in ways that read as correct. The database is the only source of truth.
 ---
 
 # Exploring the Schema

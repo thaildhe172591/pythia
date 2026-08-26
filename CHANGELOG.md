@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.5 — 2026-08-27
+
+- **A skill silently lost its trigger.** The 0.3.3 rewrite put an unquoted
+  `": "` in pythia-explore's description; YAML reads that as a nested
+  mapping, so the field was lost and the harness fell back to the H1
+  heading. The skill kept its name and stopped firing — the exact failure
+  0.3.3 set out to fix. Description rephrased, and the skill lint now
+  rejects an unquoted `": "` in any frontmatter value (stdlib only, so it
+  runs in CI like the rest).
+
 ## 0.3.4 — 2026-08-27
 
 - **The bundled-pack copy destroyed a symlinked install.** `npx skills add`

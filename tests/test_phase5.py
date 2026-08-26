@@ -54,6 +54,33 @@ def test_frontmatter_is_valid_and_triggering():
         assert len(desc) <= 1024, f"{name}: description too long ({len(desc)})"
 
 
+def test_frontmatter_is_parseable_yaml():
+    """A description holding an unquoted ": " is not valid YAML, and the
+    agent harness then falls back to the H1 heading — the skill keeps its
+    name but loses its trigger, so it silently stops firing. This shipped
+    once; it does not ship twice. Checked without PyYAML: the suites run on
+    the stdlib alone.
+    """
+    for name in sorted(EXPECTED):
+        path = SKILLS / name / "SKILL.md"
+        if not path.is_file():
+            continue
+        m = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding="utf-8"),
+                     re.S)
+        assert m, f"{name}: no YAML frontmatter"
+        for line in m.group(1).splitlines():
+            km = re.match(r"^([A-Za-z_][\w.]*):\s+(.*)$", line)
+            if not km:
+                continue            # continuation or nested line
+            value = km.group(2)
+            if value[:1] in "\"'":
+                continue            # quoted: a colon inside is fine
+            assert ": " not in value, (
+                f"{name}: frontmatter '{km.group(1)}' holds an unquoted "
+                f"': ' — YAML reads that as a nested mapping and the field "
+                f"is lost. Rephrase or quote the value.")
+
+
 def test_skill_bodies_stay_within_budget():
     for name in sorted(EXPECTED):
         path = SKILLS / name / "SKILL.md"
