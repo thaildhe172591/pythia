@@ -366,13 +366,21 @@ def test_write_path_skips_readonly_transaction():
 
 
 def test_invocation_reflects_how_the_tool_was_run():
+    import os
     interp = pathlib.Path(sys.executable).stem   # python / python3 / python3.13
     old = sys.argv[0]
     try:
         sys.argv[0] = "scripts/pythia.py"        # run from source
         assert pythia.invocation() == f"{interp} scripts/pythia.py"
-        sys.argv[0] = r"C:\somewhere\pythia.exe"  # packaged entry point
-        assert pythia.invocation() == "pythia.exe"
+        # packaged entry point — a native path for whichever OS runs the test
+        # (backslash is not a separator on POSIX, so the Windows form belongs
+        # only on Windows)
+        if os.name == "nt":
+            sys.argv[0] = r"C:\somewhere\pythia.exe"
+            assert pythia.invocation() == "pythia.exe"
+        else:
+            sys.argv[0] = "/usr/local/bin/pythia"
+            assert pythia.invocation() == "pythia"
     finally:
         sys.argv[0] = old
 
