@@ -393,6 +393,47 @@ def test_apply_refuses_changing_an_objects_type():
         assert pythia.list_journal_entries(td) == []   # a refusal leaves no entry
 
 
+def test_naming_violation_rules():
+    conv = {"naming": {"PROCEDURE": "^P_[A-Z0-9_]+$"}}
+    assert pythia.naming_violation("PROCEDURE", "DO_STUFF", conv) is not None
+    assert pythia.naming_violation("PROCEDURE", "P_DO_STUFF", conv) is None
+    assert pythia.naming_violation("FUNCTION", "ANYTHING", conv) is None  # no pattern
+    assert pythia.naming_violation("PROCEDURE", "DO_STUFF", None) is None  # no config
+
+
+def test_conventions_file_is_validated():
+    with tempfile.TemporaryDirectory() as td:
+        d = pathlib.Path(td) / ".pythia"
+        d.mkdir()
+        (d / "conventions.json").write_text('{"naming": {"PROCEDURE": "[bad"}}',
+                                            encoding="utf-8")
+        expect_exit(lambda: pythia.load_conventions(td), "PROCEDURE", "regex")
+        (d / "conventions.json").write_text('{"nameing": {}}', encoding="utf-8")
+        expect_exit(lambda: pythia.load_conventions(td), "nameing", "naming")
+        (d / "conventions.json").unlink()
+        assert pythia.load_conventions(td) is None
+
+
+def test_apply_preview_warns_on_naming_drift():
+    """A name outside the project's pattern warns at preview — style is a
+    warning, policy is the thing that blocks."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        d = pathlib.Path(td) / ".pythia"
+        d.mkdir()
+        (d / "conventions.json").write_text(
+            '{"naming": {"PACKAGE BODY": "^XX_[A-Z0-9_]+$"}}', encoding="utf-8")
+        conn = FakeConn(base_script())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql"), NEW_FILE)
+        out = buf.getvalue()
+        assert code == 0
+        assert "naming" in out.lower() and "XX_" in out    # warned...
+        assert len(pythia.list_journal_entries(td)) == 1   # ...but not blocked
+
+
 def test_invocation_reflects_how_the_tool_was_run():
     import os
     interp = pathlib.Path(sys.executable).stem   # python / python3 / python3.13

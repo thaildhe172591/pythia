@@ -82,6 +82,11 @@ below paste-able as written. Windows, macOS, Linux and WSL are all CI-tested.
 Every command takes `--json` (machine output), `--conn` (pick a connection), and
 caps output with explicit truncation markers so context windows stay intact.
 
+**Your house style is config, not folklore**: put naming patterns in
+`.pythia/conventions.json` and apply previews warn when a new object's name
+drifts; put the prose rules in `.pythia/conventions.md` and the skills make
+every agent read them first (`pythia conventions` shows both).
+
 ## Security & write policy
 
 **The account is the real security layer** — the policy file is an application-side

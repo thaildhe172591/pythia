@@ -31,6 +31,9 @@ output on any command.
    you saw everything; if it has one, say so or fetch the rest.
 7. **Restores are writes.** `journal restore` goes through the same preview
    and approval as any apply.
+8. **House style outranks generic style.** If `.pythia/conventions.md`
+   exists, read it before writing any object; `pythia conventions` shows the
+   machine-checked naming patterns, and apply previews warn on drift.
 
 ## Where things are
 

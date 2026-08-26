@@ -24,7 +24,9 @@ exact.
 
 ## Pass 2 — the antipattern checklist
 
-Work through `reference/antipatterns.md`. The seven entries, each with
+Work through `reference/antipatterns.md` — and the project's own
+`.pythia/conventions.md` when it exists, which outranks the generic list.
+The seven entries, each with
 wrong → right → why: row-by-row cursor loops, string-concatenated dynamic
 SQL, `WHEN OTHERS THEN NULL`, `COMMIT` inside loops, hand-copied types
 instead of `%TYPE`/`%ROWTYPE`, large OUT parameters without `NOCOPY`, and

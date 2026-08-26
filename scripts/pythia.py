@@ -933,6 +933,40 @@ def cmd_plscope(conn, schema, ns):
         emit_table(ns, stmt_cols, *clip(stmt_rows, ns.limit))
 
 
+def load_conventions(root):
+    """Project house style from .pythia/conventions.json — the machine half of
+    the customization surface (the prose half is conventions.md, for agents).
+    Config is a trust boundary: unknown keys and broken regexes are refused
+    with the fix, not skipped."""
+    path = pathlib.Path(root) / CONFIG_DIR / "conventions.json"
+    if not path.is_file():
+        return None
+    try:
+        conv = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as e:
+        sys.exit(f"Cannot parse {path}: {e}")
+    unknown = set(conv) - {"naming"}
+    if unknown:
+        sys.exit(f"Unknown key {sorted(unknown)[0]!r} in {path} — "
+                 "supported: \"naming\".")
+    for otype, pattern in conv.get("naming", {}).items():
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            sys.exit(f"Bad regex for {otype!r} in {path}: {e}")
+    return conv
+
+
+def naming_violation(otype, name, conv):
+    """The warning line for a name outside the project's pattern, or None.
+    Style warns; only policy blocks."""
+    pattern = ((conv or {}).get("naming") or {}).get(otype)
+    if pattern and not re.match(pattern, name):
+        return (f"naming: {name} does not match this project's {otype} "
+                f"pattern {pattern} — see .pythia/conventions.md")
+    return None
+
+
 # Which main-namespace occupants may legally coexist with each object type.
 # Spec and body pair up; triggers have a namespace of their own (None = nothing
 # in the main namespace can block them).
@@ -1063,10 +1097,13 @@ def run_apply(conn, schema, ns, file_text, origin=None):
     base = ("CREATE OR REPLACE " + db_source) if db_source.strip() else ""
     diff_text, changed = render_diff(base, stmt)
     warn = privilege_warning(conn, schema, ns.conn_user)
+    style = (naming_violation(otype, name, load_conventions(ns.project_root))
+             if group == "plsql_source" else None)
     if ns.json:
         print(json.dumps({"ok": True, "object": name, "type": otype,
                           "created": created, "changed_lines": changed,
-                          "summary": summary, "warning": warn, "token": token,
+                          "summary": summary, "warning": warn,
+                          "naming_warning": style, "token": token,
                           "journal": entry, "will_apply": confirmed}))
     else:
         en = getattr(ns, "color", False)
@@ -1081,6 +1118,8 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             print(f"  {summary.lstrip('- ')}")
         if warn:
             print(f"\n  {paint(warn, 'yellow', en)}")
+        if style:
+            print(f"\n  {paint('! ' + style, 'yellow', en)}")
         if diff_text:
             print()
             for ln in diff_text.splitlines():
@@ -1226,13 +1265,34 @@ def cmd_journal(conn, schema, ns):
         sys.exit("unreachable: restore is dispatched with a connection in main")
 
 
+def cmd_conventions(conn, schema, ns):
+    conv = load_conventions(ns.project_root)
+    if ns.json:
+        print(json.dumps(conv or {}))
+        return
+    if not conv:
+        print("No project conventions configured.")
+        print(f"Create {pathlib.Path(ns.project_root) / CONFIG_DIR / 'conventions.json'} "
+              "(see examples/conventions.example.json) and apply previews will "
+              "warn when a new object's name drifts from your patterns.\n"
+              "Put the prose rules in conventions.md next to it for your agents.")
+        return
+    print("Naming patterns — apply previews warn when a name drifts:")
+    for otype, pattern in conv.get("naming", {}).items():
+        print(f"  {otype:<13} {pattern}")
+    md = pathlib.Path(ns.project_root) / CONFIG_DIR / "conventions.md"
+    if md.is_file():
+        print(f"\nProse rules for agents: {md}")
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
-            "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply}
+            "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
+            "conventions": cmd_conventions}
 
-NO_DB_COMMANDS = {"policy", "journal"}
+NO_DB_COMMANDS = {"policy", "journal", "conventions"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -1329,6 +1389,8 @@ def build_parser():
                    help="apply without stopping; the full preview still prints and journals")
     s.add_argument("--depth", type=int, default=3,
                    help="impact depth for the preview (default 3)")
+    sub.add_parser("conventions", parents=[common()],
+                   help="show the project's house-style naming patterns")
     return p
 
 

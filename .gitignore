@@ -11,6 +11,9 @@ docs/
 tool-oracle-v1/
 NOTES-research.md
 
+# Local dogfood project material (developed WITH pythia, not part of it)
+sql/
+
 # Agent-installed skill copies (the canonical pack lives in skills/)
 .claude/
 .agents/

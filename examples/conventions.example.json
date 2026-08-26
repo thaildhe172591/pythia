@@ -1,0 +1,10 @@
+{
+  "naming": {
+    "TABLE": "^T_[A-Z0-9_]+$",
+    "PROCEDURE": "^P_[A-Z0-9_]+$",
+    "FUNCTION": "^F_[A-Z0-9_]+$",
+    "PACKAGE": "^PKG_[A-Z0-9_]+$",
+    "SEQUENCE": "^S_[A-Z0-9_]+$",
+    "TRIGGER": "^TRG_[A-Z0-9_]+$"
+  }
+}

@@ -7,6 +7,10 @@ description: Use when writing or modifying PL/SQL source - a procedure, function
 
 **Announce at start:** "Using plsql-write — mining the codebase's conventions first."
 
+**Before anything:** if the project has `.pythia/conventions.md`, read it —
+house rules there outrank every generic pattern below, and
+`pythia conventions` shows the naming patterns the apply preview will check.
+
 A codebase with thousands of procedures has already decided how procedures
 look. Your job is to write one that a maintainer cannot tell from the
 existing ones — not to introduce a better style.

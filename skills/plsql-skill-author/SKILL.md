@@ -51,6 +51,11 @@ Memory lies; the schema does not. Before writing a line:
 - Write in the language the team works in; this pack is English, a private
   team skill may be Vietnamese — the developer decides.
 
+**Not everything needs a skill.** Pure naming and style rules travel better
+as `.pythia/conventions.json` (machine-checked at every apply preview) plus
+`.pythia/conventions.md` (prose the agent reads). Reserve skills for
+workflows — things with steps, gates and judgment.
+
 ## Step 4 — Place it
 
 User skills live in the **developer's project**, e.g.
