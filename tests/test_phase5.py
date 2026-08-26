@@ -11,7 +11,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
 
 EXPECTED = {"plsql-setup", "plsql-explore", "plsql-impact",
-            "plsql-write", "plsql-apply", "plsql-review"}
+            "plsql-write", "plsql-apply", "plsql-review",
+            "plsql-skill-author"}
 
 # spec: SKILL.md under 150 lines, detail pushed to reference/
 MAX_LINES = 150
@@ -29,7 +30,7 @@ def frontmatter(text):
     return fields
 
 
-def test_all_six_skills_exist():
+def test_all_expected_skills_exist():
     found = {p.name for p in SKILLS.iterdir() if (p / "SKILL.md").is_file()} \
         if SKILLS.is_dir() else set()
     assert found == EXPECTED, (f"missing: {sorted(EXPECTED - found)}, "
@@ -40,7 +41,7 @@ def test_frontmatter_is_valid_and_triggering():
     for name in sorted(EXPECTED):
         path = SKILLS / name / "SKILL.md"
         if not path.is_file():
-            continue  # reported by test_all_six_skills_exist
+            continue  # reported by test_all_expected_skills_exist
         text = path.read_text(encoding="utf-8")
         fm = frontmatter(text)
         assert fm is not None, f"{name}: no YAML frontmatter"
