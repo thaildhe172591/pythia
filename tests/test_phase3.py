@@ -346,6 +346,14 @@ def test_journal_restore_of_created_object_is_a_drop_and_policy_gates_it():
         assert wrote_ddl(conn) == []
 
 
+def test_docstring_no_longer_claims_readonly_build():
+    doc = pythia.__doc__
+    assert "READ-ONLY" not in doc
+    assert "pythia apply" in doc and "pythia policy" in doc
+    # the sql command's SELECT/WITH-only gate is still documented
+    assert "SELECT/WITH" in doc
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """pythia — ask an Oracle Database directly instead of reading stale dumps.
 
-This build is READ-ONLY: there is no write mode and no --write flag.
-Change PL/SQL by editing files and applying them yourself; a controlled
-write workflow (`apply`) is planned but not part of this build.
+Reads are plain commands; sql accepts SELECT/WITH only. Writes go through
+`apply` — snapshot, impact, preview, apply, verify, report — gated by
+.pythia/policy.json. There is no --write flag: the write path is `apply`,
+nothing else.
 
 Connection resolution order:
   1. --conn NAME
@@ -35,6 +36,11 @@ you always know whether you saw everything.
   pythia impact MY_TABLE
   pythia similar PKG_ORDER_TOTAL_LIST
   pythia plscope MY_TABLE
+  pythia apply PKG_ORDER_BODY.sql
+  pythia apply PKG_ORDER_BODY.sql --confirm 7f3a91
+  pythia journal list
+  pythia journal restore <id>
+  pythia policy
 """
 import argparse
 import json
@@ -76,9 +82,9 @@ def is_readonly_sql(stmt):
 
 def forbid_write_flag(argv):
     if "--write" in argv:
-        sys.exit("pythia is read-only in this build: there is no --write mode.\n"
-                 "Edit PL/SQL in files and apply changes yourself; a controlled\n"
-                 "write workflow (`apply`) is planned but not available yet.")
+        sys.exit("There is no --write flag. The write path is `pythia apply "
+                 "<file>` — snapshot, preview and verify included; nothing "
+                 "else writes.")
 
 
 def load_query(name):
@@ -629,6 +635,9 @@ def cmd_check(conn, schema, ns):
                (select count(*) from all_triggers  where owner = :s) triggers
         from dual""", {"s": schema})
     emit_table(ns, cols, rows, False)
+    warn = privilege_warning(conn, schema, ns.conn_user)
+    if warn:
+        print(f"\n{warn}", file=sys.stderr)
 
 
 def cmd_ls(conn, schema, ns):

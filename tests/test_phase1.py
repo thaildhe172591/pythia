@@ -35,7 +35,10 @@ def test_readonly_gate():
 
 
 def test_write_flag_refused():
-    expect_exit(lambda: pythia.forbid_write_flag(["sql", "--write", "select 1"]), "read-only")
+    # since Phase 3 the message points at the real write path instead of
+    # claiming the tool is read-only (it no longer is)
+    expect_exit(lambda: pythia.forbid_write_flag(["sql", "--write", "select 1"]),
+                "no --write", "apply")
     pythia.forbid_write_flag(["sql", "select 1 from dual"])  # no flag -> no exit
 
 
