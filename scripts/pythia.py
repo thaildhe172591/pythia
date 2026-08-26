@@ -201,6 +201,13 @@ def invocation():
     return pathlib.Path(prog).name
 
 
+HEADLESS_YES_MSG = (
+    "--yes is the developer's flag, and no terminal is attached to this "
+    "session.\nAgents preview, relay the diff and the impact verbatim, "
+    "STOP, and pass --confirm <token> only after the developer's explicit "
+    "approval in chat.\n(Real pipelines set PYTHIA_CI=1.)")
+
+
 def human_at_the_keyboard():
     """True only when a person is typing: stdin is a TTY. An agent driving
     the CLI through a subprocess has no TTY and cannot fake one — which is
@@ -1124,11 +1131,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         db_source = "".join(cell(r[0]) for r in rows)
     token = apply_token(otype, name, file_text, db_source)
     if ns.yes and not human_at_the_keyboard():
-        sys.exit("--yes is the developer's flag, and no terminal is attached "
-                 "to this session.\nAgents preview, relay the diff and the "
-                 "impact verbatim, STOP, and pass --confirm <token> only "
-                 "after the developer's explicit approval in chat.\n"
-                 "(Real pipelines set PYTHIA_CI=1.)")
+        sys.exit(HEADLESS_YES_MSG)
     confirmed = bool(ns.yes) or ns.confirm == token
     if ns.confirm and ns.confirm != token:
         sys.exit("The confirmation token does not match: the file or the "
@@ -1842,6 +1845,15 @@ def main(argv=None):
         except AttributeError:
             pass
     ns = build_parser().parse_args(argv)
+    # refusals that need no database come first — an unreachable or locked
+    # connection must never mask them
+    if ns.command == "sql" and not is_readonly_sql(
+            " ".join(ns.statement).strip().rstrip(";")):
+        sys.exit("Only SELECT/WITH statements are allowed; sql is read-only."
+                 f"\nThe write path is `{invocation()} apply <file>` — "
+                 "snapshot, preview and verify included.")
+    if getattr(ns, "yes", False) and not human_at_the_keyboard():
+        sys.exit(HEADLESS_YES_MSG)
     ns.color = color_enabled() and not ns.json
     if ns.color and os.name == "nt":
         # Constant empty string, never user input — safe from injection. This

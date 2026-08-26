@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 — 2026-08-26
+
+- Refusals that need no database fire before any connection is opened: a
+  non-SELECT `sql` statement and a headless `--yes` are refused with their
+  real messages even when the connection is unreachable or locked — found
+  when ORA-28000 masked both during a field test of the 0.3.0 gates.
+
 ## 0.3.0 — 2026-08-26
 
 - **The developer's approval is now enforced by the CLI, not just asked of
