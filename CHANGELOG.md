@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.3 — 2026-08-27
+
+- `examples/claude-code-settings.example.json`: optional Claude Code
+  permission settings — the 22 read-only pythia commands stop prompting
+  (deterministic rules, in the syntax Claude Code itself writes), and the
+  auto-mode classifier is asked to pause on `apply --confirm`, `journal
+  restore --confirm` and `policy set`. Shipped as an example the developer
+  installs, like `agent-user-setup.example.sql`, and NOT installed by
+  `pythia install`: it is another product's security config, it covers one
+  of 77 supported agents, and its `autoMode` half is advisory — GUIDE
+  section 11 says which half is enforcement and which is only a nudge.
+
 ## 0.4.2 — 2026-08-27
 
 - **The exit-code contract survives a pipe.** Agents pipe to `tail` to keep

@@ -17,6 +17,7 @@ và xử lý sự cố. Mọi lệnh đều paste được nguyên văn.
 8. [Message tiếng Việt: unistr](#8-message-tiếng-việt-unistr)
 9. [Bộ skills cho agent](#9-bộ-skills-cho-agent)
 10. [Xử lý sự cố](#10-xử-lý-sự-cố)
+11. [Tuỳ chọn: cấu hình quyền cho Claude Code](#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)
 
 ---
 
@@ -327,6 +328,41 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | Output bị cắt | có marker `-- truncated` — tăng `--limit`/`--max-lines` hoặc `--offset` đọc tiếp |
 | `--yes ... no terminal is attached` | agent định tự phê duyệt — đúng thiết kế: preview, relay nguyên văn, dừng; dev đồng ý rồi mới `--confirm <token>` |
 | `Loosening the write policy ... no terminal` | tương tự: đưa dev đúng lệnh `policy set` đã in để họ tự chạy |
+
+## 11. Tuỳ chọn: cấu hình quyền cho Claude Code
+
+Claude Code tự quyết có chạy một lệnh hay không, và ở auto mode thì một
+classifier chấm từng lệnh theo ngữ cảnh. Kéo theo hai chuyện.
+
+**Lệnh đọc hỏi những câu không có gì để quyết.** Hai mươi hai lệnh pythia
+không thể ghi — `sql` từ chối mọi thứ không phải SELECT/WITH, phần còn lại
+chỉ đọc data dictionary. Bắt duyệt từng cái chỉ dạy dev bấm duyệt mà không
+nhìn, đúng ngược với lý do prompt tồn tại.
+
+**Lệnh ghi lại không được thêm lần dừng nào.** Ở auto mode,
+`pythia apply … --confirm` hoàn toàn có thể bị chấm là an toàn rồi chạy
+thẳng. pythia vẫn bắt preview và token, skills vẫn bắt bạn duyệt trong
+chat — nhưng bản thân harness không góp thêm gì.
+
+[`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
+xử lý cả hai. Copy vào `.claude/settings.json` (gộp nếu đã có sẵn), khởi
+động lại phiên, rồi `/permissions` để kiểm tra.
+
+**pythia cố ý KHÔNG tự cài file này.** Đó là cấu hình bảo mật của sản phẩm
+khác, nó chỉ áp cho một agent trong số 77 agent mà skill pack hỗ trợ, và —
+lý do lớn nhất — hai nửa của file không mạnh ngang nhau:
+
+| Nửa | Cơ chế | Độ chắc |
+|---|---|---|
+| `permissions.allow` | so khớp rule tất định | tin được; cú pháp đúng dạng mà chính Claude Code viết ra khi bạn bấm "always allow" |
+| `autoMode.allow` / `soft_deny` | văn bản đưa vào prompt của classifier | chỉ gợi ý — nghiêng cán cân, không quyết định |
+
+Nên đừng hiểu nửa sau là "từ nay mọi lần ghi đều dừng lại". Các bảo đảm
+thật nằm chỗ khác và không đổi: token trói lần ghi vào đúng bản preview bạn
+đã xem, `.pythia/policy.json` từ chối thẳng cả nhóm, và quyền Oracle của
+agent là lớp duy nhất không thể nói vòng qua. Hãy đối xử với file này y như
+[`agent-user-setup.example.sql`](examples/agent-user-setup.example.sql) —
+kit đưa cho bạn, còn chạy hay không là bạn quyết.
 
 ---
 

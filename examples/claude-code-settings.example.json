@@ -1,0 +1,48 @@
+{
+  "//": "Optional Claude Code settings for a project using pythia. Copy to .claude/settings.json (merge if one exists). NOT installed by pythia: this is another product's security config, and yours to own. See GUIDE.md section 11.",
+
+  "//permissions": "DETERMINISTIC rule matching. These are pythia's read-only commands: sql refuses anything that is not SELECT/WITH, and none of the rest can write. Allowing them removes prompts that carry no decision. Everything absent from this list still prompts as usual - including every form of apply.",
+
+  "permissions": {
+    "allow": [
+      "Bash(pythia check *)",
+      "Bash(pythia ls *)",
+      "Bash(pythia src *)",
+      "Bash(pythia args *)",
+      "Bash(pythia cols *)",
+      "Bash(pythia ddl *)",
+      "Bash(pythia grep *)",
+      "Bash(pythia sql *)",
+      "Bash(pythia invalid *)",
+      "Bash(pythia errors *)",
+      "Bash(pythia deps *)",
+      "Bash(pythia impact *)",
+      "Bash(pythia similar *)",
+      "Bash(pythia plscope *)",
+      "Bash(pythia history *)",
+      "Bash(pythia conventions *)",
+      "Bash(pythia unistr *)",
+      "Bash(pythia policy)",
+      "Bash(pythia journal list *)",
+      "Bash(pythia journal show *)",
+      "Bash(pythia journal diff *)",
+      "Bash(pythia journal export *)"
+    ]
+  },
+
+  "//autoMode": "ADVISORY, not enforcement: these lines are fed to the auto-mode classifier as guidance, so they shift the odds rather than decide. Do not read them as a guarantee that a write will pause. The guarantees live elsewhere - in pythia's confirm token, in the policy file, and above all in the agent's Oracle grants. soft_deny means 'pause unless the developer's own words clear it', which is exactly right here: you saying 'apply it' should clear the pause; the agent deciding alone should not.",
+
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "`pythia apply <file>` WITHOUT a --confirm flag is a preview: it reads the object, writes a snapshot to .pythia/journal/, prints a diff and a confirm token, and does not touch the database. Allow it - blocking the preview is what pushes a developer into running DDL by hand instead, with no snapshot at all.",
+      "Every pythia read command (check, ls, src, args, cols, ddl, grep, sql, invalid, errors, deps, impact, similar, plscope, history, conventions, unistr, policy without `set`, journal list/show/diff/export) is read-only. `pythia sql` refuses anything that is not SELECT/WITH."
+    ],
+    "soft_deny": [
+      "$defaults",
+      "`pythia apply <file> --confirm <token>` writes to the Oracle database, and DDL self-commits there - no transaction can roll it back. Pause for the developer, even though pythia already required a preview.",
+      "`pythia journal restore <id> --confirm <token>` is also a write. Pause the same way.",
+      "`pythia policy set <group> <value>` changes which kinds of write are allowed at all. Pause; loosening it is the developer's decision, never the agent's."
+    ]
+  }
+}

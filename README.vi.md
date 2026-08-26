@@ -167,6 +167,11 @@ một lần chạy. Đây chỉ là tiện ích; bạn tự làm tay theo
 cũng được. `pythia check` sẽ cảnh báo khi tài khoản đang dùng có quyền cao
 hơn mức công việc cần.
 
+Dùng Claude Code? [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
+giúp nó thôi hỏi các lệnh chỉ-đọc và đề nghị dừng lại ở các lệnh ghi — tuỳ
+chọn, và do bạn tự cài
+([vì sao pythia không tự cài](GUIDE.vi.md#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)).
+
 Chính sách ghi chia theo nhóm trong `.pythia/policy.json` (mặc định):
 
 | Nhóm | Mặc định | Có rollback thật không? |

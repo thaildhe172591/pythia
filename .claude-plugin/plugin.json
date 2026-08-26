@@ -1,6 +1,6 @@
 {
   "name": "pythia",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "PL/SQL development for AI agents on Oracle Database - expert data-dictionary queries, impact analysis, and a snapshot-verified write path with honest rollback.",
   "author": {
     "name": "thaild"

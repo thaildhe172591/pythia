@@ -137,6 +137,11 @@ hand with
 works just as well.
 `pythia check` warns when the session runs with more power than the task needs.
 
+Using Claude Code? [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
+stops it prompting for the read-only commands and asks it to pause on
+writes — optional, and yours to install
+([why pythia does not](GUIDE.md#11-optional-claude-code-permission-settings)).
+
 Per-group write policy, `.pythia/policy.json` (defaults shown):
 
 | Group | Default | Is rollback real? |

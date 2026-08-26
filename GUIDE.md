@@ -17,6 +17,7 @@ Every command pastes as written.
 8. [Exact non-ASCII literals: unistr](#8-exact-non-ascii-literals-unistr)
 9. [The agent skill pack](#9-the-agent-skill-pack)
 10. [Troubleshooting](#10-troubleshooting)
+11. [Optional: Claude Code permission settings](#11-optional-claude-code-permission-settings)
 
 ---
 
@@ -340,6 +341,44 @@ go through MCP.**
 | Output cut short | a `-- truncated` marker is present — raise `--limit`/`--max-lines`, or `--offset` to continue |
 | `--yes ... no terminal is attached` | an agent tried to self-approve — by design: preview, relay verbatim, stop; the developer approves, then `--confirm <token>` |
 | `Loosening the write policy ... no terminal` | same design: hand the developer the printed `policy set` command to run themselves |
+
+## 11. Optional: Claude Code permission settings
+
+Claude Code decides for itself whether to run a command, and in auto mode a
+classifier makes that call per command, in context. Two things follow.
+
+**Read commands prompt for nothing worth deciding.** Twenty-two pythia
+commands cannot write — `sql` refuses anything that is not SELECT/WITH, and
+the rest only read the data dictionary. Approving them one by one teaches a
+developer to approve without looking, which is the opposite of what a
+permission prompt is for.
+
+**Writes get no extra pause.** In auto mode `pythia apply … --confirm` may
+well be judged safe and run without stopping. pythia still required a
+preview and a token, and the skills still require your approval in chat —
+but the harness itself adds nothing.
+
+[`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
+addresses both. Copy it to `.claude/settings.json` (merge if you already
+have one), then restart the session and check `/permissions`.
+
+**pythia does not install this, on purpose.** It is another product's
+security configuration, it applies to one agent out of the 77 the skill
+pack supports, and — most of the reason — the two halves are not equally
+strong:
+
+| Half | Mechanism | Strength |
+|---|---|---|
+| `permissions.allow` | deterministic rule matching | reliable; the syntax matches what Claude Code itself writes when you click "always allow" |
+| `autoMode.allow` / `soft_deny` | text fed to the auto-mode classifier | advisory — it shifts the odds, it does not decide |
+
+So do not read the second half as "writes now always pause". The guarantees
+are elsewhere and unchanged: the confirm token binds a write to a preview
+you saw, `.pythia/policy.json` refuses whole groups outright, and the
+agent's Oracle grants are the only layer that cannot be talked around.
+Treat this file the way you treat
+[`agent-user-setup.example.sql`](examples/agent-user-setup.example.sql) —
+something the kit hands you, and you decide to run.
 
 ---
 
