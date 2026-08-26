@@ -219,7 +219,11 @@ report**.
   the database object changed, the token is stale and you preview again
 - Type-changing applies (function → procedure of the same name…) are
   refused at preview
-- `--yes` skips the stop, but the full preview still prints and journals
+- `--yes` skips the stop — but it is **the developer's flag**: without a
+  terminal attached (an agent driving the CLI) it is refused, as is any
+  `policy set` to a looser value. A human at the keyboard is unaffected;
+  real pipelines set `PYTHIA_CI=1`. The journal records how every write
+  was confirmed (`token` / `yes`) and whether a TTY was present
 - The preview warns when a new object's name drifts from the project's
   naming conventions
 
@@ -334,6 +338,8 @@ go through MCP.**
 | Token refused on `--confirm` | file or DB changed since the preview — previewing again is the design |
 | Exit 3 after apply | written but new errors/invalids — read them, run the printed `journal restore` |
 | Output cut short | a `-- truncated` marker is present — raise `--limit`/`--max-lines`, or `--offset` to continue |
+| `--yes ... no terminal is attached` | an agent tried to self-approve — by design: preview, relay verbatim, stop; the developer approves, then `--confirm <token>` |
+| `Loosening the write policy ... no terminal` | same design: hand the developer the printed `policy set` command to run themselves |
 
 ---
 

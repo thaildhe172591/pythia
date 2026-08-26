@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 — 2026-08-26
+
+- **The developer's approval is now enforced by the CLI, not just asked of
+  the agent** (field report: an agent self-approved writes and widened its
+  own scope). Without a terminal attached, `apply --yes` is refused, and
+  so is any `policy set` to a looser value — tightening stays free. A
+  human at the keyboard is unaffected; real pipelines set `PYTHIA_CI=1`.
+  Every journal entry now records how the write was confirmed (`token` /
+  `yes`) and whether a TTY was present.
+- Skills hardened to match: the preview ends the agent's turn (`--confirm`
+  only after the developer's approval arrives as a new message), and
+  scope is the developer's sentence — dependents that break are reported
+  with a proposal, never auto-fixed.
+
 ## 0.2.4 — 2026-08-26
 
 - **Global-first skills** (field report): some Claude Code versions never

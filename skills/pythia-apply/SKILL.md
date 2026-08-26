@@ -21,6 +21,16 @@ Applies to every write: new objects, fixes, restores, batch runs. No
 exceptions for "trivial" changes — a one-line change can invalidate twelve
 dependents.
 
+Three moves are FORBIDDEN for agents, and the CLI enforces the first two
+(no terminal attached → refusal):
+
+- `--yes` — it is the developer's flag, never yours.
+- `pythia policy set <group>` to anything LOOSER — loosening policy is the
+  developer's decision; hand them the exact command to run themselves.
+- Passing `--confirm` in the same turn as the preview. The preview ends
+  your turn; the token is only used after the developer's approval
+  arrives as a NEW message.
+
 ## The Workflow
 
 **Before step 1:** if this conversation has not yet seen a standalone impact

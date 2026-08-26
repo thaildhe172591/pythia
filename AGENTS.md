@@ -23,15 +23,20 @@ output on any command.
    through SQLcl MCP `run-sql`, `sqlplus`, or a driver script — those have
    no snapshot, no verify, no journal.
 4. **The developer sees every preview.** Relay apply's diff, impact line and
-   warnings verbatim; wait for an explicit go-ahead before `--confirm`.
-5. **Exit codes are the verdict:** `0` clean · `1` refused (relay the reason,
+   warnings verbatim; the preview ends your turn. `--confirm` only after
+   the developer's approval arrives as a new message. `--yes` and loosening
+   `policy set` are the developer's actions — the CLI refuses them without
+   a terminal.
+5. **Scope is what was asked.** Dependents that break are reported with a
+   proposal, never auto-fixed.
+6. **Exit codes are the verdict:** `0` clean · `1` refused (relay the reason,
    do not route around it) · `3` written but broken — never report success;
    show the errors and the printed restore command.
-6. **Truncation is always announced.** If output lacks a truncation marker,
+7. **Truncation is always announced.** If output lacks a truncation marker,
    you saw everything; if it has one, say so or fetch the rest.
-7. **Restores are writes.** `journal restore` goes through the same preview
+8. **Restores are writes.** `journal restore` goes through the same preview
    and approval as any apply.
-8. **House style outranks generic style.** If `.pythia/conventions.md`
+9. **House style outranks generic style.** If `.pythia/conventions.md`
    exists, read it before writing any object; `pythia conventions` shows the
    machine-checked naming patterns, and apply previews warn on drift.
 

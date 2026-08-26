@@ -211,7 +211,11 @@ report**.
 - Token 6-hex trói lần ghi vào nội dung đã preview — file hay DB đổi là token
   hết hiệu lực, phải preview lại
 - Đổi kiểu object (function → procedure cùng tên...) bị chặn ngay preview
-- `--yes` bỏ bước dừng nhưng preview vẫn in đủ và vẫn ghi journal
+- `--yes` bỏ bước dừng — nhưng nó là **cờ của developer**: không có
+  terminal (agent điều khiển CLI) thì bị từ chối, `policy set` nới lỏng
+  cũng vậy. Người gõ tay không bị ảnh hưởng; pipeline thật đặt
+  `PYTHIA_CI=1`. Journal ghi lại mỗi lần ghi được xác nhận bằng gì
+  (`token` / `yes`) và có TTY hay không
 - Preview cảnh báo khi tên object lệch naming conventions của project
 
 **Exit code là kết luận, máy đọc được:**
@@ -321,6 +325,8 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | Token bị từ chối khi `--confirm` | file/DB đổi sau preview — preview lại là đúng thiết kế |
 | Exit 3 sau apply | đã ghi nhưng có lỗi compile/invalid mới — xem lỗi, chạy lệnh `journal restore` đã in |
 | Output bị cắt | có marker `-- truncated` — tăng `--limit`/`--max-lines` hoặc `--offset` đọc tiếp |
+| `--yes ... no terminal is attached` | agent định tự phê duyệt — đúng thiết kế: preview, relay nguyên văn, dừng; dev đồng ý rồi mới `--confirm <token>` |
+| `Loosening the write policy ... no terminal` | tương tự: đưa dev đúng lệnh `policy set` đã in để họ tự chạy |
 
 ---
 

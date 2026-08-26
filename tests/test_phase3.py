@@ -8,6 +8,9 @@ import pathlib
 import sys
 import tempfile
 
+import os
+os.environ.setdefault("PYTHIA_CI", "1")   # the suites are headless by design
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
 import pythia  # noqa: E402
 
@@ -589,6 +592,70 @@ def test_agent_user_alter_form_and_warning_prediction():
         assert "CREATE USER" not in d["sql"]
         assert d["check_will_warn"] is True
         assert d["owner_dangerous_privs"] == ["DROP ANY TABLE"]
+
+
+class _NoTTY:
+    """A headless agent session: PYTHIA_CI cleared, stdin not a terminal."""
+    def __enter__(self):
+        import io
+        self.ci = os.environ.pop("PYTHIA_CI", None)
+        self.stdin = sys.stdin
+        sys.stdin = io.StringIO()
+        return self
+
+    def __exit__(self, *a):
+        sys.stdin = self.stdin
+        if self.ci is not None:
+            os.environ["PYTHIA_CI"] = self.ci
+        return False
+
+
+def test_headless_yes_is_refused_before_anything_is_written():
+    """--yes belongs to a human at a terminal. An agent (no TTY) must be
+    told to preview, stop, and wait for the developer — and nothing may
+    reach the database."""
+    with tempfile.TemporaryDirectory() as td, _NoTTY():
+        conn = FakeConn(base_script())
+        try:
+            pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql", yes=True),
+                             NEW_FILE)
+        except SystemExit as e:
+            msg = str(e)
+            assert "developer" in msg and "--confirm" in msg
+            assert "PYTHIA_CI" in msg
+        else:
+            raise AssertionError("expected SystemExit, none raised")
+        assert wrote_ddl(conn) == []          # refused before the write
+    # the developer at a real terminal keeps --yes (simulated via PYTHIA_CI)
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        assert pythia.run_apply(conn, "APP",
+                                apply_ns(td, file="f.sql", yes=True),
+                                NEW_FILE) == 0
+
+
+def test_headless_policy_loosening_is_refused_tightening_allowed():
+    import argparse
+    import contextlib
+    import io
+
+    def policy_ns(root, group, value):
+        return argparse.Namespace(action="set", group=group, value=value,
+                                  json=False, project_root=root)
+
+    with tempfile.TemporaryDirectory() as td, _NoTTY():
+        # deny -> confirm is loosening: the developer's decision
+        try:
+            pythia.cmd_policy(None, None, policy_ns(td, "structural", "confirm"))
+        except SystemExit as e:
+            assert "developer" in str(e) and "policy set structural" in str(e)
+        else:
+            raise AssertionError("expected SystemExit, none raised")
+        assert not pythia.policy_path(td).is_file()   # nothing written
+        # confirm -> deny is tightening: always allowed, even headless
+        with contextlib.redirect_stdout(io.StringIO()):
+            pythia.cmd_policy(None, None, policy_ns(td, "plsql_source", "deny"))
+        assert pythia.load_policy(td)["plsql_source"][0] == "deny"
 
 
 def main():

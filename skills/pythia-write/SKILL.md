@@ -40,6 +40,14 @@ existing ones — not to introduce a better style.
    `reference/patterns.md` — cursor and bulk patterns, exception discipline,
    bind variables, commit ownership.
 
+## Scope is the developer's sentence, not yours
+
+Change ONLY the objects the developer named. When impact shows dependents
+that will break, you REPORT them with the list and a proposal — fixing
+them is a separate request that needs its own explicit approval. "While I
+was there" is how an asked-for table edit becomes seven unasked procedure
+rewrites.
+
 ## Conventions outrank preferences
 
 If the codebase writes explicit cursors where you would write `FOR r IN`,

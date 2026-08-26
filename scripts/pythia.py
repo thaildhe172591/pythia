@@ -201,6 +201,19 @@ def invocation():
     return pathlib.Path(prog).name
 
 
+def human_at_the_keyboard():
+    """True only when a person is typing: stdin is a TTY. An agent driving
+    the CLI through a subprocess has no TTY and cannot fake one — which is
+    exactly why the loosening actions below key on this. PYTHIA_CI=1 is the
+    documented escape for real pipelines."""
+    if os.environ.get("PYTHIA_CI"):
+        return True
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def forbid_write_flag(argv):
     if "--write" in argv:
         sys.exit(f"There is no --write flag. The write path is `{invocation()} "
@@ -1110,6 +1123,12 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                             {"s": schema, "n": name, "t": otype})
         db_source = "".join(cell(r[0]) for r in rows)
     token = apply_token(otype, name, file_text, db_source)
+    if ns.yes and not human_at_the_keyboard():
+        sys.exit("--yes is the developer's flag, and no terminal is attached "
+                 "to this session.\nAgents preview, relay the diff and the "
+                 "impact verbatim, STOP, and pass --confirm <token> only "
+                 "after the developer's explicit approval in chat.\n"
+                 "(Real pipelines set PYTHIA_CI=1.)")
     confirmed = bool(ns.yes) or ns.confirm == token
     if ns.confirm and ns.confirm != token:
         sys.exit("The confirmation token does not match: the file or the "
@@ -1120,6 +1139,9 @@ def run_apply(conn, schema, ns, file_text, origin=None):
     invalid_before = [(r[0], r[1]) for r in inv_rows]
     meta = {"schema": schema, "connection": ns.conn_name, "group": group,
             "token": token, "applied": False,
+            "confirmed_via": ("yes" if ns.yes else
+                              "token" if confirmed else "preview"),
+            "tty": human_at_the_keyboard(),
             "invalid_before": invalid_before, **(origin or {})}
     entry = write_journal_entry(ns.project_root, otype, name, db_source,
                                 file_text, meta)
@@ -1263,6 +1285,16 @@ def cmd_policy(conn, schema, ns):
                  "values: allow, confirm, deny.")
     if ns.action == "set":
         eff = load_policy(ns.project_root)
+        RANK = {"deny": 0, "confirm": 1, "allow": 2}
+        if (RANK[ns.value] > RANK[eff[ns.group][0]]
+                and not human_at_the_keyboard()):
+            sys.exit(f"Loosening the write policy ({ns.group}: "
+                     f"{eff[ns.group][0]} → {ns.value}) is the developer's "
+                     "decision, and no terminal is attached to this session."
+                     "\nAsk the developer to run this themselves:\n"
+                     f"  {invocation()} policy set {ns.group} {ns.value}\n"
+                     "(Tightening is always allowed; pipelines set "
+                     "PYTHIA_CI=1.)")
         eff[ns.group] = (ns.value, "policy.json")   # validated by argparse choices
         path = policy_path(ns.project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
