@@ -1,0 +1,46 @@
+# Working in this repository / with this tool
+
+pythia is a CLI + skill pack for developing PL/SQL on Oracle Database. If you
+are an AI agent, these are the standing rules; the `skills/` directory
+carries the full workflows.
+
+## Invocation
+
+Run as `python scripts/pythia.py <command>` (or `python3` on most Unix
+systems). Every pythia output prints follow-up commands in the correct,
+paste-able form — prefer running exactly those. `--json` gives structured
+output on any command.
+
+## Standing rules
+
+1. **Ask the database, never the dump.** Repo exports drift (a real audit:
+   all types and packages missing, 89% of indexes). Use `ls / src / args /
+   cols / ddl / grep / plscope` against the live schema.
+2. **Impact before change.** Run `pythia impact <OBJECT>` before proposing
+   any modification. Ten or more dependents, or any cross-schema dependent:
+   show the developer the list before writing code.
+3. **Writes go through `pythia apply` only.** Never `CREATE OR REPLACE`
+   through SQLcl MCP `run-sql`, `sqlplus`, or a driver script — those have
+   no snapshot, no verify, no journal.
+4. **The developer sees every preview.** Relay apply's diff, impact line and
+   warnings verbatim; wait for an explicit go-ahead before `--confirm`.
+5. **Exit codes are the verdict:** `0` clean · `1` refused (relay the reason,
+   do not route around it) · `3` written but broken — never report success;
+   show the errors and the printed restore command.
+6. **Truncation is always announced.** If output lacks a truncation marker,
+   you saw everything; if it has one, say so or fetch the rest.
+7. **Restores are writes.** `journal restore` goes through the same preview
+   and approval as any apply.
+
+## Where things are
+
+- `scripts/pythia.py` — the CLI (stdlib + python-oracledb, thin mode)
+- `queries/*.sql` — every SQL statement the tool runs, reviewable in isolation
+- `skills/` — the seven workflow skills (`plsql-apply` is the write gate)
+- `examples/` — connection config and the least-privilege agent-user setup
+- `tests/` — four suites, no database required; run them before claiming done
+
+## Contributing changes to pythia itself
+
+Follow [CONTRIBUTING.md](CONTRIBUTING.md): TDD, the bind-contract lint, the
+skill lint, and documentation that never contradicts code.

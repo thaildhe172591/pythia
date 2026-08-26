@@ -81,6 +81,20 @@ def test_reference_files_exist_where_promised():
         assert (SKILLS / rel).is_file(), f"missing {rel}"
 
 
+def test_readme_carries_the_required_tables():
+    """The spec's completion criteria: drift table up top, honest-rollback and
+    policy tables present, install channels, under 200 lines."""
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    for needle in ("1,016",                              # drift table, index row
+                   "Flashback Query", "Recycle Bin",     # rollback honesty
+                   "plsql_source", "data_dml",           # policy table
+                   "npx skills add",                     # install channel
+                   "star-history.com",                   # star chart
+                   "MIT"):
+        assert needle in text, f"README missing {needle!r}"
+    assert text.count("\n") + 1 <= 200, "README must stay under 200 lines"
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

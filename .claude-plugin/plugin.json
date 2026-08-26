@@ -1,0 +1,12 @@
+{
+  "name": "pythia",
+  "version": "0.1.0",
+  "description": "PL/SQL development for AI agents on Oracle Database - expert data-dictionary queries, impact analysis, and a snapshot-verified write path with honest rollback.",
+  "author": {
+    "name": "thaild"
+  },
+  "homepage": "https://github.com/thaildhe172591/pythia",
+  "repository": "https://github.com/thaildhe172591/pythia",
+  "license": "MIT",
+  "keywords": ["oracle", "plsql", "database", "agent-skills", "sql"]
+}

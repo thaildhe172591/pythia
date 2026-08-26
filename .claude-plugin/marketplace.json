@@ -1,0 +1,27 @@
+{
+  "name": "pythia",
+  "owner": {
+    "name": "thaild"
+  },
+  "metadata": {
+    "description": "PL/SQL development kit for AI agents on Oracle Database",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "pythia",
+      "source": "./",
+      "description": "Explore Oracle schemas, measure blast radius before changing anything, and write PL/SQL through a snapshot-verified pipeline. Seven skills teach the agent the workflow; the CLI enforces it.",
+      "license": "MIT",
+      "skills": [
+        "./skills/plsql-setup",
+        "./skills/plsql-explore",
+        "./skills/plsql-impact",
+        "./skills/plsql-write",
+        "./skills/plsql-apply",
+        "./skills/plsql-review",
+        "./skills/plsql-skill-author"
+      ]
+    }
+  ]
+}
