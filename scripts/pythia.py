@@ -42,6 +42,7 @@ you always know whether you saw everything.
   pythia journal restore <id>
   pythia policy
   pythia install
+  pythia history MY_PACKAGE
   pythia unistr "Nhóm không được để trống"
   pythia agent-user --save
 """
@@ -631,6 +632,84 @@ def load_settings(root):
         sys.exit(f"Cannot parse {path}: {e}")
 
 
+def source_sha(text):
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def fetch_source(conn, schema, name):
+    """Current source of an object, as ALL_SOURCE holds it. ('', None) when
+    the name is not a source object (a table, say)."""
+    _, rows = run_query(conn, load_query("source.sql"), {"s": schema, "n": name})
+    if not rows:
+        return "", None
+    return "".join(cell(r[2]) for r in rows), rows[0][0]
+
+
+def last_known_state(root, name):
+    """What the database held, as far as the journal knows: the newest entry
+    for this object, and the source that entry says was really there.
+    A preview wrote nothing, so its `before` is the real state."""
+    for eid in list_journal_entries(root):        # newest first
+        e = read_journal_entry(root, eid)
+        m = e["meta"]
+        if str(m.get("object", "")).upper() != name.upper():
+            continue
+        real = e["after"] if (m.get("applied") or m.get("snapshot")) else e["before"]
+        return real, eid, m
+    return None, None, None
+
+
+def auto_snapshot(conn, schema, name, ns):
+    """Capture an object's source the moment an agent focuses on it, so a
+    later hand-edit outside pythia still has something to go back to.
+
+    Silent by design: writing to the journal costs the agent no context, and
+    a line of "snapshot taken" on every read would cost it on every read.
+    The one thing worth saying is drift — the source moved without an apply
+    of ours explaining it — and that goes to stderr, so --json stays clean.
+
+    Returns a drift warning, or None.
+    """
+    root = getattr(ns, "project_root", None)
+    if root is None or not load_settings(root).get("auto_snapshot", True):
+        return None
+    try:
+        text, otype = fetch_source(conn, schema, name)
+        if not text.strip():
+            return None                    # not a source object; nothing to keep
+        known, eid, meta = last_known_state(root, name)
+        if known is not None and source_sha(known) == source_sha(text):
+            return None                    # unchanged — no entry, no output
+        write_journal_entry(root, otype or "OBJECT", name.upper(), text, text,
+                            {"schema": schema, "connection": ns.conn_name,
+                             "snapshot": True, "applied": False,
+                             "sha": source_sha(text)})
+        if known is None:
+            return None                    # first sighting is a baseline
+        rollback = journal_root(root) / eid / "restore.sql"
+        return (f"! {name.upper()} changed outside pythia since {eid}.\n"
+                f"  Rollback file for the previous version: {rollback}\n"
+                f"  All versions: {invocation()} history {name.upper()}")
+    except Exception:                      # noqa: BLE001
+        return None                        # a safety net must never break a read
+
+
+def report_drift(msg):
+    if msg:
+        print(paint(msg, "yellow", color_enabled(sys.stderr)), file=sys.stderr)
+
+
+def journaled_objects(root):
+    names = {}
+    for eid in list_journal_entries(root):        # newest first
+        m = read_journal_entry(root, eid)["meta"]
+        n = str(m.get("object", "")).upper()
+        if n and n != "STATEMENT" and n not in names:
+            names[n] = eid[:19]                   # the entry's timestamp
+    return names
+
+
 def undo_group_action(ns):
     """Undoing a CREATE is a DROP, which is `structural` — so the policy on
     that group decides whether the restore command we print can run."""
@@ -827,6 +906,43 @@ def cmd_check(conn, schema, ns):
     if warn:
         print("\n" + paint(warn, "yellow", color_enabled(sys.stderr)),
               file=sys.stderr)
+    report_drift(drift_summary(conn, schema, ns))
+
+
+def drift_summary(conn, schema, ns):
+    """One line, only when objects pythia knows have moved since it last saw
+    them. Uses LAST_DDL_TIME — a single query for every journaled object,
+    instead of re-reading every source.
+    ponytail: LAST_DDL_TIME also ticks on a bare recompile, so this is a
+    'go look' signal; `history` and the src/impact hash comparison are the
+    precise ones."""
+    root = getattr(ns, "project_root", None)
+    if root is None:
+        return None
+    try:
+        known = journaled_objects(root)
+        if not known:
+            return None
+        names = sorted(known)[:200]        # one query, bounded
+        binds = {"s": schema}
+        placeholders = []
+        for i, n in enumerate(names):
+            binds[f"n{i}"] = n
+            placeholders.append(f":n{i}")
+        _, rows = run_query(
+            conn, "select object_name, to_char(last_ddl_time,"
+            "'yyyy-mm-dd\"T\"hh24-mi-ss') from all_objects "
+            f"where owner = :s and object_name in ({','.join(placeholders)})",
+            binds)
+        moved = [r[0] for r in rows if str(r[1]) > known.get(str(r[0]), "")]
+        if not moved:
+            return None
+        shown = ", ".join(moved[:3]) + ("…" if len(moved) > 3 else "")
+        return (f"! {len(moved)} object(s) changed since pythia last saw them: "
+                f"{shown}\n  Versions and restores: {invocation()} history "
+                f"<NAME>")
+    except Exception:                      # noqa: BLE001
+        return None
 
 
 def cmd_ls(conn, schema, ns):
@@ -846,8 +962,10 @@ def cmd_src(conn, schema, ns):
     if not rows:
         sys.exit(f"No source found for {ns.name!r} in schema {schema}.")
     total = len(rows)
+    drift = auto_snapshot(conn, schema, ns.name, ns)
     shown, truncated = clip(rows, ns.max_lines, ns.offset)
     emit_source(ns, shown, truncated, total)
+    report_drift(drift)
 
 
 def cmd_args(conn, schema, ns):
@@ -955,19 +1073,26 @@ def cmd_deps(conn, schema, ns):
 def cmd_impact(conn, schema, ns):
     cols, rows = run_query(conn, load_query("impact.sql"),
                            {"s": schema, "n": ns.name, "depth": ns.depth})
+    # impact is mandatory before any change, so it is the surest "about to
+    # touch this" signal there is — the best possible place to capture a
+    # before-state the developer never had to ask for
+    drift = auto_snapshot(conn, schema, ns.name, ns)
     shown, truncated = clip(rows, ns.limit)
     if ns.json:
         print(json_envelope(ns.command, ns.conn_name, ns.schema, cols, shown, truncated,
                             summary=impact_summary(rows)))
+        report_drift(drift)
         return
     if not rows:
         print(f"-- nothing depends on {ns.name.upper()} "
               f"(within {schema}, depth {ns.depth})")
+        report_drift(drift)
         return
     sys.stdout.write(render_tree(shown, f"{schema}.{ns.name.upper()}"))
     if truncated:
         print(f"-- truncated at {len(shown)} rows (raise --limit, or --limit 0 for no cap)")
     print(impact_summary(rows))
+    report_drift(drift)
 
 
 def cmd_similar(conn, schema, ns):
@@ -1351,6 +1476,48 @@ def cmd_policy(conn, schema, ns):
     print(ROLLBACK_TABLE)
 
 
+def cmd_history(conn, schema, ns):
+    """Every version of one object the journal holds, newest first. Compact
+    on purpose — an agent reads this to choose an id, not to read source."""
+    root = ns.project_root
+    name = ns.name.upper()
+    rows = []
+    for eid in list_journal_entries(root):
+        e = read_journal_entry(root, eid)
+        m = e["meta"]
+        if str(m.get("object", "")).upper() != name:
+            continue
+        real = e["after"] if (m.get("applied") or m.get("snapshot")) else e["before"]
+        kind = ("applied" if m.get("applied") else
+                "snapshot" if m.get("snapshot") else "preview")
+        rows.append({"entry": eid, "kind": kind,
+                     "lines": len(real.splitlines()),
+                     "sha": source_sha(real),
+                     "rollback_file": str(journal_root(root) / eid
+                                          / "restore.sql")})
+    if ns.json:
+        print(json.dumps({"object": name, "versions": rows}))
+        return
+    if not rows:
+        print(f"-- no journal history for {name}. It is captured the first "
+              f"time you run `{invocation()} src {name}` or "
+              f"`{invocation()} impact {name}`.")
+        return
+    prev = None
+    for r in rows:                       # newest first; compare to the older one
+        older = rows[rows.index(r) + 1] if rows.index(r) + 1 < len(rows) else None
+        delta = ""
+        if older and older["sha"] != r["sha"]:
+            n = r["lines"] - older["lines"]
+            delta = f"  {n:+d} lines" if n else "  content changed"
+        print(f"  {r['entry']:<44} {r['kind']:<9} {r['lines']:>5} lines{delta}")
+        prev = r
+    print(f"\n-- every version above has a ready-to-run rollback file:")
+    print(f"     {journal_root(root)}\\<entry>\\restore.sql")
+    print(f"-- through pythia (previews first, you approve):")
+    print(f"     {invocation()} journal restore <entry>")
+
+
 def cmd_journal(conn, schema, ns):
     root = ns.project_root
     if ns.action == "list":
@@ -1370,14 +1537,17 @@ def cmd_journal(conn, schema, ns):
         import shutil
         removed = 0
         for eid in list_journal_entries(root):
-            if not read_journal_entry(root, eid)["meta"].get("applied"):
-                shutil.rmtree(journal_root(root) / eid)
-                removed += 1
+            meta = read_journal_entry(root, eid)["meta"]
+            if meta.get("applied") or meta.get("snapshot"):
+                continue      # applied = a real write; snapshot = the only
+                              # undo a hand-edit outside pythia will ever have
+            shutil.rmtree(journal_root(root) / eid)
+            removed += 1
         if ns.json:
             print(json.dumps({"pruned": removed}))
         else:
-            print(f"-- pruned {removed} preview-only entries; applied entries "
-                  "(the real snapshots) are all kept")
+            print(f"-- pruned {removed} preview-only entries; applied "
+                  "entries and snapshots are all kept")
         return
     if not ns.id:
         sys.exit(f"Usage: {invocation()} journal "
@@ -1752,9 +1922,11 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
             "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
             "conventions": cmd_conventions, "install": cmd_install,
-            "unistr": cmd_unistr, "agent-user": cmd_agent_user}
+            "unistr": cmd_unistr, "agent-user": cmd_agent_user,
+            "history": cmd_history}
 
-NO_DB_COMMANDS = {"policy", "journal", "conventions", "install", "unistr"}
+NO_DB_COMMANDS = {"policy", "journal", "conventions", "install", "unistr",
+                  "history"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -1860,6 +2032,10 @@ def build_parser():
     s.add_argument("--save", action="store_true",
                    help="add the new credential as <conn>_agent and make it "
                         "the default connection")
+    s = sub.add_parser("history", parents=[common()],
+                       help="every captured version of one object, newest "
+                            "first — pick one to restore")
+    s.add_argument("name")
     s = sub.add_parser("unistr", parents=[common()],
                        help="Oracle unistr('...') literal for non-ASCII text "
                             "(Vietnamese messages stay exact)")

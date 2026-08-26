@@ -687,6 +687,81 @@ def test_report_admits_a_created_objects_undo_is_blocked():
         assert "will be refused" not in buf.getvalue().lower()
 
 
+def test_auto_snapshot_captures_silently_and_writes_a_rollback_file():
+    """Every captured version leaves a runnable rollback file — that is the
+    whole point for work done by hand, outside pythia. And capturing costs
+    the agent no context: nothing is printed when nothing moved."""
+    import argparse
+    import contextlib
+    import io
+    src = "PROCEDURE P_X AS\nBEGIN\n  NULL;\nEND;\n"
+    script = {"from all_source": ([("TYPE", "LINE", "TEXT")],
+                                  [("PROCEDURE", i + 1, ln + "\n")
+                                   for i, ln in enumerate(src.splitlines())])}
+    with tempfile.TemporaryDirectory() as td:
+        ns = argparse.Namespace(project_root=td, conn_name="DEV")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            drift = pythia.auto_snapshot(FakeConn(script), "APP", "P_X", ns)
+        assert drift is None                      # first sighting: a baseline
+        assert buf.getvalue() == ""               # and not one token of output
+        ids = pythia.list_journal_entries(td)
+        assert len(ids) == 1
+        e = pythia.read_journal_entry(td, ids[0])
+        assert e["meta"]["snapshot"] is True
+        rollback = e["restore"]
+        assert rollback.startswith("CREATE OR REPLACE PROCEDURE P_X")
+        assert (pythia.journal_root(td) / ids[0] / "restore.sql").is_file()
+
+        # reading it again unchanged must not create a second entry
+        assert pythia.auto_snapshot(FakeConn(script), "APP", "P_X", ns) is None
+        assert pythia.list_journal_entries(td) == ids
+
+
+def test_auto_snapshot_reports_drift_and_keeps_the_old_rollback():
+    """Source moved with no apply of ours behind it — say so once, and point
+    at the rollback file for the version that was there before."""
+    import argparse
+    old_src = "PROCEDURE P_X AS\nBEGIN\n  NULL;\nEND;\n"
+    new_src = "PROCEDURE P_X AS\nBEGIN\n  other_thing;\nEND;\n"
+
+    def script(text):
+        return {"from all_source": ([("TYPE", "LINE", "TEXT")],
+                                    [("PROCEDURE", i + 1, ln + "\n")
+                                     for i, ln in enumerate(text.splitlines())])}
+    with tempfile.TemporaryDirectory() as td:
+        ns = argparse.Namespace(project_root=td, conn_name="DEV")
+        pythia.auto_snapshot(FakeConn(script(old_src)), "APP", "P_X", ns)
+        first = pythia.list_journal_entries(td)[0]
+        drift = pythia.auto_snapshot(FakeConn(script(new_src)), "APP", "P_X", ns)
+        assert drift and "changed outside pythia" in drift
+        assert "restore.sql" in drift
+        # the older version's rollback is still on disk and still runnable
+        old_rollback = pythia.read_journal_entry(td, first)["restore"]
+        assert "NULL;" in old_rollback
+        assert len(pythia.list_journal_entries(td)) == 2
+
+
+def test_prune_never_eats_a_snapshot():
+    import argparse
+    import contextlib
+    import io
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        base = datetime.datetime(2026, 8, 27, 9, 0, 0)
+        pythia.write_journal_entry(td, "PROCEDURE", "P_A", "a", "b",
+                                   {"applied": False}, now=base)
+        snap = pythia.write_journal_entry(
+            td, "PROCEDURE", "P_B", "a", "a", {"snapshot": True,
+                                               "applied": False},
+            now=base.replace(minute=1))
+        ns = argparse.Namespace(action="prune", project_root=td, json=False,
+                                id=None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            pythia.cmd_journal(None, None, ns)
+        assert pythia.list_journal_entries(td) == [snap]
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

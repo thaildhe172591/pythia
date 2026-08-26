@@ -101,12 +101,18 @@ and WSL are all CI-tested.
 | `src` source, compiler line numbers | `errors` compile errors, line:col | `policy` show · set |
 | `args` signatures | `invalid` everything broken | `unistr` exact non-ASCII literals |
 | `ddl` via DBMS_METADATA | `plscope` exact identifier usages | `agent-user` least-privilege setup |
-| `cols` columns + types | `similar` programs named like this | |
+| `cols` columns + types | `similar` programs named like this | `history` every captured version |
 | `grep` search all source | | |
 | `sql` free query (SELECT/WITH only) | | |
 
 Every command takes `--json` (machine output), `--conn` (pick a connection), and
 caps output with explicit truncation markers so context windows stay intact.
+
+**The safety net covers hand edits too**: `src` and `impact` snapshot the
+object silently into the journal, each with a runnable rollback file, so a
+change made later in SQL Developer still has something to go back to —
+`pythia history <OBJECT>` lists the versions. Source that moved with no
+apply behind it is reported as drift.
 
 **Your house style is config, not folklore**: put naming patterns in
 `.pythia/conventions.json` and apply previews warn when a new object's name

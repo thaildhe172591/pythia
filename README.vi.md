@@ -125,13 +125,19 @@ gợi ý mà nó in ra luôn khớp với cách bạn gọi. Windows, macOS, Lin
 | `src` source, đúng số dòng compiler | `errors` lỗi biên dịch kèm dòng:cột | `policy` xem · sửa |
 | `args` tham số của procedure | `invalid` mọi object đang hỏng | `unistr` chuỗi tiếng Việt chuẩn |
 | `cols` cột và kiểu dữ liệu | `plscope` chỗ nào dùng identifier này | `agent-user` tạo user least-privilege |
-| `ddl` lấy DDL qua DBMS_METADATA | `similar` chương trình tên tương tự | |
+| `ddl` lấy DDL qua DBMS_METADATA | `similar` chương trình tên tương tự | `history` các bản đã chụp |
 | `grep` tìm chuỗi trong toàn bộ source | | |
 | `sql` truy vấn tự do (chỉ SELECT/WITH) | | |
 
 Lệnh nào cũng có `--json` (cho máy đọc) và `--conn` (chọn kết nối). Output
 luôn bị giới hạn độ dài kèm dấu báo đã cắt, để không nuốt hết context window
 của agent.
+
+**Lưới an toàn phủ cả việc sửa tay**: `src` và `impact` tự chụp source của
+object vào journal — im lặng, kèm file rollback chạy được — nên một thay đổi
+sau đó bằng SQL Developer vẫn có chỗ để quay về. `pythia history <OBJECT>`
+liệt kê các bản đã chụp. Source đổi mà không có `apply` nào đứng sau thì bị
+báo là drift.
 
 **Quy ước đặt tên nên là config, đừng để truyền miệng.** Viết pattern đặt
 tên vào `.pythia/conventions.json` — preview khi apply sẽ cảnh báo nếu tên

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.0 — 2026-08-27
+
+**The safety net now covers work done by hand.** Until now the journal only
+held what went through `pythia apply` — so a developer editing in SQL
+Developer, or an agent restricted to read-only exploration, had no snapshot
+and no rollback at all, while the docs implied otherwise.
+
+- **Automatic snapshots.** `src` and `impact` capture the object's current
+  source into the journal. `impact` is already mandatory before any change,
+  so the capture happens exactly when it matters without anyone having to
+  remember a command. Content-hashed: reading an unchanged object writes
+  nothing.
+- **Costs the agent no context.** Capturing is completely silent. The only
+  thing ever printed is drift, and it goes to stderr, so `--json` stays
+  parseable.
+- **Drift detection falls out of the same mechanism.** Source that moved
+  with no apply of ours behind it means someone changed it outside pythia:
+  `src` and `impact` say so on the spot, and `check` summarises it in one
+  line using `LAST_DDL_TIME` (one query, not one per object).
+- **`pythia history <OBJECT>`** — every captured version, newest first, with
+  the ready-to-run rollback file for each. That is the index for choosing
+  what to go back to.
+- **Every version carries a rollback file.** `restore.sql` is written for
+  snapshots as well as applies — a plain `CREATE OR REPLACE` you can hand a
+  DBA when pythia is not in the loop.
+- **`journal prune` no longer eats snapshots** — for a hand-edit they are
+  the only undo that exists.
+- Opt out with `{"auto_snapshot": false}` in `.pythia/settings.json`.
+
 ## 0.3.5 — 2026-08-27
 
 - **A skill silently lost its trigger.** The 0.3.3 rewrite put an unquoted
