@@ -394,6 +394,22 @@ def test_preview_hint_is_pasteable():
         assert "python scripts/pythia.py apply f.sql --confirm " in buf.getvalue()
 
 
+def test_preview_diff_ignores_the_create_header():
+    """ALL_SOURCE never stores the CREATE OR REPLACE header, so a file
+    identical to the database must not show a phantom two-line change."""
+    import contextlib
+    import io
+    file_text = "CREATE OR REPLACE PACKAGE BODY pkg_order AS\n  old line;\nEND;\n/\n"
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())          # db source == the same body
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql"), file_text)
+        out = buf.getvalue()
+        assert "no source change" in out
+        assert "lines changed" not in out
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

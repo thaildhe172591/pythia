@@ -924,8 +924,11 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                                 {"s": schema, "n": name, "depth": ns.depth})
         summary = impact_summary(dep_rows)
 
-    # 3. PREVIEW
-    diff_text, changed = render_diff(db_source, stmt)
+    # 3. PREVIEW — diff like against like: ALL_SOURCE never stores the
+    # CREATE OR REPLACE header, so prepend it before comparing, or an
+    # unchanged object would show a phantom two-line change forever.
+    base = ("CREATE OR REPLACE " + db_source) if db_source.strip() else ""
+    diff_text, changed = render_diff(base, stmt)
     warn = privilege_warning(conn, schema, ns.conn_user)
     if ns.json:
         print(json.dumps({"ok": True, "object": name, "type": otype,
@@ -933,7 +936,12 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                           "summary": summary, "warning": warn, "token": token,
                           "journal": entry, "will_apply": confirmed}))
     else:
-        head = "new object" if created else f"{changed} lines changed"
+        if created:
+            head = "new object"
+        elif changed == 0:
+            head = "no source change (recompile)"
+        else:
+            head = f"{changed} lines changed"
         print(f"\n  {name} ({otype}) in {schema} — {head}")
         if summary:
             print(f"  {summary.lstrip('- ')}")
