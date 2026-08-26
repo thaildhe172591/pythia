@@ -75,6 +75,35 @@ def test_impact_summary_counts_unique_objects():
         "-- impact: 0 dependent objects, 0 currently VALID"
 
 
+def test_rank_similar_orders_by_shared_name_tokens():
+    cands = [("PKG_ORDER_TOTAL_IN", "PROCEDURE", "VALID", "2026-01-01"),
+             ("PKG_ORDER_TOTAL_LIST_CT", "PROCEDURE", "VALID", "2026-01-02"),
+             ("HT_CODE_MAP", "PROCEDURE", "VALID", "2026-01-03"),
+             ("PKG_ORDER_TOTAL_LIST", "PROCEDURE", "VALID", "2026-01-04")]
+    out = pythia.rank_similar("PKG_ORDER_TOTAL_LIST", cands)
+    assert [r[0] for r in out] == ["PKG_ORDER_TOTAL_LIST_CT", "PKG_ORDER_TOTAL_IN"]
+    # self-match dropped, zero-overlap dropped, most shared tokens first
+    assert out[0][-1] == "LIST ORDER PKG TOTAL"     # why it matched, sorted
+    assert out[0][1] == "PROCEDURE"                 # original columns preserved
+
+
+def test_rank_similar_is_case_insensitive_and_breaks_ties_by_name():
+    out = pythia.rank_similar("pkg_order_calc",
+                              [("PKG_ORDER_TOTAL", "PACKAGE", "VALID", "2026-01-01"),
+                               ("PKG_ORDER_ITEM", "PACKAGE", "VALID", "2026-01-01")])
+    assert [r[0] for r in out] == ["PKG_ORDER_ITEM", "PKG_ORDER_TOTAL"]
+    assert pythia.rank_similar("ANYTHING", []) == []
+
+
+def test_per_command_limit_default_does_not_leak():
+    """argparse shares parent actions between subparsers, so a per-command
+    default set on one can silently change every other command's default."""
+    p = pythia.build_parser()
+    assert p.parse_args(["similar", "X"]).limit == 20   # short list of examples
+    assert p.parse_args(["ls", "X"]).limit == 200       # unchanged by similar
+    assert p.parse_args(["grep", "X"]).limit == 200
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

@@ -32,6 +32,7 @@ you always know whether you saw everything.
   pythia errors MY_PACKAGE
   pythia deps MY_PACKAGE --depth 2
   pythia impact MY_TABLE
+  pythia similar PKG_ORDER_TOTAL_LIST
 """
 import argparse
 import json
@@ -55,6 +56,7 @@ QUERY_BINDS = {
     "compile-errors.sql": {"s", "n"},
     "dependencies.sql": {"s", "n", "depth"},
     "impact.sql": {"s", "n", "depth"},
+    "similar-candidates.sql": {"s"},
 }
 
 
@@ -233,6 +235,25 @@ def impact_summary(rows):
         seen[(owner, name, otype)] = status
     valid = sum(1 for s in seen.values() if s == "VALID")
     return f"-- impact: {len(seen)} dependent objects, {valid} currently VALID"
+
+
+def rank_similar(target, candidates):
+    """candidates: (object_name, object_type, status, last_ddl). A codebase's
+    naming convention lives in the underscore-separated tokens of its names, so
+    shared tokens are the cheapest honest signal of 'written the same way'.
+    Returns each match with the shared tokens appended, best first."""
+    target = str(target).upper()
+    want = {t for t in target.split("_") if t}
+    scored = []
+    for row in candidates:
+        name = str(row[0]).upper()
+        if name == target:
+            continue
+        shared = want & {t for t in name.split("_") if t}
+        if shared:
+            scored.append((len(shared), name, (*row, " ".join(sorted(shared)))))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [row for _score, _name, row in scored]
 
 
 def json_envelope(command, connection, schema, cols, rows, truncated, **extra):
@@ -470,67 +491,86 @@ def cmd_impact(conn, schema, ns):
     print(impact_summary(rows))
 
 
+def cmd_similar(conn, schema, ns):
+    cols, rows = run_query(conn, load_query("similar-candidates.sql"), {"s": schema})
+    ranked = rank_similar(ns.name, rows)
+    shown, truncated = clip(ranked, ns.limit)
+    if not shown and not ns.json:
+        print(f"-- nothing in {schema} shares a name token with {ns.name.upper()}")
+        return
+    emit_table(ns, [*cols, "MATCHED_TOKENS"], shown, truncated)
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
-            "impact": cmd_impact}
+            "impact": cmd_impact, "similar": cmd_similar}
 
 
 # --- CLI ---------------------------------------------------------------------
 
 def build_parser():
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--conn", help="connection name from connections.json")
-    common.add_argument("--json", action="store_true", help="machine-readable output")
-    common.add_argument("--limit", type=int, default=200,
-                        help="max rows for list output, 0 = no cap (default 200)")
-    common.add_argument("--max-lines", type=int, default=2000, dest="max_lines",
-                        help="max source/DDL lines, 0 = no cap (default 2000)")
-    common.add_argument("--offset", type=int, default=0,
-                        help="skip N lines/rows first (continue truncated output)")
-    common.add_argument("--raw", action="store_true",
-                        help="plain text, no line numbers or unit headers")
+    def common():
+        """A fresh set of shared options per subcommand. argparse's `parents`
+        shares the very same action objects, so one subcommand's set_defaults
+        would otherwise rewrite every other subcommand's default."""
+        c = argparse.ArgumentParser(add_help=False)
+        c.add_argument("--conn", help="connection name from connections.json")
+        c.add_argument("--json", action="store_true", help="machine-readable output")
+        c.add_argument("--limit", type=int, default=200,
+                       help="max rows for list output, 0 = no cap (default 200)")
+        c.add_argument("--max-lines", type=int, default=2000, dest="max_lines",
+                       help="max source/DDL lines, 0 = no cap (default 2000)")
+        c.add_argument("--offset", type=int, default=0,
+                       help="skip N lines/rows first (continue truncated output)")
+        c.add_argument("--raw", action="store_true",
+                       help="plain text, no line numbers or unit headers")
+        return c
 
     p = argparse.ArgumentParser(
         prog="pythia", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
-    sub.add_parser("check", parents=[common],
+    sub.add_parser("check", parents=[common()],
                    help="connectivity + object counts for the schema")
-    s = sub.add_parser("ls", parents=[common], help="find objects by name pattern")
+    s = sub.add_parser("ls", parents=[common()], help="find objects by name pattern")
     s.add_argument("pattern", help="LIKE pattern, e.g. \"PKG_%%\"")
-    s = sub.add_parser("src", parents=[common],
+    s = sub.add_parser("src", parents=[common()],
                        help="PL/SQL source with Oracle line numbers")
     s.add_argument("name")
     s.add_argument("--body", action="store_true", help="only *BODY units")
     s.add_argument("--spec", action="store_true", help="only spec units")
-    s = sub.add_parser("args", parents=[common], help="procedure/function signature")
+    s = sub.add_parser("args", parents=[common()], help="procedure/function signature")
     s.add_argument("name")
-    s = sub.add_parser("ddl", parents=[common], help="DDL via DBMS_METADATA")
+    s = sub.add_parser("ddl", parents=[common()], help="DDL via DBMS_METADATA")
     s.add_argument("type", help="e.g. TABLE, INDEX, VIEW, PACKAGE_BODY")
     s.add_argument("name")
-    s = sub.add_parser("cols", parents=[common], help="columns and data types")
+    s = sub.add_parser("cols", parents=[common()], help="columns and data types")
     s.add_argument("name")
-    s = sub.add_parser("grep", parents=[common], help="search all PL/SQL source")
+    s = sub.add_parser("grep", parents=[common()], help="search all PL/SQL source")
     s.add_argument("pattern")
-    s = sub.add_parser("sql", parents=[common], help="free query (SELECT/WITH only)")
+    s = sub.add_parser("sql", parents=[common()], help="free query (SELECT/WITH only)")
     s.add_argument("statement", nargs="+")
-    sub.add_parser("invalid", parents=[common],
+    sub.add_parser("invalid", parents=[common()],
                    help="every INVALID object in the schema")
-    s = sub.add_parser("errors", parents=[common],
+    s = sub.add_parser("errors", parents=[common()],
                        help="compilation errors with line and column")
     s.add_argument("name", nargs="?", default=None,
                    help="object name; omit for every object in the schema")
-    s = sub.add_parser("deps", parents=[common],
+    s = sub.add_parser("deps", parents=[common()],
                        help="what an object depends on")
     s.add_argument("name")
     s.add_argument("--depth", type=int, default=3,
                    help="levels to walk (default 3)")
-    s = sub.add_parser("impact", parents=[common],
+    s = sub.add_parser("impact", parents=[common()],
                        help="what depends on an object — run this before changing it")
     s.add_argument("name")
     s.add_argument("--depth", type=int, default=3,
                    help="levels to walk (default 3)")
+    s = sub.add_parser("similar", parents=[common()],
+                       help="programs named like this one — copy their conventions")
+    s.add_argument("name")
+    s.set_defaults(limit=20)
     return p
 
 
