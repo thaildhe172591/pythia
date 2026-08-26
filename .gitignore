@@ -13,6 +13,8 @@ NOTES-research.md
 
 # Agent-installed skill copies (the canonical pack lives in skills/)
 .claude/
+.agents/
+skills-lock.json
 
 # Python
 __pycache__/
