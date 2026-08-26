@@ -80,6 +80,15 @@ disposable artifacts (they are gitignored).
 3. Wire a command or use it from an existing one; reuse `emit_table`/`clip`.
 4. Run the suites; smoke-test against a real dev schema before the PR.
 
+## Testing the skills themselves
+
+`tests/*.py` prove the CLI. The skills are shipped artifacts too, and the
+only thing that proves them is an agent's behaviour — so
+[`tests/agent-conformance.md`](tests/agent-conformance.md) is a set of chat
+scenarios, each written to tempt an agent into breaking exactly one rule,
+with observable PASS/FAIL criteria. Run it after any change to `skills/`
+or to the approval gates.
+
 ## Adding or changing a skill
 
 1. Declare it in `EXPECTED` in `tests/test_phase5.py` (new skills).
