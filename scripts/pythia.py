@@ -41,6 +41,7 @@ you always know whether you saw everything.
   pythia journal list
   pythia journal restore <id>
   pythia policy
+  pythia install
 """
 import argparse
 import json
@@ -54,7 +55,16 @@ CONFIG_DIR = ".pythia"
 CONFIG_NAME = "connections.json"
 INT_MAX = 2147483647
 
-QUERY_DIR = pathlib.Path(__file__).resolve().parent.parent / "queries"
+def _pack_dir(source_name, installed_name):
+    """Repo layout first (reviewable dirs next to scripts/), wheel layout
+    second (package data installed beside this module)."""
+    here = pathlib.Path(__file__).resolve().parent
+    source = here.parent / source_name
+    return source if source.is_dir() else here / installed_name
+
+
+QUERY_DIR = _pack_dir("queries", "pythia_queries")
+SKILLS_DIR = _pack_dir("skills", "pythia_skills")
 
 # Bind contract: what each query file is allowed to use. tests/test_phase2.py
 # fails on any drift in either direction — that is how queries/ stays reviewable
@@ -176,6 +186,11 @@ def invocation():
     """How to invoke this tool, exactly as the user actually ran it. Every
     printed command must be paste-able: a bare `pythia ...` is
     CommandNotFound for anyone running from source."""
+    main_spec = getattr(sys.modules.get("__main__"), "__spec__", None)
+    if getattr(main_spec, "name", "") == "pythia":
+        # `python -m pythia` — argv[0] is the module's site-packages path,
+        # which nobody typed; the -m form is the paste-able one
+        return f"{pathlib.Path(sys.executable).stem} -m pythia"
     prog = sys.argv[0] or "pythia"
     if prog.lower().endswith(".py"):
         # the interpreter actually running us: "python3" on most Linux/macOS,
@@ -1285,14 +1300,107 @@ def cmd_conventions(conn, schema, ns):
         print(f"\nProse rules for agents: {md}")
 
 
+DEFAULT_SKILLS_SOURCE = "thaildhe172591/pythia"
+
+# Kept byte-identical to examples/connections.example.json —
+# tests/test_install.py fails on any drift.
+CONNECTIONS_TEMPLATE = """{
+  "default": "dev",
+
+  "dev": {
+    "host": "",
+    "port": 1521,
+    "service_name": "",
+    "sid": "",
+    "dsn": "",
+    "user": "",
+    "password": "",
+    "schema": ""
+  },
+  "staging": {
+    "host": "",
+    "port": 1521,
+    "service_name": "",
+    "sid": "",
+    "dsn": "",
+    "user": "",
+    "password": "",
+    "schema": ""
+  }
+}
+"""
+
+
+def scaffold_config(root):
+    """Create .pythia/connections.json from the template. An existing file is
+    never touched — it may hold real credentials."""
+    path = pathlib.Path(root) / CONFIG_DIR / CONFIG_NAME
+    if path.is_file():
+        return path, False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(CONNECTIONS_TEMPLATE, encoding="utf-8")
+    return path, True
+
+
+def run_skills_add(source, interactive=False):
+    """Install the skill pack via the skills CLI. Returns its exit code, or
+    None when npx is absent — the caller then copies the bundled pack, so a
+    machine with only Python still gets the whole kit. At a TTY the CLI's own
+    interactive agent picker is left on; piped/CI runs get -y."""
+    import shutil
+    import subprocess
+    npx = shutil.which("npx")
+    if npx is None:
+        return None
+    cmd = [npx, "skills", "add", source]
+    if not interactive:
+        cmd.append("-y")
+    return subprocess.run(cmd).returncode
+
+
+def copy_bundled_skills(root):
+    """No-Node fallback: copy the wheel-bundled pack into the two
+    conventional project layouts — Claude Code and the universal .agents one
+    (Codex, Cursor, Copilot, Gemini CLI and friends all read it)."""
+    import shutil
+    targets = []
+    for rel in (".claude/skills", ".agents/skills"):
+        dest_root = pathlib.Path(root) / rel
+        for pack in sorted(SKILLS_DIR.iterdir()):
+            if not (pack / "SKILL.md").is_file():
+                continue
+            shutil.copytree(pack, dest_root / pack.name, dirs_exist_ok=True)
+        targets.append(dest_root)
+    return targets
+
+
+def cmd_install(conn, schema, ns):
+    en = getattr(ns, "color", False)
+    if en:
+        sys.stdout.write(banner(en))
+    path, created = scaffold_config(ns.project_root)
+    print(f"{'Created' if created else 'Kept existing'} {path}")
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    code = run_skills_add(ns.source, interactive)
+    if code is None:
+        for t in copy_bundled_skills(ns.project_root):
+            print(f"Copied the bundled skill pack into {t}")
+        print("(npx not found — with Node.js, `npx skills add` reaches 77 "
+              "agents with symlinked updates.)")
+    elif code:
+        sys.exit(code)
+    print(f"\nNext: fill in {path}")
+    print(f"Then: {invocation()} check")
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
             "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
-            "conventions": cmd_conventions}
+            "conventions": cmd_conventions, "install": cmd_install}
 
-NO_DB_COMMANDS = {"policy", "journal", "conventions"}
+NO_DB_COMMANDS = {"policy", "journal", "conventions", "install"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -1391,6 +1499,11 @@ def build_parser():
                    help="impact depth for the preview (default 3)")
     sub.add_parser("conventions", parents=[common()],
                    help="show the project's house-style naming patterns")
+    s = sub.add_parser("install", parents=[common()],
+                       help="install the skill pack and scaffold .pythia/ config")
+    s.add_argument("--source", default=DEFAULT_SKILLS_SOURCE,
+                   help="skills repo for `npx skills add` "
+                        f"(default {DEFAULT_SKILLS_SOURCE})")
     return p
 
 

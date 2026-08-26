@@ -22,3 +22,8 @@ skills-lock.json
 # Python
 __pycache__/
 *.pyc
+
+# Packaging build artifacts
+build/
+dist/
+*.egg-info/

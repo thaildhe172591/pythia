@@ -6,8 +6,8 @@ carries the full workflows.
 
 ## Invocation
 
-Run as `python scripts/pythia.py <command>` (or `python3` on most Unix
-systems). Every pythia output prints follow-up commands in the correct,
+Run as `pythia <command>` when installed from pip (`pip install
+pythia-plsql`), or `python scripts/pythia.py <command>` from a clone. Every pythia output prints follow-up commands in the correct,
 paste-able form — prefer running exactly those. `--json` gives structured
 output on any command.
 

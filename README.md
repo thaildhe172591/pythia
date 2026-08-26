@@ -48,23 +48,26 @@ previewed; exit codes make honesty machine-readable
 ## Install
 
 ```bash
-# 1. skills into your agent (Claude Code, Codex, Cursor, ...)
-npx skills add thaildhe172591/pythia
-
-# or as a Claude Code plugin
-/plugin marketplace add thaildhe172591/pythia
-
-# 2. the CLI (thin driver — no Oracle Instant Client needed)
-git clone https://github.com/thaildhe172591/pythia && cd pythia
-pip install oracledb
-
-# 3. connection + verify
-cp examples/connections.example.json .pythia/connections.json   # then fill it in
-python scripts/pythia.py check
+npx pythia-plsql           # everything: pip install + skills picker + config scaffold
 ```
 
-Tip: `alias pythia="python3 scripts/pythia.py"` (macOS/Linux) makes every example
-below paste-able as written. Windows, macOS, Linux and WSL are all CI-tested.
+Or the same thing piecewise:
+
+```bash
+pip install pythia-plsql   # the CLI (thin driver — no Oracle Instant Client needed)
+pythia install             # skills into your agent + .pythia/connections.json scaffold
+pythia check               # fill in connections.json first, then verify
+```
+
+The pip package is the whole kit: with Node.js present, `pythia install`
+runs `npx skills add` (77 agents, symlinked updates; `--source <git-url>`
+for internal mirrors) — without Node it copies the bundled skill pack into
+`.claude/skills/` and `.agents/skills/`. Skills alone: `npx skills add
+thaildhe172591/pythia`, or `/plugin marketplace add thaildhe172591/pythia`.
+
+Running from a clone works too — `python scripts/pythia.py <command>`; every
+printed follow-up command matches how you invoked it. Windows, macOS, Linux
+and WSL are all CI-tested.
 
 ## Commands
 

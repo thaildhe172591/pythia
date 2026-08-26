@@ -13,8 +13,10 @@ SQLcl MCP last (optional, reads only).
 
 ## 1. Connection
 
-Create `.pythia/connections.json` at the project root — copy
-`examples/connections.example.json` and fill it in. Rules pythia applies:
+Create `.pythia/connections.json` at the project root — `pythia install`
+scaffolds it (pip installs: `pip install pythia-plsql`), or copy
+`examples/connections.example.json` from a clone. Fill it in. Rules pythia
+applies:
 
 - One entry: used as-is. Several entries: the path segment directly under the
   project root picks one (`root/DEV/...` → `DEV`), else the entry named by a
