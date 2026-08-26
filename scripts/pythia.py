@@ -30,6 +30,7 @@ you always know whether you saw everything.
   pythia sql  "select count(*) from all_views where owner = user"
   pythia invalid
   pythia errors MY_PACKAGE
+  pythia deps MY_PACKAGE --depth 2
 """
 import argparse
 import json
@@ -51,6 +52,7 @@ QUERY_DIR = pathlib.Path(__file__).resolve().parent.parent / "queries"
 QUERY_BINDS = {
     "invalid-objects.sql": {"s"},
     "compile-errors.sql": {"s", "n"},
+    "dependencies.sql": {"s", "n", "depth"},
 }
 
 
@@ -205,6 +207,17 @@ def format_errors(rows):
             out.append(f"{name} ({otype})\n")
             seen = (name, otype)
         out.append(f"  {line}:{pos} {attr} {str(text).strip()}\n")
+    return "".join(out)
+
+
+def render_tree(rows, root):
+    """rows: (lvl, owner, name, type, ...) in hierarchical order; trailing
+    columns are ignored so deps and impact share one renderer. The same object
+    can appear on more than one path — that is the graph, not a bug."""
+    out = [f"{root}\n"]
+    for row in rows:
+        lvl, owner, name, otype = row[:4]
+        out.append(f"{'  ' * int(lvl)}{owner}.{name} ({otype})\n")
     return "".join(out)
 
 
@@ -410,9 +423,24 @@ def cmd_errors(conn, schema, ns):
         print(f"-- truncated at {len(rows)} rows (raise --limit, or --limit 0 for no cap)")
 
 
+def cmd_deps(conn, schema, ns):
+    cols, rows = run_query(conn, load_query("dependencies.sql"),
+                           {"s": schema, "n": ns.name, "depth": ns.depth})
+    rows, truncated = clip(rows, ns.limit)
+    if ns.json:
+        print(json_envelope(ns.command, ns.conn_name, ns.schema, cols, rows, truncated))
+        return
+    if not rows:
+        print(f"-- {ns.name.upper()} depends on nothing (or does not exist in {schema})")
+        return
+    sys.stdout.write(render_tree(rows, f"{schema}.{ns.name.upper()}"))
+    if truncated:
+        print(f"-- truncated at {len(rows)} rows (raise --limit, or --limit 0 for no cap)")
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
-            "invalid": cmd_invalid, "errors": cmd_errors}
+            "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -460,6 +488,11 @@ def build_parser():
                        help="compilation errors with line and column")
     s.add_argument("name", nargs="?", default=None,
                    help="object name; omit for every object in the schema")
+    s = sub.add_parser("deps", parents=[common],
+                       help="what an object depends on")
+    s.add_argument("name")
+    s.add_argument("--depth", type=int, default=3,
+                   help="levels to walk (default 3)")
     return p
 
 

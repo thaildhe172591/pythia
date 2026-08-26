@@ -50,6 +50,21 @@ def test_format_errors_groups_by_object():
     assert pythia.format_errors([]) == ""
 
 
+def test_render_tree_indents_by_level():
+    rows = [(1, "APP", "T_ORDER", "TABLE", "HARD"),
+            (1, "APP", "PKG_TAX", "PACKAGE", "HARD"),
+            (2, "APP", "T_RATE", "TABLE", "HARD")]
+    lines = pythia.render_tree(rows, "APP.PKG_ORDER").splitlines()
+    assert lines[0] == "APP.PKG_ORDER"
+    assert lines[1] == "  APP.T_ORDER (TABLE)"
+    assert lines[2] == "  APP.PKG_TAX (PACKAGE)"
+    assert lines[3] == "    APP.T_RATE (TABLE)"
+    # extra columns are ignored, so impact rows render with the same function
+    wide = [(1, "APP", "P_SETTLE", "PROCEDURE", "VALID", "HARD")]
+    assert pythia.render_tree(wide, "APP.T_ORDER").splitlines()[1] == \
+        "  APP.P_SETTLE (PROCEDURE)"
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
