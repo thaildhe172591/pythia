@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1 — 2026-08-27
+
+For a change that never goes through `apply` — a DBA runs it, a release
+process owns it, policy denies the group — the rollback file was already
+being written, and was impossible to find.
+
+- **The preview names the rollback file.** It has always written
+  `restore.sql` holding the version currently live; the preview now prints
+  that path and says what it is for.
+- **`journal prune` stopped being able to delete a unique rollback.** A
+  preview wrote nothing to the database, but its `restore.sql` is the only
+  undo for a change the developer then ran by hand. Prune now drops a
+  preview only when a newer entry already keeps a byte-identical rollback.
+- **pythia-apply** requires handing that path over in the same message as
+  the `.sql` file whenever the developer will run it themselves.
+
 ## 0.4.0 — 2026-08-27
 
 **The safety net now covers work done by hand.** Until now the journal only

@@ -1338,6 +1338,11 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         print(paint(f"\n  Snapshot saved: {journal_root(ns.project_root) / entry}",
                     "dim", en))
         if not confirmed:
+            print(paint("  Rollback file for the current database version — "
+                        "use it if this is\n  run by hand instead: "
+                        f"{journal_root(ns.project_root) / entry / 'restore.sql'}",
+                        "dim", en))
+        if not confirmed:
             print(f"\n  To apply:\n    "
                   + paint(f"{invocation()} apply {ns.file} --confirm {token}",
                           "cyan", en))
@@ -1536,18 +1541,29 @@ def cmd_journal(conn, schema, ns):
     if ns.action == "prune":
         import shutil
         removed = 0
-        for eid in list_journal_entries(root):
-            meta = read_journal_entry(root, eid)["meta"]
+        # A preview wrote nothing to the database, but its restore.sql holds
+        # the version that was live at the time — the only rollback there is
+        # for a change the developer then ran by hand. So drop a preview only
+        # when its rollback is byte-identical to one a newer entry already
+        # keeps: redundant captures go, unique ones never do.
+        kept = {}
+        for eid in list_journal_entries(root):        # newest first
+            e = read_journal_entry(root, eid)
+            meta, obj = e["meta"], str(e["meta"].get("object", ""))
             if meta.get("applied") or meta.get("snapshot"):
-                continue      # applied = a real write; snapshot = the only
-                              # undo a hand-edit outside pythia will ever have
-            shutil.rmtree(journal_root(root) / eid)
-            removed += 1
+                kept.setdefault(obj, set()).add(e["restore"])
+                continue
+            if e["restore"] in kept.get(obj, set()):
+                shutil.rmtree(journal_root(root) / eid)
+                removed += 1
+            else:
+                kept.setdefault(obj, set()).add(e["restore"])
         if ns.json:
             print(json.dumps({"pruned": removed}))
         else:
-            print(f"-- pruned {removed} preview-only entries; applied "
-                  "entries and snapshots are all kept")
+            print(f"-- pruned {removed} redundant previews; applied entries, "
+                  "snapshots, and any preview holding a rollback nothing "
+                  "else has are all kept")
         return
     if not ns.id:
         sys.exit(f"Usage: {invocation()} journal "

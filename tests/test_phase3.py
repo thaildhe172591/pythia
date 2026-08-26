@@ -540,25 +540,42 @@ def test_privilege_warning_speaks_proxy():
         FakeConn(direct), "APP", "APP")
 
 
-def test_journal_prune_keeps_applied_entries():
+def test_prune_drops_only_redundant_previews():
+    """A preview wrote nothing, but its restore.sql is the live version at
+    that moment — the only rollback for a change run by hand. Prune may drop
+    it only when a newer entry already keeps the identical rollback."""
     import argparse
+    import contextlib
     import datetime
+    import io
     with tempfile.TemporaryDirectory() as td:
-        base = datetime.datetime(2026, 8, 26, 12, 0, 0)
-        pythia.write_journal_entry(td, "PROCEDURE", "P_PREVIEW", "a", "b",
+        base = datetime.datetime(2026, 8, 27, 9, 0, 0)
+        # two previews of the same object, same live version -> one is spare
+        pythia.write_journal_entry(td, "PROCEDURE", "P_A", "old", "new1",
                                    {"applied": False}, now=base)
-        kept = pythia.write_journal_entry(
-            td, "PROCEDURE", "P_APPLIED", "a", "b", {"applied": True},
+        keep_dup = pythia.write_journal_entry(
+            td, "PROCEDURE", "P_A", "old", "new2", {"applied": False},
             now=base.replace(minute=1))
+        # a preview of another object, unique rollback -> must survive
+        lone = pythia.write_journal_entry(
+            td, "PROCEDURE", "P_B", "only_copy", "x", {"applied": False},
+            now=base.replace(minute=2))
+        applied = pythia.write_journal_entry(
+            td, "PROCEDURE", "P_C", "a", "b", {"applied": True},
+            now=base.replace(minute=3))
+        snap = pythia.write_journal_entry(
+            td, "PROCEDURE", "P_D", "a", "a",
+            {"snapshot": True, "applied": False}, now=base.replace(minute=4))
         ns = argparse.Namespace(action="prune", project_root=td, json=False,
                                 id=None)
-        import contextlib
-        import io
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             pythia.cmd_journal(None, None, ns)
-        assert "pruned 1" in buf.getvalue()
-        assert pythia.list_journal_entries(td) == [kept]
+        left = pythia.list_journal_entries(td)
+        assert "pruned 1" in buf.getvalue(), buf.getvalue()
+        assert applied in left and snap in left      # never touched
+        assert lone in left                          # unique rollback survives
+        assert keep_dup in left                      # newest of the pair kept
 
 
 def test_agent_user_alter_form_and_warning_prediction():
@@ -740,26 +757,6 @@ def test_auto_snapshot_reports_drift_and_keeps_the_old_rollback():
         old_rollback = pythia.read_journal_entry(td, first)["restore"]
         assert "NULL;" in old_rollback
         assert len(pythia.list_journal_entries(td)) == 2
-
-
-def test_prune_never_eats_a_snapshot():
-    import argparse
-    import contextlib
-    import io
-    import datetime
-    with tempfile.TemporaryDirectory() as td:
-        base = datetime.datetime(2026, 8, 27, 9, 0, 0)
-        pythia.write_journal_entry(td, "PROCEDURE", "P_A", "a", "b",
-                                   {"applied": False}, now=base)
-        snap = pythia.write_journal_entry(
-            td, "PROCEDURE", "P_B", "a", "a", {"snapshot": True,
-                                               "applied": False},
-            now=base.replace(minute=1))
-        ns = argparse.Namespace(action="prune", project_root=td, json=False,
-                                id=None)
-        with contextlib.redirect_stdout(io.StringIO()):
-            pythia.cmd_journal(None, None, ns)
-        assert pythia.list_journal_entries(td) == [snap]
 
 
 def main():

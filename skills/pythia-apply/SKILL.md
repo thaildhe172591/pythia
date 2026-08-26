@@ -31,6 +31,21 @@ Three moves are FORBIDDEN for agents, and the CLI enforces the first two
   your turn; the token is only used after the developer's approval
   arrives as a NEW message.
 
+## When the change will NOT go through apply
+
+Sometimes the developer runs the file themselves — a DBA executes it, a
+release process owns it, or policy denies the group. The preview still ran,
+so a rollback file for the version currently live already exists. Hand it
+over in the same message as the .sql file, by path:
+
+```
+.pythia/journal/<entry>/restore.sql
+```
+
+Never let a change leave your hands for manual execution without naming
+that file. `pythia history <OBJECT>` lists every captured version if an
+older one is wanted.
+
 ## The Workflow
 
 **Before step 1:** if this conversation has not yet seen a standalone impact
