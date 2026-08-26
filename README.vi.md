@@ -69,9 +69,10 @@ pythia check               # điền connections.json trước, rồi kiểm tra
 
 Gói pip là trọn bộ kit: có Node.js thì `pythia install` chạy `npx skills add`
 (77 agent, cập nhật qua symlink; `--source <git-url>` cho mirror nội bộ) —
-không có Node thì nó tự copy bộ skills đóng gói sẵn vào `.agents/skills/` —
-layout chuẩn chung mà Claude Code, Codex, Cursor đều đọc (một bản duy nhất,
-không skill nào hiện đôi trong menu). Chỉ cần skills: `npx skills add thaildhe172591/pythia`,
+không có Node thì nó tự copy bộ skills đóng gói sẵn. Nên dùng **skills
+global**: `pythia install -g` một lần mỗi máy là mọi project dùng chung, và
+`pythia install` trong project sẽ tự bỏ qua bước skills — chỉ một bản ở một
+nơi, không skill nào hiện đôi trong menu. Chỉ cần skills: `npx skills add thaildhe172591/pythia`,
 hoặc `/plugin marketplace add thaildhe172591/pythia`.
 
 ### Máy cài một lần — mỗi dự án chạy một lần

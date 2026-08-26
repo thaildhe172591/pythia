@@ -67,9 +67,10 @@ pythia check               # fill in connections.json first, then verify
 
 The pip package is the whole kit: with Node.js present, `pythia install`
 runs `npx skills add` (77 agents, symlinked updates; `--source <git-url>`
-for internal mirrors) — without Node it copies the bundled skill pack into
-`.agents/skills/`, the universal layout Claude Code, Codex and Cursor all
-read (one copy, so no skill shows up twice). Skills alone: `npx skills add
+for internal mirrors) — without Node it copies the bundled pack itself.
+Prefer **global skills**: `pythia install -g` once per machine serves every
+project, and per-project installs then skip the skills step automatically —
+one copy anywhere means no skill ever shows up twice in the agent's menu. Skills alone: `npx skills add
 thaildhe172591/pythia`, or `/plugin marketplace add thaildhe172591/pythia`.
 
 `pip install` is **once per machine**; `pythia install` is **once per

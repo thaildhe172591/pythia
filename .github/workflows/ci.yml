@@ -45,7 +45,7 @@ jobs:
           PY=$(which python)
           mkdir /tmp/kit && cd /tmp/kit
           PATH=/nonexistent "$PY" -m pythia install
-          test -f .agents/skills/pythia-apply/SKILL.md
-          test ! -e .claude/skills/pythia-apply
-          test -f .agents/skills/pythia-review/reference/antipatterns.md
+          test -f .claude/skills/pythia-apply/SKILL.md
+          test ! -e .agents/skills/pythia-apply
+          test -f .claude/skills/pythia-review/reference/antipatterns.md
           test -f .pythia/connections.json

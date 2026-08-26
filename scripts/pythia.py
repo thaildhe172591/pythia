@@ -1539,7 +1539,7 @@ def scaffold_config(root):
     return path, True
 
 
-def run_skills_add(source, interactive=False):
+def run_skills_add(source, interactive=False, glob=False):
     """Install the skill pack via the skills CLI. Returns its exit code, or
     None when npx is absent — the caller then copies the bundled pack, so a
     machine with only Python still gets the whole kit. At a TTY the CLI's own
@@ -1549,17 +1549,21 @@ def run_skills_add(source, interactive=False):
     npx = shutil.which("npx")
     if npx is None:
         return None
-    return subprocess.run(skills_add_cmd(npx, source, interactive)).returncode
+    return subprocess.run(skills_add_cmd(npx, source, interactive,
+                                         glob=glob)).returncode
 
 
-def skills_add_cmd(npx, source, interactive):
-    """Interactive: the CLI's own agent picker. Non-interactive: universal
-    layout only (.agents/skills) — one copy that Claude Code, Codex, Cursor
-    and friends all read; a second per-agent copy shows every skill twice
-    in Claude Code's menu."""
+def skills_add_cmd(npx, source, interactive, glob=False):
+    """Interactive: the CLI's own agent picker. Non-interactive project
+    installs pin one agent target so nothing is double-installed; global
+    installs let the CLI place per-agent copies under the home directory."""
     cmd = [npx, "skills", "add", source]
+    if glob:
+        cmd.append("-g")
     if not interactive:
-        cmd += ["-y", "-a", "universal"]
+        cmd.append("-y")
+        if not glob:
+            cmd += ["-a", "claude-code"]
     return cmd
 
 
@@ -1568,62 +1572,100 @@ LEGACY_SKILLS = ("plsql-setup", "plsql-explore", "plsql-impact",
                  "plsql-skill-author")
 
 
-def copy_bundled_skills(root):
-    """No-Node fallback: copy the wheel-bundled pack into .agents/skills/
-    ONLY — the universal layout that Claude Code, Codex, Cursor, Copilot and
-    friends all read. A second copy in .claude/skills/ would show every
-    skill twice in Claude Code's menu. The copy merges: only the pack's own
-    skills are refreshed, anything else in the directory is untouched.
-    Stale copies under the pack's old plsql-* names are removed from both
-    conventional roots (real directories only, never symlinks)."""
+def pack_names():
+    return [p.name for p in sorted(SKILLS_DIR.iterdir())
+            if (p / "SKILL.md").is_file()]
+
+
+def global_pack_present(home=None):
+    """Is the skill pack already installed machine-wide? Then a project copy
+    would only duplicate every entry in the agent's menu."""
+    home = pathlib.Path(home) if home else pathlib.Path.home()
+    return any((home / rel / "pythia-apply" / "SKILL.md").is_file()
+               for rel in (".claude/skills", ".agents/skills",
+                           ".config/agents/skills"))
+
+
+def copy_bundled_skills(base_dir):
+    """No-Node fallback: copy the wheel-bundled pack into
+    <base>/.claude/skills/ ONLY — the directory Claude Code reliably reads
+    in both scopes (field evidence: project .agents/skills is invisible to
+    some Claude Code versions, and a second copy doubles every menu entry).
+    base_dir is the project root, or the home directory for -g. The copy
+    merges: only the pack's own skills are refreshed; stale copies of the
+    pack under .agents/skills and old plsql-* names are cleaned."""
     import shutil
-    dest_root = pathlib.Path(root) / ".agents" / "skills"
+    dest_root = pathlib.Path(base_dir) / ".claude" / "skills"
     for pack in sorted(SKILLS_DIR.iterdir()):
         if not (pack / "SKILL.md").is_file():
             continue
         shutil.copytree(pack, dest_root / pack.name, dirs_exist_ok=True)
-    clean_legacy_skills(root)
+    clean_legacy_skills(base_dir)
+    for name in pack_names():   # canonical copy lives in .claude now
+        _remove_link_first(pathlib.Path(base_dir) / ".agents" / "skills" / name)
     return [dest_root]
 
 
-def clean_legacy_skills(root):
-    """Remove stale copies under the pack's old plsql-* names from both
-    conventional roots. Windows junctions defeat is_symlink(), so remove
-    link-first: unlink/rmdir take out a symlink, junction or empty dir
-    without touching its target; only a real populated directory needs
-    rmtree."""
+def _remove_link_first(path):
+    """Windows junctions defeat is_symlink(); unlink/rmdir take out a file,
+    symlink, junction or empty dir without touching any target — only a
+    real populated directory needs rmtree."""
     import shutil
+    if not os.path.lexists(path):
+        return
+    try:
+        path.unlink()
+    except OSError:
+        try:
+            os.rmdir(path)
+        except OSError:
+            shutil.rmtree(path)
+
+
+def clean_legacy_skills(base_dir):
+    """Remove stale copies under the pack's old plsql-* names from both
+    conventional roots below base_dir (project root or home)."""
     for rel in (".agents/skills", ".claude/skills"):
         for old_name in LEGACY_SKILLS:
-            legacy = pathlib.Path(root) / rel / old_name
-            if not os.path.lexists(legacy):
-                continue
-            try:
-                legacy.unlink()          # file or true symlink
-            except OSError:
-                try:
-                    os.rmdir(legacy)     # junction or empty dir: link only
-                except OSError:
-                    shutil.rmtree(legacy)
+            _remove_link_first(pathlib.Path(base_dir) / rel / old_name)
 
 
 def cmd_install(conn, schema, ns):
     en = getattr(ns, "color", False)
     if en:
         sys.stdout.write(banner(en))
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    if ns.glob:
+        code = run_skills_add(ns.source, interactive, glob=True)
+        if code is None:
+            for tgt in copy_bundled_skills(pathlib.Path.home()):
+                print(f"Copied the bundled skill pack into {tgt}")
+        elif code:
+            sys.exit(code)
+        else:
+            clean_legacy_skills(pathlib.Path.home())
+        print("\nGlobal skills serve every project — per-project installs "
+              "will now skip the skills step automatically.")
+        return
     path, created = scaffold_config(ns.project_root)
     print(f"{'Created' if created else 'Kept existing'} {path}")
-    interactive = sys.stdin.isatty() and sys.stdout.isatty()
-    code = run_skills_add(ns.source, interactive)
-    if code is None:
-        for t in copy_bundled_skills(ns.project_root):
-            print(f"Copied the bundled skill pack into {t}")
-        print("(npx not found — with Node.js, `npx skills add` reaches 77 "
-              "agents with symlinked updates.)")
-    elif code:
-        sys.exit(code)
-    else:
+    if global_pack_present():
+        print("Skill pack found in the global install — it already serves "
+              "this project,\nso no project copy is made (a second copy "
+              f"doubles every menu entry).\nRefresh it with: {invocation()} "
+              "install -g")
         clean_legacy_skills(ns.project_root)
+    else:
+        code = run_skills_add(ns.source, interactive)
+        if code is None:
+            for tgt in copy_bundled_skills(ns.project_root):
+                print(f"Copied the bundled skill pack into {tgt}")
+            print("(npx not found — with Node.js, `npx skills add` reaches "
+                  "77 agents with symlinked updates.)")
+        elif code:
+            sys.exit(code)
+        else:
+            clean_legacy_skills(ns.project_root)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
 
@@ -1750,6 +1792,9 @@ def build_parser():
                    help="wrap as 'loi:'||unistr(...)||':loi'")
     s = sub.add_parser("install", parents=[common()],
                        help="install the skill pack and scaffold .pythia/ config")
+    s.add_argument("-g", "--global", dest="glob", action="store_true",
+                   help="install the skill pack machine-wide (serves every "
+                        "project; per-project installs then skip skills)")
     s.add_argument("--source", default=DEFAULT_SKILLS_SOURCE,
                    help="skills repo for `npx skills add` "
                         f"(default {DEFAULT_SKILLS_SOURCE})")

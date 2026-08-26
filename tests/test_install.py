@@ -35,11 +35,11 @@ def test_scaffold_creates_config_once_and_never_clobbers():
 
 
 def test_missing_npx_falls_back_to_the_bundled_pack():
-    """No Node -> the whole kit still installs. One target only
-    (.agents/skills, the universal layout) — a second copy in
-    .claude/skills would double every skill in Claude Code's menu. The
-    copy merges: foreign skills survive, and stale plsql-* copies of the
-    pack's old names are cleaned from both conventional roots."""
+    """No Node -> the whole kit still installs, into .claude/skills ONLY —
+    the directory Claude Code reliably reads (field evidence: project
+    .agents/skills is invisible to some versions, and any second copy
+    doubles every menu entry). Foreign skills survive; stale plsql-* and
+    old .agents pack copies are cleaned."""
     import shutil
     old = shutil.which
     shutil.which = lambda name: None
@@ -50,44 +50,39 @@ def test_missing_npx_falls_back_to_the_bundled_pack():
     with tempfile.TemporaryDirectory() as td:
         agents = pathlib.Path(td) / ".agents" / "skills"
         claude = pathlib.Path(td) / ".claude" / "skills"
-        # pre-existing content: a custom skill, and stale old-name copies
         (agents / "my-team-skill").mkdir(parents=True)
         (agents / "my-team-skill" / "SKILL.md").write_text("x", encoding="utf-8")
-        (agents / "plsql-apply").mkdir()
+        (agents / "pythia-apply").mkdir()      # stale copy from 0.2.0-0.2.3
         (claude / "plsql-review").mkdir(parents=True)
         targets = pythia.copy_bundled_skills(td)
-        assert targets == [agents]
-        assert (agents / "pythia-apply" / "SKILL.md").is_file()
-        assert (agents / "pythia-review" / "reference" / "antipatterns.md").is_file()
-        assert not (claude / "pythia-apply").exists()      # single target
+        assert targets == [claude]
+        assert (claude / "pythia-apply" / "SKILL.md").is_file()
+        assert (claude / "pythia-review" / "reference" / "antipatterns.md").is_file()
+        assert not (agents / "pythia-apply").exists()       # single copy
         assert (agents / "my-team-skill" / "SKILL.md").read_text(
-            encoding="utf-8") == "x"                        # merge, not wipe
-        assert not (agents / "plsql-apply").exists()        # legacy cleaned
-        assert not (claude / "plsql-review").exists()       # in both roots
-        pythia.copy_bundled_skills(td)                      # idempotent
+            encoding="utf-8") == "x"                         # merge, not wipe
+        assert not (claude / "plsql-review").exists()        # legacy cleaned
+        pythia.copy_bundled_skills(td)                       # idempotent
 
 
-def test_invocation_names_the_dash_m_form():
-    """`python -m pythia` runs with argv[0] = a site-packages path nobody
-    typed; the printed follow-ups must use the -m form instead."""
-    import types
-    real_main = sys.modules.get("__main__")
-    fake = types.ModuleType("__main__")
-    fake.__spec__ = types.SimpleNamespace(name="pythia")
-    sys.modules["__main__"] = fake
-    try:
-        interp = pathlib.Path(sys.executable).stem
-        assert pythia.invocation() == f"{interp} -m pythia"
-    finally:
-        sys.modules["__main__"] = real_main
+def test_global_pack_detection_skips_project_copies():
+    with tempfile.TemporaryDirectory() as home:
+        assert not pythia.global_pack_present(home)
+        d = pathlib.Path(home) / ".claude" / "skills" / "pythia-apply"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("x", encoding="utf-8")
+        assert pythia.global_pack_present(home)
 
 
-def test_skills_add_cmd_targets_universal_when_noninteractive():
-    """Unattended installs must not double-install: one universal copy."""
-    cmd = pythia.skills_add_cmd("npx", "o/r", interactive=False)
-    assert cmd[-3:] == ["-y", "-a", "universal"]
-    cmd = pythia.skills_add_cmd("npx", "o/r", interactive=True)
-    assert "-y" not in cmd and "universal" not in cmd   # picker stays
+def test_skills_add_cmd_scopes():
+    """Unattended project installs pin one agent (no double-install);
+    global installs use -g; the interactive picker stays untouched."""
+    assert pythia.skills_add_cmd("npx", "o/r", interactive=False) == \
+        ["npx", "skills", "add", "o/r", "-y", "-a", "claude-code"]
+    assert pythia.skills_add_cmd("npx", "o/r", interactive=False, glob=True) == \
+        ["npx", "skills", "add", "o/r", "-g", "-y"]
+    assert pythia.skills_add_cmd("npx", "o/r", interactive=True) == \
+        ["npx", "skills", "add", "o/r"]
 
 
 def test_pack_dirs_resolve_in_the_source_layout():

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.4 — 2026-08-26
+
+- **Global-first skills** (field report): some Claude Code versions never
+  read a project's `.agents/skills/`, so the project copy was invisible
+  while the global pack showed — or both showed, duplicated. Now:
+  `pythia install -g` installs the pack machine-wide; a project
+  `pythia install` that finds the global pack skips the skills step
+  entirely (config scaffold still runs). The no-Node fallback targets
+  `.claude/skills/` — the directory Claude Code reliably reads in both
+  scopes — and cleans stale `.agents` pack copies and `plsql-*` names.
+
 ## 0.2.3 — 2026-08-26
 
 - Duplicate-skill fix covers the npx path too: unattended `pythia install`
