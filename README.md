@@ -89,7 +89,7 @@ and WSL are all CI-tested.
 | `ls` find objects | `impact` what depends on it | `journal` list · diff · export · restore |
 | `src` source, compiler line numbers | `errors` compile errors, line:col | `policy` show · set |
 | `args` signatures | `invalid` everything broken | `unistr` exact non-ASCII literals |
-| `ddl` via DBMS_METADATA | `plscope` exact identifier usages | |
+| `ddl` via DBMS_METADATA | `plscope` exact identifier usages | `agent-user` least-privilege setup |
 | `cols` columns + types | `similar` programs named like this | |
 | `grep` search all source | | |
 | `sql` free query (SELECT/WITH only) | | |

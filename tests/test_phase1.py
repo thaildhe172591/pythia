@@ -253,6 +253,45 @@ def test_to_unistr():
     assert u("ABC 123") == "unistr('ABC 123')"
 
 
+def test_agent_user_sql_is_least_privilege():
+    sql = pythia.AGENT_USER_SQL.format(owner="APP", agent="APP_AGENT",
+                                       password="x")
+    assert "CREATE USER APP_AGENT" in sql
+    assert "GRANT CREATE SESSION TO APP_AGENT" in sql
+    assert "GRANT CONNECT THROUGH APP_AGENT" in sql
+    for bad in ("DBA TO", "RESOURCE TO", "ANY "):   # the whole point
+        assert bad not in sql.upper().replace("-- ", ""), bad
+
+
+def test_agent_password_shape():
+    for _ in range(20):
+        pw = pythia.agent_password()
+        assert len(pw) >= 14 and pw[0].isalpha() and "#" in pw
+        assert '"' not in pw and "'" not in pw      # safe inside quotes
+
+
+def test_save_agent_connection_keeps_owner_and_sets_default():
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        (root / ".pythia").mkdir()
+        cfg = {"default": "dev",
+               "dev": {"host": "h", "port": 1521, "service_name": "svc",
+                       "user": "PYTHIA", "password": "ownerpw",
+                       "schema": "PYTHIA"}}
+        (root / ".pythia" / "connections.json").write_text(
+            json.dumps(cfg), encoding="utf-8")
+        name = pythia.save_agent_connection(root, "dev", cfg["dev"],
+                                            "PYTHIA_AGENT", "agpw")
+        out = json.loads((root / ".pythia" / "connections.json")
+                         .read_text(encoding="utf-8"))
+        assert name == "dev_agent" and out["default"] == "dev_agent"
+        assert out["dev"]["user"] == "PYTHIA"          # owner untouched
+        assert out["dev"]["password"] == "ownerpw"
+        assert out["dev_agent"]["user"] == "pythia_agent[pythia]"
+        assert out["dev_agent"]["password"] == "agpw"
+        assert out["dev_agent"]["host"] == "h"         # connect details copied
+
+
 def test_json_envelope():
     s = pythia.json_envelope("ls", "DEV", "OWNER1", ["A", "B"],
                              [(1, datetime.date(2026, 1, 2))], truncated=True)

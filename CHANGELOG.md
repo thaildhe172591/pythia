@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3 — 2026-08-26
+
+- `pythia agent-user` — prints the least-privilege proxy-user SQL for the
+  current connection's schema (generated password, no DBA/RESOURCE/ANY);
+  `--save` adds the credential to connections.json as `<conn>_agent` and
+  makes it the default, owner entry untouched.
+
 ## 0.1.2 — 2026-08-26
 
 - `pythia unistr` — exact Oracle literals for Vietnamese/non-ASCII messages

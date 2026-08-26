@@ -43,6 +43,7 @@ you always know whether you saw everything.
   pythia policy
   pythia install
   pythia unistr "Nhóm không được để trống"
+  pythia agent-user --save
 """
 import argparse
 import json
@@ -1301,6 +1302,76 @@ def cmd_conventions(conn, schema, ns):
         print(f"\nProse rules for agents: {md}")
 
 
+AGENT_USER_SQL = """\
+-- Least-privilege agent credential for schema {owner} — run as a DBA.
+-- Proxy authentication: the agent logs in with its OWN password but works
+-- inside {owner}; it never learns the owner password, owns nothing, and
+-- revocation is one statement. Deliberately absent: DBA, RESOURCE, ANY
+-- privileges, utility grants — the agent needs none of them to develop
+-- PL/SQL, and every extra grant widens the blast radius.
+
+CREATE USER {agent} IDENTIFIED BY "{password}";
+GRANT CREATE SESSION TO {agent};
+ALTER USER {owner} GRANT CONNECT THROUGH {agent};
+
+-- Cut the agent off later (owner untouched):
+--   ALTER USER {owner} REVOKE CONNECT THROUGH {agent};
+-- Fresh owner schema instead? See examples/agent-user-setup.example.sql.
+"""
+
+
+def agent_password():
+    """Random password satisfying common Oracle verify functions: letter
+    first, upper+lower+digit+special, 16+ chars. Always quoted in SQL."""
+    import secrets
+    import string
+    body = "".join(secrets.choice(string.ascii_letters + string.digits)
+                   for _ in range(12))
+    return "Ag" + body + "#7"
+
+
+def save_agent_connection(root, base_name, base, agent, password):
+    """Add <base>_agent alongside the owner entry (never overwrite it) and
+    make it the default. Returns the new entry name."""
+    path = pathlib.Path(root) / CONFIG_DIR / CONFIG_NAME
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    owner = (base.get("schema") or base["user"]).upper()
+    entry = dict(base)
+    entry["user"] = f"{agent.lower()}[{owner.lower()}]"
+    entry["password"] = password
+    entry["schema"] = owner
+    name = f"{base_name}_agent"
+    cfg[name] = entry
+    cfg["default"] = name
+    path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8")
+    return name
+
+
+def cmd_agent_user(conn, schema, ns):
+    cwd = pathlib.Path.cwd()
+    cfg, root = find_config(cwd, os.environ)
+    base_name, base = resolve_connection(cfg, ns.conn, os.environ, cwd, root)
+    owner = (base.get("schema") or base["user"]).upper()
+    if "[" in base["user"]:
+        sys.exit(f"Connection {base_name} already uses a proxy user "
+                 f"({base['user']}) — nothing to set up.")
+    agent = (ns.name or f"{owner}_AGENT").upper()
+    password = agent_password()
+    print(AGENT_USER_SQL.format(owner=owner, agent=agent, password=password))
+    if ns.save:
+        name = save_agent_connection(root, base_name, base, agent, password)
+        print(f"Saved connection '{name}' (now the default) in "
+              f"{pathlib.Path(root) / CONFIG_DIR / CONFIG_NAME};\n"
+              f"the owner entry '{base_name}' is untouched — switch back "
+              f"any time with --conn {base_name}.")
+        print(f"\nNext: run the SQL above as a DBA, then: {invocation()} check")
+    else:
+        print(f"-- Rerun with --save to add this credential to "
+              f"connections.json as '{base_name}_agent' and make it the "
+              f"default once the DBA has run it.")
+
+
 # unistr escapes. Single quote doubles to '' per SQL (a \' is ORA-01756 for
 # Oracle); backslash doubles for unistr itself.
 UNISTR_ESC = {0: r"\0", 8: r"\b", 9: r"\t", 10: r"\n", 13: r"\r",
@@ -1430,9 +1501,10 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
             "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
             "conventions": cmd_conventions, "install": cmd_install,
-            "unistr": cmd_unistr}
+            "unistr": cmd_unistr, "agent-user": cmd_agent_user}
 
-NO_DB_COMMANDS = {"policy", "journal", "conventions", "install", "unistr"}
+NO_DB_COMMANDS = {"policy", "journal", "conventions", "install", "unistr",
+                  "agent-user"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -1531,6 +1603,13 @@ def build_parser():
                    help="impact depth for the preview (default 3)")
     sub.add_parser("conventions", parents=[common()],
                    help="show the project's house-style naming patterns")
+    s = sub.add_parser("agent-user", parents=[common()],
+                       help="SQL for a least-privilege proxy agent user; "
+                            "--save adds it to connections.json")
+    s.add_argument("--name", help="agent user name (default <OWNER>_AGENT)")
+    s.add_argument("--save", action="store_true",
+                   help="add the new credential as <conn>_agent and make it "
+                        "the default connection")
     s = sub.add_parser("unistr", parents=[common()],
                        help="Oracle unistr('...') literal for non-ASCII text "
                             "(Vietnamese messages stay exact)")

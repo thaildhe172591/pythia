@@ -100,7 +100,7 @@ gợi ý in ra luôn khớp với cách bạn đã gọi. Windows, macOS, Linux 
 | `ls` tìm object | `impact` cái gì phụ thuộc nó | `journal` list · diff · export · restore |
 | `src` source, số dòng compiler | `errors` lỗi biên dịch, dòng:cột | `policy` show · set |
 | `args` chữ ký thủ tục | `invalid` mọi thứ đang hỏng | `unistr` literal tiếng Việt chuẩn xác |
-| `ddl` qua DBMS_METADATA | `plscope` vị trí dùng identifier | |
+| `ddl` qua DBMS_METADATA | `plscope` vị trí dùng identifier | `agent-user` tạo user least-privilege |
 | `cols` cột + kiểu dữ liệu | `similar` chương trình đặt tên giống | |
 | `grep` tìm trong toàn bộ source | | |
 | `sql` truy vấn tự do (chỉ SELECT/WITH) | | |
