@@ -15,6 +15,12 @@ write them down here, do not implement them on impulse.
   connection string is not, so the owner warning stays silent today. Honest
   refinement: read `sys_context('userenv','proxy_user')` and phrase the
   warning differently for sanctioned proxy setups.
+- **Scaffold engine (`pythia new`).** With conventions.json in place, the
+  next step writes itself: `pythia new table <NAME>` generating the full
+  house-style set — table, sequence, trigger, CRUD procedures — from a
+  project-local template directory (a real module the team already wrote,
+  used as the mold). The conventions engine warns on drift; the scaffold
+  would prevent it. Needs a template format decision — brainstorm first.
 - **`journal prune`.** Preview-only entries accumulate one directory per
   preview. Harmless, but a `journal prune --previews` would keep the list
   readable once real usage produces hundreds.
