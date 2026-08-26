@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.4 — 2026-08-27
+
+- **The bundled-pack copy destroyed a symlinked install.** `npx skills add`
+  leaves `.claude/skills/<name>` as a symlink into `.agents/skills/<name>`.
+  `copy_bundled_skills` wrote through that symlink and then deleted the
+  target as a stale copy, leaving dangling links and no readable pack —
+  seen on a real machine after refreshing skills. Both destinations are now
+  cleared link-first before copying, and a regression test builds the
+  symlink layout and proves the pack survives.
+
 ## 0.3.3 — 2026-08-27
 
 - **pythia-explore now fires when a `.sql` file looks like the answer.**

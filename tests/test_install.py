@@ -65,6 +65,29 @@ def test_missing_npx_falls_back_to_the_bundled_pack():
         pythia.copy_bundled_skills(td)                       # idempotent
 
 
+def test_copy_survives_a_symlinked_destination():
+    """`npx skills add` leaves .claude/skills/<name> as a symlink into
+    .agents/skills/<name>. Copying through that link and then cleaning the
+    target left dangling links and no pack — it happened on a real machine."""
+    with tempfile.TemporaryDirectory() as td:
+        base = pathlib.Path(td)
+        agents = base / ".agents" / "skills" / "pythia-explore"
+        claude = base / ".claude" / "skills"
+        agents.mkdir(parents=True)
+        (agents / "SKILL.md").write_text("old", encoding="utf-8")
+        claude.mkdir(parents=True)
+        try:
+            (claude / "pythia-explore").symlink_to(agents,
+                                                   target_is_directory=True)
+        except (OSError, NotImplementedError):
+            return          # no symlink privilege on this box; skip
+        pythia.copy_bundled_skills(td)
+        real = claude / "pythia-explore" / "SKILL.md"
+        assert real.is_file(), "pack vanished through the symlink"
+        assert not (claude / "pythia-explore").is_symlink()
+        assert "old" not in real.read_text(encoding="utf-8")
+
+
 def test_global_pack_detection_skips_project_copies():
     with tempfile.TemporaryDirectory() as home:
         assert not pythia.global_pack_present(home)

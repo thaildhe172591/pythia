@@ -1659,20 +1659,26 @@ def global_pack_present(home=None):
 def copy_bundled_skills(base_dir):
     """No-Node fallback: copy the wheel-bundled pack into
     <base>/.claude/skills/ ONLY — the directory Claude Code reliably reads
-    in both scopes (field evidence: project .agents/skills is invisible to
-    some Claude Code versions, and a second copy doubles every menu entry).
-    base_dir is the project root, or the home directory for -g. The copy
-    merges: only the pack's own skills are refreshed; stale copies of the
-    pack under .agents/skills and old plsql-* names are cleaned."""
+    in both scopes (field evidence: a project's .agents/skills is invisible
+    to some Claude Code versions, and a second copy doubles every menu
+    entry). base_dir is the project root, or the home directory for -g.
+
+    Both destinations are cleared link-first before the copy. An earlier
+    `npx skills add` leaves .claude/skills/<name> as a symlink into
+    .agents/skills/<name>; copying into that symlink would write through to
+    its target, which the .agents cleanup then deletes — leaving a dangling
+    link and no pack at all. Only the pack's own names are touched; other
+    skills in those directories are left alone."""
     import shutil
-    dest_root = pathlib.Path(base_dir) / ".claude" / "skills"
+    base = pathlib.Path(base_dir)
+    dest_root = base / ".claude" / "skills"
     for pack in sorted(SKILLS_DIR.iterdir()):
         if not (pack / "SKILL.md").is_file():
             continue
-        shutil.copytree(pack, dest_root / pack.name, dirs_exist_ok=True)
+        _remove_link_first(dest_root / pack.name)
+        _remove_link_first(base / ".agents" / "skills" / pack.name)
+        shutil.copytree(pack, dest_root / pack.name)
     clean_legacy_skills(base_dir)
-    for name in pack_names():   # canonical copy lives in .claude now
-        _remove_link_first(pathlib.Path(base_dir) / ".agents" / "skills" / name)
     return [dest_root]
 
 
