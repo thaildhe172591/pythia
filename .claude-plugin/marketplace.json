@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "PL/SQL development kit for AI agents on Oracle Database",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "plugins": [
     {

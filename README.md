@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/thaildhe172591/pythia/main/assets/logo.png" alt="pythia" width="280" />
+</p>
+
 # pythia
 
 > Oracle's MCP gives your agent a connection. **pythia gives it the judgment to use it.**

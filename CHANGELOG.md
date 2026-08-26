@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 — 2026-08-26
+
+- Logo on the README, the PyPI page and a dedicated npm README.
+
 ## 0.1.0 — 2026-08-26
 
 First public release.

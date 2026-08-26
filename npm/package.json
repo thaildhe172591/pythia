@@ -1,12 +1,27 @@
 {
   "name": "pythia-plsql",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "One-command installer for pythia: PL/SQL development for AI agents on Oracle Database. Installs the Python CLI, the seven-skill pack, and the .pythia/ config scaffold.",
-  "bin": { "pythia-plsql": "bin.js" },
-  "files": ["bin.js"],
+  "bin": {
+    "pythia-plsql": "bin.js"
+  },
+  "files": [
+    "bin.js"
+  ],
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/thaildhe172591/pythia.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thaildhe172591/pythia.git"
+  },
   "homepage": "https://github.com/thaildhe172591/pythia",
-  "keywords": ["oracle", "plsql", "database", "agent-skills", "sql"],
-  "engines": { "node": ">=18" }
+  "keywords": [
+    "oracle",
+    "plsql",
+    "database",
+    "agent-skills",
+    "sql"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
 }
