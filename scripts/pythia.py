@@ -28,6 +28,7 @@ you always know whether you saw everything.
   pythia cols MY_TABLE
   pythia grep "some_identifier"
   pythia sql  "select count(*) from all_views where owner = user"
+  pythia invalid
 """
 import argparse
 import json
@@ -41,6 +42,15 @@ CONFIG_DIR = ".pythia"
 CONFIG_NAME = "connections.json"
 INT_MAX = 2147483647
 
+QUERY_DIR = pathlib.Path(__file__).resolve().parent.parent / "queries"
+
+# Bind contract: what each query file is allowed to use. tests/test_phase2.py
+# fails on any drift in either direction — that is how queries/ stays reviewable
+# by PR without a database.
+QUERY_BINDS = {
+    "invalid-objects.sql": {"s"},
+}
+
 
 # --- pure helpers (covered by tests/test_phase1.py) --------------------------
 
@@ -53,6 +63,23 @@ def forbid_write_flag(argv):
         sys.exit("pythia is read-only in this build: there is no --write mode.\n"
                  "Edit PL/SQL in files and apply changes yourself; a controlled\n"
                  "write workflow (`apply`) is planned but not available yet.")
+
+
+def load_query(name):
+    """Read a statement from queries/. All SQL lives there so it can be
+    reviewed, tested and contributed to without reading Python."""
+    path = QUERY_DIR / name
+    if not path.is_file():
+        sys.exit(f"Missing query file: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def query_binds(sql):
+    """Bind names a statement actually uses, ignoring comments and string
+    literals — a date format like 'hh24:mi:ss' is not two binds."""
+    sql = re.sub(r"--[^\n]*", " ", sql)
+    sql = re.sub(r"'(?:[^']|'')*'", " ", sql)
+    return set(re.findall(r"(?<![:\w]):([a-z_][a-z0-9_]*)", sql, re.I))
 
 
 def find_config(cwd, env):
@@ -347,8 +374,15 @@ def cmd_sql(conn, schema, ns):
     emit_table(ns, cols, rows, truncated)
 
 
+def cmd_invalid(conn, schema, ns):
+    cols, rows = run_query(conn, load_query("invalid-objects.sql"), {"s": schema})
+    rows, truncated = clip(rows, ns.limit)
+    emit_table(ns, cols, rows, truncated)
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
-            "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql}
+            "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
+            "invalid": cmd_invalid}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -390,6 +424,8 @@ def build_parser():
     s.add_argument("pattern")
     s = sub.add_parser("sql", parents=[common], help="free query (SELECT/WITH only)")
     s.add_argument("statement", nargs="+")
+    sub.add_parser("invalid", parents=[common],
+                   help="every INVALID object in the schema")
     return p
 
 
