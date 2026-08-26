@@ -82,6 +82,14 @@ def test_invocation_names_the_dash_m_form():
         sys.modules["__main__"] = real_main
 
 
+def test_skills_add_cmd_targets_universal_when_noninteractive():
+    """Unattended installs must not double-install: one universal copy."""
+    cmd = pythia.skills_add_cmd("npx", "o/r", interactive=False)
+    assert cmd[-3:] == ["-y", "-a", "universal"]
+    cmd = pythia.skills_add_cmd("npx", "o/r", interactive=True)
+    assert "-y" not in cmd and "universal" not in cmd   # picker stays
+
+
 def test_pack_dirs_resolve_in_the_source_layout():
     assert (pythia.QUERY_DIR / "impact.sql").is_file()
     assert (pythia.SKILLS_DIR / "pythia-apply" / "SKILL.md").is_file()

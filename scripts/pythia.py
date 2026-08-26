@@ -1549,10 +1549,18 @@ def run_skills_add(source, interactive=False):
     npx = shutil.which("npx")
     if npx is None:
         return None
+    return subprocess.run(skills_add_cmd(npx, source, interactive)).returncode
+
+
+def skills_add_cmd(npx, source, interactive):
+    """Interactive: the CLI's own agent picker. Non-interactive: universal
+    layout only (.agents/skills) — one copy that Claude Code, Codex, Cursor
+    and friends all read; a second per-agent copy shows every skill twice
+    in Claude Code's menu."""
     cmd = [npx, "skills", "add", source]
     if not interactive:
-        cmd.append("-y")
-    return subprocess.run(cmd).returncode
+        cmd += ["-y", "-a", "universal"]
+    return cmd
 
 
 LEGACY_SKILLS = ("plsql-setup", "plsql-explore", "plsql-impact",
@@ -1574,12 +1582,20 @@ def copy_bundled_skills(root):
         if not (pack / "SKILL.md").is_file():
             continue
         shutil.copytree(pack, dest_root / pack.name, dirs_exist_ok=True)
+    clean_legacy_skills(root)
+    return [dest_root]
+
+
+def clean_legacy_skills(root):
+    """Remove stale copies under the pack's old plsql-* names from both
+    conventional roots — real directories only, never symlinks (those
+    belong to the skills CLI)."""
+    import shutil
     for rel in (".agents/skills", ".claude/skills"):
         for old_name in LEGACY_SKILLS:
             legacy = pathlib.Path(root) / rel / old_name
             if legacy.is_dir() and not legacy.is_symlink():
                 shutil.rmtree(legacy)
-    return [dest_root]
 
 
 def cmd_install(conn, schema, ns):
@@ -1597,6 +1613,8 @@ def cmd_install(conn, schema, ns):
               "agents with symlinked updates.)")
     elif code:
         sys.exit(code)
+    else:
+        clean_legacy_skills(ns.project_root)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
 

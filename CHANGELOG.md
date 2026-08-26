@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3 — 2026-08-26
+
+- Duplicate-skill fix covers the npx path too: unattended `pythia install`
+  passes `-a universal` (one copy in `.agents/skills/` serves every
+  agent), and stale `plsql-*` copies are cleaned after npx installs as
+  well, not only in the no-Node fallback. The interactive agent picker is
+  unchanged.
+
 ## 0.2.2 — 2026-08-26
 
 - `agent-user` asks the database before writing SQL: an agent user that
