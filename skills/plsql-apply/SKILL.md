@@ -68,7 +68,10 @@ correct; relay it instead of forcing a way around.
 
 `--yes` skips the pause, not the preview — output and journal are identical.
 Use it only when the developer explicitly asked for unattended application
-("apply all of these"). Rules for a batch:
+("apply all of these"). A frustrated "stop asking" grants `--yes` for the
+task at hand, not from now on: confirm the scope once ("this batch, or
+standing?") and default to this-batch-only. A standing `--yes` never extends
+to restores. Rules for a batch:
 
 - **Stop at the first exit 3.** Never keep applying onto a broken state.
 - Afterwards report: one line per success, full detail (errors, newly
@@ -107,6 +110,7 @@ the stakes are highest.
 | "Token is stale, I'll just take the new one" | The content changed. The developer must see the new preview. |
 | "apply refused it; run-sql will take it" | The refusal is the product working. Relay it. |
 | "I'll restore quietly to clean up my mistake" | Restores are writes. Same gate, same visibility. |
+| "The dev said 'stop asking' once" | That covered that task, not forever. Re-confirm scope on the next one. |
 
 ## When NOT to use this skill
 

@@ -64,6 +64,15 @@ rollback-honesty table exists in three places (CLI `policy`, README,
   silent restore, unrecognized statements refused, exit 3 for
   applied-but-broken.
 
+## Field-testing inside this repository — one footgun
+
+`npx skills` treats a root `skills/` directory as an *install location*, so
+running `npx skills remove` in this repo deletes the **source** skill pack,
+not just installed copies. Everything is tracked, so recovery is
+`git restore skills/` — but prefer field-testing installs in a separate
+directory, and treat `.agents/`, `.claude/` and `skills-lock.json` here as
+disposable artifacts (they are gitignored).
+
 ## Adding a query
 
 1. Write `queries/<name>.sql` with the header and named binds.

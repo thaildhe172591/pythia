@@ -191,6 +191,8 @@ def base_script(errors=(), invalid_after=None, db_source=OLD_SRC):
         "from all_errors": ([("NAME", "TYPE", "SEQUENCE", "LINE", "POSITION",
                               "ATTRIBUTE", "TEXT")], list(errors)),
         "from session_privs": ([("PRIVILEGE",)], []),
+        # main-namespace occupants of the target name (type-conflict check)
+        "object_name = upper(:n)": ([("OBJECT_TYPE",)], [("PACKAGE BODY",)]),
     }
 
 
@@ -363,6 +365,32 @@ def test_write_path_skips_readonly_transaction():
     assert pythia.session_should_be_readonly("journal", "list")
     assert not pythia.session_should_be_readonly("apply")
     assert not pythia.session_should_be_readonly("journal", "restore")
+
+
+def test_name_conflicts_namespace_rules():
+    nc = pythia.name_conflicts
+    assert nc("FUNCTION", ["PROCEDURE"]) == ["PROCEDURE"]     # ORA-00955 waiting
+    assert nc("PROCEDURE", ["PROCEDURE"]) == []               # same type: replace
+    assert nc("PACKAGE BODY", ["PACKAGE", "PACKAGE BODY"]) == []
+    assert nc("TYPE BODY", ["TYPE"]) == []
+    assert nc("TRIGGER", ["PROCEDURE"]) == []   # triggers live in their own namespace
+    assert nc("PROCEDURE", ["TABLE"]) == ["TABLE"]            # tables share the namespace
+
+
+def test_apply_refuses_changing_an_objects_type():
+    """Found in the field: a FUNCTION file over an existing PROCEDURE previewed
+    as 'new object' and only failed at apply time with ORA-00955. The preview
+    must refuse instead of promising what the database will reject."""
+    script = base_script()
+    script["object_name = upper(:n)"] = ([("OBJECT_TYPE",)], [("PROCEDURE",)])
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(script)
+        expect_exit(lambda: pythia.run_apply(
+            conn, "APP", apply_ns(td),
+            "CREATE OR REPLACE FUNCTION pkg_order RETURN NUMBER AS BEGIN RETURN 1; END;"),
+            "PROCEDURE", "cannot change", "DROP")
+        assert wrote_ddl(conn) == []
+        assert pythia.list_journal_entries(td) == []   # a refusal leaves no entry
 
 
 def test_invocation_reflects_how_the_tool_was_run():

@@ -71,6 +71,7 @@ QUERY_BINDS = {
     "source.sql": {"s", "n"},
     "object-source.sql": {"s", "n", "t"},
     "session-privileges.sql": set(),
+    "name-occupants.sql": {"s", "n"},
 }
 
 
@@ -932,6 +933,30 @@ def cmd_plscope(conn, schema, ns):
         emit_table(ns, stmt_cols, *clip(stmt_rows, ns.limit))
 
 
+# Which main-namespace occupants may legally coexist with each object type.
+# Spec and body pair up; triggers have a namespace of their own (None = nothing
+# in the main namespace can block them).
+NAMESPACE_COEXIST = {
+    "PROCEDURE": {"PROCEDURE"},
+    "FUNCTION": {"FUNCTION"},
+    "PACKAGE": {"PACKAGE", "PACKAGE BODY"},
+    "PACKAGE BODY": {"PACKAGE", "PACKAGE BODY"},
+    "TYPE": {"TYPE", "TYPE BODY"},
+    "TYPE BODY": {"TYPE", "TYPE BODY"},
+    "VIEW": {"VIEW"},
+    "TRIGGER": None,
+}
+
+
+def name_conflicts(otype, occupants):
+    """Occupant types that CREATE OR REPLACE <otype> cannot replace — the
+    ORA-00955 the preview must predict instead of discovering at apply time."""
+    allowed = NAMESPACE_COEXIST.get(otype)
+    if allowed is None:
+        return []
+    return sorted(set(occupants) - allowed)
+
+
 def privilege_warning(conn, schema, conn_user):
     """One line, only when true. The policy file is an application-side fence;
     Oracle grants are the only layer that cannot be walked around, so say when
@@ -987,6 +1012,17 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                      f"connection targets {schema!r}. Refused: applying across "
                      "schemas hides which database object actually changes.\n"
                      f"Use --conn to select the {file_schema.upper()!r} connection.")
+        _, occ_rows = run_query(conn, load_query("name-occupants.sql"),
+                                {"s": schema, "n": name})
+        blockers = name_conflicts(otype, [r[0] for r in occ_rows])
+        if blockers:
+            sys.exit(f"{name} already exists as {', '.join(blockers)} in {schema} "
+                     "— CREATE OR REPLACE cannot change an object's type "
+                     "(ORA-00955 would follow).\n"
+                     "Changing the type means DROP first — structural, and the "
+                     "policy on that group applies:\n"
+                     f"  {invocation()} policy set structural confirm   "
+                     "(only if you accept losing the old object)")
     else:
         # confirm-mode DML/DDL/grants: no object identity, no snapshot — the
         # journal records the statement itself so at least *what ran* is kept.
