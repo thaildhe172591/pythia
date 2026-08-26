@@ -33,6 +33,7 @@ you always know whether you saw everything.
   pythia deps MY_PACKAGE --depth 2
   pythia impact MY_TABLE
   pythia similar PKG_ORDER_TOTAL_LIST
+  pythia plscope MY_TABLE
 """
 import argparse
 import json
@@ -57,6 +58,9 @@ QUERY_BINDS = {
     "dependencies.sql": {"s", "n", "depth"},
     "impact.sql": {"s", "n", "depth"},
     "similar-candidates.sql": {"s"},
+    "plscope-usages.sql": {"s", "n"},
+    "plscope-statements.sql": {"s", "n"},
+    "plscope-enabled.sql": {"s"},
 }
 
 
@@ -254,6 +258,22 @@ def rank_similar(target, candidates):
             scored.append((len(shared), name, (*row, " ".join(sorted(shared)))))
     scored.sort(key=lambda x: (-x[0], x[1]))
     return [row for _score, _name, row in scored]
+
+
+def plscope_message(name, has_any_data):
+    """What to say when an identifier lookup returns nothing. Never run the
+    ALTER: recompiling a shared schema is the team's call, not the tool's."""
+    if has_any_data:
+        return (f"No PL/Scope entry for {name!r}. Either it does not exist, or the "
+                "objects using it were compiled before PL/Scope was enabled.")
+    return ("PL/Scope has no data for this schema, so this question cannot be "
+            "answered exactly yet.\n"
+            "To enable it, and then recompile the objects you care about:\n"
+            "  ALTER SESSION SET plscope_settings='IDENTIFIERS:ALL, STATEMENTS:ALL';\n"
+            "  ALTER PROCEDURE <name> COMPILE;\n"
+            "Recompiling on a shared schema affects everyone using it — agree it with "
+            "the team first. pythia will not run these for you.\n"
+            "Until then, the approximate answer is: pythia grep \"<text>\"")
 
 
 def json_envelope(command, connection, schema, cols, rows, truncated, **extra):
@@ -501,10 +521,31 @@ def cmd_similar(conn, schema, ns):
     emit_table(ns, [*cols, "MATCHED_TOKENS"], shown, truncated)
 
 
+def cmd_plscope(conn, schema, ns):
+    cols, rows = run_query(conn, load_query("plscope-usages.sql"),
+                           {"s": schema, "n": ns.name})
+    if not rows:
+        _, probe = run_query(conn, load_query("plscope-enabled.sql"), {"s": schema})
+        sys.exit(plscope_message(ns.name, bool(probe)))
+    stmt_cols, stmt_rows = (), []
+    if any(str(r[3]).upper() == "TABLE" for r in rows):   # TYPE column
+        stmt_cols, stmt_rows = run_query(conn, load_query("plscope-statements.sql"),
+                                         {"s": schema, "n": ns.name})
+    shown, truncated = clip(rows, ns.limit)
+    if ns.json:
+        print(json_envelope(ns.command, ns.conn_name, ns.schema, cols, shown, truncated,
+                            statements=[dict(zip(stmt_cols, r)) for r in stmt_rows]))
+        return
+    emit_table(ns, cols, shown, truncated)
+    if stmt_rows:
+        print("\n-- SQL statements touching this table")
+        emit_table(ns, stmt_cols, *clip(stmt_rows, ns.limit))
+
+
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "ddl": cmd_ddl, "cols": cmd_cols, "grep": cmd_grep, "sql": cmd_sql,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
-            "impact": cmd_impact, "similar": cmd_similar}
+            "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -571,6 +612,9 @@ def build_parser():
                        help="programs named like this one — copy their conventions")
     s.add_argument("name")
     s.set_defaults(limit=20)
+    s = sub.add_parser("plscope", parents=[common()],
+                       help="exact identifier usages from PL/Scope")
+    s.add_argument("name")
     return p
 
 

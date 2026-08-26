@@ -104,6 +104,16 @@ def test_per_command_limit_default_does_not_leak():
     assert p.parse_args(["grep", "X"]).limit == 200
 
 
+def test_plscope_message_distinguishes_disabled_from_missing():
+    disabled = pythia.plscope_message("CALC_TAX", has_any_data=False)
+    assert "plscope_settings" in disabled       # how to turn it on
+    assert "shared" in disabled.lower()         # warns before recompiling
+    assert "grep" in disabled                   # what to use meanwhile
+    missing = pythia.plscope_message("CALC_TAX", has_any_data=True)
+    assert "plscope_settings" not in missing    # already on — do not misdirect
+    assert "CALC_TAX" in missing
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
