@@ -89,6 +89,15 @@ CLI luôn đọc config của dự án bạn đang đứng (tìm ngược từ t
 lên, **không có fallback global**) — nên một CLI cài chung không bao giờ lẫn
 database giữa các dự án. Đứng ngoài mọi dự án thì báo lỗi rõ ràng, không đoán.
 
+**Cập nhật phiên bản mới** cũng theo đúng cách chia đó:
+
+```bash
+pip install --upgrade pythia-plsql   # CLI bản mới (mỗi máy một lần)
+pythia install                       # làm mới skills của dự án; config không bị đụng
+```
+
+(Skills cài qua npx thì `npx skills update` cũng được.)
+
 Chạy từ bản clone cũng được — `python scripts/pythia.py <lệnh>`; mọi lệnh
 gợi ý in ra luôn khớp với cách bạn đã gọi. Windows, macOS, Linux và WSL đều
 được CI kiểm thử.

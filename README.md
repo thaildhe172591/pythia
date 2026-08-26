@@ -78,6 +78,15 @@ project** — run it in each repo's root to drop the skills and a fresh
 project you are standing in (searched upward from the current directory,
 no global fallback), so one global CLI never mixes up databases.
 
+**Updating** follows the same split:
+
+```bash
+pip install --upgrade pythia-plsql   # new CLI version (once per machine)
+pythia install                       # refresh a project's skills; config never touched
+```
+
+(`npx skills update` also works for skills installed via npx.)
+
 Running from a clone works too — `python scripts/pythia.py <command>`; every
 printed follow-up command matches how you invoked it. Windows, macOS, Linux
 and WSL are all CI-tested.
