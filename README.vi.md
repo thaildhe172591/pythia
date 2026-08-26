@@ -99,7 +99,7 @@ gợi ý in ra luôn khớp với cách bạn đã gọi. Windows, macOS, Linux 
 | `check` kết nối + đếm object | `deps` nó phụ thuộc gì | `apply` đường ghi 6 bước |
 | `ls` tìm object | `impact` cái gì phụ thuộc nó | `journal` list · diff · export · restore |
 | `src` source, số dòng compiler | `errors` lỗi biên dịch, dòng:cột | `policy` show · set |
-| `args` chữ ký thủ tục | `invalid` mọi thứ đang hỏng | |
+| `args` chữ ký thủ tục | `invalid` mọi thứ đang hỏng | `unistr` literal tiếng Việt chuẩn xác |
 | `ddl` qua DBMS_METADATA | `plscope` vị trí dùng identifier | |
 | `cols` cột + kiểu dữ liệu | `similar` chương trình đặt tên giống | |
 | `grep` tìm trong toàn bộ source | | |

@@ -42,6 +42,7 @@ you always know whether you saw everything.
   pythia journal restore <id>
   pythia policy
   pythia install
+  pythia unistr "Nhóm không được để trống"
 """
 import argparse
 import json
@@ -1300,6 +1301,36 @@ def cmd_conventions(conn, schema, ns):
         print(f"\nProse rules for agents: {md}")
 
 
+# unistr escapes. Single quote doubles to '' per SQL (a \' is ORA-01756 for
+# Oracle); backslash doubles for unistr itself.
+UNISTR_ESC = {0: r"\0", 8: r"\b", 9: r"\t", 10: r"\n", 13: r"\r",
+              11: r"\v", 12: r"\f", 92: "\\\\", 39: "''"}
+
+
+def to_unistr(text):
+    r"""A National-charset-safe Oracle literal for any text. Non-ASCII goes
+    to \XXXX escapes, so the statement survives every client/DB charset on
+    the way in — the standard way to keep Vietnamese messages exact."""
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        if cp in UNISTR_ESC:
+            out.append(UNISTR_ESC[cp])
+        elif 0x1F < cp < 0x7F:
+            out.append(ch)
+        elif cp > 0xFFFF:
+            out.append("\\U%08X" % cp)   # beyond the BMP: \U + 8 hex
+        else:
+            out.append("\\%04X" % cp)
+    return "unistr('%s')" % "".join(out)
+
+
+def cmd_unistr(conn, schema, ns):
+    text = " ".join(ns.text) if ns.text else sys.stdin.read().rstrip("\n")
+    u = to_unistr(text)
+    print("'loi:'||%s||':loi'" % u if ns.loi else u)
+
+
 DEFAULT_SKILLS_SOURCE = "thaildhe172591/pythia"
 
 # Kept byte-identical to examples/connections.example.json —
@@ -1398,9 +1429,10 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
             "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
-            "conventions": cmd_conventions, "install": cmd_install}
+            "conventions": cmd_conventions, "install": cmd_install,
+            "unistr": cmd_unistr}
 
-NO_DB_COMMANDS = {"policy", "journal", "conventions", "install"}
+NO_DB_COMMANDS = {"policy", "journal", "conventions", "install", "unistr"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -1499,6 +1531,12 @@ def build_parser():
                    help="impact depth for the preview (default 3)")
     sub.add_parser("conventions", parents=[common()],
                    help="show the project's house-style naming patterns")
+    s = sub.add_parser("unistr", parents=[common()],
+                       help="Oracle unistr('...') literal for non-ASCII text "
+                            "(Vietnamese messages stay exact)")
+    s.add_argument("text", nargs="*", help="text; omit to read stdin")
+    s.add_argument("--loi", action="store_true",
+                   help="wrap as 'loi:'||unistr(...)||':loi'")
     s = sub.add_parser("install", parents=[common()],
                        help="install the skill pack and scaffold .pythia/ config")
     s.add_argument("--source", default=DEFAULT_SKILLS_SOURCE,

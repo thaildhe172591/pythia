@@ -33,6 +33,9 @@ existing ones — not to introduce a better style.
    - End the file with the PL/SQL block's `;` and a final line holding `/`.
    - Name the object unqualified, or qualified with the exact schema the
      connection targets — a mismatch is refused at apply time.
+   - **Non-ASCII string literals** (Vietnamese messages, any accented text):
+     never paste raw — run `pythia unistr "<text>"` and use the printed
+     `unistr('...')`, so the text survives every client/DB charset exactly.
 5. **Check yourself before handing off.** Reread against
    `reference/patterns.md` — cursor and bulk patterns, exception discipline,
    bind variables, commit ownership.

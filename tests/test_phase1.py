@@ -240,6 +240,19 @@ def test_source_unit_filter():
     assert pythia.filter_units(rows, body=False, spec=False) == rows
 
 
+def test_to_unistr():
+    r"""Ported from the field tool's self-check: Vietnamese exact, quote
+    doubled per SQL (never \'), backslash doubled, beyond-BMP \U form."""
+    u = pythia.to_unistr
+    assert u("Nhóm không được để trống") == \
+        r"unistr('Nh\00F3m kh\00F4ng \0111\01B0\1EE3c \0111\1EC3 tr\1ED1ng')"
+    assert u("Mã bệnh") == r"unistr('M\00E3 b\1EC7nh')"
+    assert u("O'Brien") == "unistr('O''Brien')"
+    assert u("a\\b") == r"unistr('a\\b')"
+    assert u("\U0001F600") == r"unistr('\U0001F600')"
+    assert u("ABC 123") == "unistr('ABC 123')"
+
+
 def test_json_envelope():
     s = pythia.json_envelope("ls", "DEV", "OWNER1", ["A", "B"],
                              [(1, datetime.date(2026, 1, 2))], truncated=True)

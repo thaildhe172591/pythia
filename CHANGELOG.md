@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-08-26
+
+- `pythia unistr` — exact Oracle literals for Vietnamese/non-ASCII messages
+  (`--loi` wraps in the loi:...:loi error format); the write skill now
+  requires it for non-ASCII literals.
+
 ## 0.1.1 — 2026-08-26
 
 - Logo on the README, the PyPI page and a dedicated npm README.

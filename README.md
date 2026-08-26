@@ -88,7 +88,7 @@ and WSL are all CI-tested.
 | `check` connectivity + counts | `deps` what it depends on | `apply` the six-step write |
 | `ls` find objects | `impact` what depends on it | `journal` list · diff · export · restore |
 | `src` source, compiler line numbers | `errors` compile errors, line:col | `policy` show · set |
-| `args` signatures | `invalid` everything broken | |
+| `args` signatures | `invalid` everything broken | `unistr` exact non-ASCII literals |
 | `ddl` via DBMS_METADATA | `plscope` exact identifier usages | |
 | `cols` columns + types | `similar` programs named like this | |
 | `grep` search all source | | |
