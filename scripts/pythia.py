@@ -1355,7 +1355,7 @@ AGENT_USER_SQL = """\
 -- privileges, utility grants — the agent needs none of them to develop
 -- PL/SQL, and every extra grant widens the blast radius.
 
-CREATE USER {agent} IDENTIFIED BY "{password}";
+{create_line}
 GRANT CREATE SESSION TO {agent};
 ALTER USER {owner} GRANT CONNECT THROUGH {agent};
 
@@ -1363,6 +1363,23 @@ ALTER USER {owner} GRANT CONNECT THROUGH {agent};
 --   ALTER USER {owner} REVOKE CONNECT THROUGH {agent};
 -- Fresh owner schema instead? See examples/agent-user-setup.example.sql.
 """
+
+
+def agent_user_sql(owner, agent, password, exists):
+    """exists True: the user is already there — CREATE would be ORA-01920,
+    so reset the password and unlock in one statement (harmless if it was
+    never locked). exists None: no database to ask — emit CREATE plus the
+    fallback as a comment so the DBA can pick."""
+    if exists:
+        line = (f'ALTER USER {agent} IDENTIFIED BY "{password}" ACCOUNT '
+                f"UNLOCK;  -- user already exists; CREATE would be ORA-01920")
+    else:
+        line = f'CREATE USER {agent} IDENTIFIED BY "{password}";'
+        if exists is None:
+            line += ("\n-- (if the user already exists — ORA-01920 — run "
+                     "instead:\n--  ALTER USER "
+                     f'{agent} IDENTIFIED BY "{password}" ACCOUNT UNLOCK;)')
+    return AGENT_USER_SQL.format(owner=owner, agent=agent, create_line=line)
 
 
 def agent_password():
@@ -1403,19 +1420,39 @@ def cmd_agent_user(conn, schema, ns):
                  f"({base['user']}) — nothing to set up.")
     agent = (ns.name or f"{owner}_AGENT").upper()
     password = agent_password()
-    sql = AGENT_USER_SQL.format(owner=owner, agent=agent, password=password)
+    exists, dangerous = None, None
+    if conn is not None:
+        _, rows = run_query(conn, "select username from all_users "
+                                  "where username = :n", {"n": agent})
+        exists = bool(rows)
+        _, prows = run_query(conn, load_query("session-privileges.sql"))
+        dangerous = [r[0] for r in prows]
+    sql = agent_user_sql(owner, agent, password, exists)
     saved = None
     if ns.save:
         saved = save_agent_connection(root, base_name, base, agent, password)
     if ns.json:
         print(json.dumps({
             "owner": owner, "agent": agent, "password": password, "sql": sql,
-            "saved_connection": saved, "owner_connection": base_name,
+            "agent_user_exists": exists, "saved_connection": saved,
+            "owner_connection": base_name,
+            "check_will_warn": bool(dangerous) if dangerous is not None else None,
+            "owner_dangerous_privs": dangerous,
             "next": ["have a DBA run the sql", f"{invocation()} check"]}))
         return
     print(sql)
     print("-- The password is regenerated on EVERY run — only the SQL from")
     print("-- this exact run matches what --save writes. One run, not two.")
+    if dangerous:
+        print(f"\n! Even after this, {invocation()} check will STILL warn: "
+              f"the owner {owner} holds\n  {', '.join(dangerous[:3])}"
+              + ("…" if len(dangerous) > 3 else "")
+              + " — every proxy session inherits it.\n"
+              "  Trim the owner's grants to reach the no-warning goal state "
+              "(see README, Security).")
+    elif dangerous is not None:
+        print(f"\nOwner grants look clean: after the DBA runs this, "
+              f"{invocation()} check should pass with no warning.")
     if saved:
         print(f"\nSaved connection '{saved}' (now the default) in "
               f"{pathlib.Path(root) / CONFIG_DIR / CONFIG_NAME} — its "
@@ -1572,8 +1609,7 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "conventions": cmd_conventions, "install": cmd_install,
             "unistr": cmd_unistr, "agent-user": cmd_agent_user}
 
-NO_DB_COMMANDS = {"policy", "journal", "conventions", "install", "unistr",
-                  "agent-user"}
+NO_DB_COMMANDS = {"policy", "journal", "conventions", "install", "unistr"}
 
 
 # --- CLI ---------------------------------------------------------------------

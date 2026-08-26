@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.2 — 2026-08-26
+
+- `agent-user` asks the database before writing SQL: an agent user that
+  already exists gets the `ALTER ... ACCOUNT UNLOCK` form (CREATE would be
+  ORA-01920), and the owner's grants are inspected up front — the output
+  states whether `check` will pass clean or still warn, before the DBA
+  runs anything. Offline (no connection) falls back to CREATE plus the
+  ALTER fallback as a comment.
+
 ## 0.2.1 — 2026-08-26
 
 - `agent-user` speaks agent: `--json` returns owner/agent/password/sql/

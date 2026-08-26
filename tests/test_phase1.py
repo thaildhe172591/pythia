@@ -254,8 +254,7 @@ def test_to_unistr():
 
 
 def test_agent_user_sql_is_least_privilege():
-    sql = pythia.AGENT_USER_SQL.format(owner="APP", agent="APP_AGENT",
-                                       password="x")
+    sql = pythia.agent_user_sql("APP", "APP_AGENT", "x", exists=False)
     assert "CREATE USER APP_AGENT" in sql
     assert "GRANT CREATE SESSION TO APP_AGENT" in sql
     assert "GRANT CONNECT THROUGH APP_AGENT" in sql

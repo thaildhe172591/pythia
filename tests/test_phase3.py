@@ -558,6 +558,39 @@ def test_journal_prune_keeps_applied_entries():
         assert pythia.list_journal_entries(td) == [kept]
 
 
+def test_agent_user_alter_form_and_warning_prediction():
+    """DB-aware agent-user: an existing agent user gets the ALTER+UNLOCK
+    form (CREATE would be ORA-01920), and a dirty owner is called out —
+    check will STILL warn — before the DBA runs anything."""
+    import argparse
+    import contextlib
+    import io
+    import os
+    script = {"from all_users": ([("USERNAME",)], [("APP_AGENT",)]),
+              "from session_privs": ([("PRIVILEGE",)], [("DROP ANY TABLE",)])}
+    with tempfile.TemporaryDirectory() as td:
+        (pathlib.Path(td) / ".pythia").mkdir()
+        (pathlib.Path(td) / ".pythia" / "connections.json").write_text(
+            json.dumps({"dev": {"host": "h", "user": "APP", "password": "p",
+                                "schema": "APP"}}), encoding="utf-8")
+        cwd = os.getcwd()
+        os.chdir(td)
+        try:
+            ns = argparse.Namespace(conn=None, json=True, save=False, name=None)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                pythia.cmd_agent_user(FakeConn(script), "APP", ns)
+            d = json.loads(buf.getvalue())
+        finally:
+            os.chdir(cwd)
+        assert d["agent_user_exists"] is True
+        assert "ALTER USER APP_AGENT IDENTIFIED BY" in d["sql"]
+        assert "ACCOUNT UNLOCK" in d["sql"]
+        assert "CREATE USER" not in d["sql"]
+        assert d["check_will_warn"] is True
+        assert d["owner_dangerous_privs"] == ["DROP ANY TABLE"]
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
