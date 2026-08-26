@@ -106,8 +106,12 @@ every agent read them first (`pythia conventions` shows both).
 
 **The account is the real security layer** — the policy file is an application-side
 fence. Give the agent its own revocable credential with proxy authentication
-(`agent_user[schema_owner]`, no `ANY` privileges, no owner password shared):
-see [`examples/agent-user-setup.example.sql`](examples/agent-user-setup.example.sql).
+(`agent_user[schema_owner]`, no `ANY` privileges, no owner password shared).
+`pythia agent-user` generates that SQL for your current connection — password
+included, `--save` drops the credential into `connections.json` — but it is
+optional convenience: running
+[`examples/agent-user-setup.example.sql`](examples/agent-user-setup.example.sql)
+by hand works just as well.
 `pythia check` warns when the session runs with more power than the task needs.
 
 Per-group write policy, `.pythia/policy.json` (defaults shown):

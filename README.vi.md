@@ -118,8 +118,11 @@ agent đọc nó trước tiên (`pythia conventions` hiển thị cả hai).
 **Tài khoản DB mới là lớp bảo vệ thật** — file policy chỉ là hàng rào phía
 ứng dụng. Cấp cho agent một credential riêng, thu hồi được, qua proxy
 authentication (`agent_user[schema_owner]`, không quyền `ANY`, không chia sẻ
-mật khẩu owner): xem
-[`examples/agent-user-setup.example.sql`](examples/agent-user-setup.example.sql).
+mật khẩu owner). `pythia agent-user` sinh sẵn khối SQL đó cho connection hiện
+tại — kèm password, `--save` tự dán credential vào `connections.json` — nhưng
+đây chỉ là tiện ích tuỳ chọn: dev tự thao tác bằng
+[`examples/agent-user-setup.example.sql`](examples/agent-user-setup.example.sql)
+cũng hoàn toàn được.
 `pythia check` cảnh báo khi phiên chạy với quyền cao hơn mức việc cần.
 
 Chính sách ghi theo nhóm, `.pythia/policy.json` (giá trị mặc định):
