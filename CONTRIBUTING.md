@@ -92,3 +92,24 @@ disposable artifacts (they are gitignored).
 - One concern per PR, tests included, all four suites green locally.
 - Explain *why* in the commit body; the repo's history is written as prose
   and reviewers read it.
+
+## Releasing
+
+Versions live in four files and must agree: `pyproject.toml`,
+`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
+`npm/package.json` (`tests/test_install.py` enforces it). To release:
+
+1. Bump the version in all four, update `CHANGELOG.md`, merge to `main`.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z` — the `release` workflow
+   checks the tag against the manifests, runs the suites, then publishes
+   `pythia-plsql` to PyPI and npm.
+
+One-time setup by a maintainer:
+
+- **PyPI**: add a trusted publisher (pypi.org → account → Publishing →
+  add a *pending* publisher for project `pythia-plsql`, repository
+  `thaildhe172591/pythia`, workflow `release.yml`, environment `pypi`).
+  No token is stored anywhere.
+- **npm**: `npm token create` (automation token) → repository secret
+  `NPM_TOKEN`. The very first `npm publish` of a name cannot use OIDC,
+  so the token path stays.

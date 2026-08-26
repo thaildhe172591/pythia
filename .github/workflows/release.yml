@@ -1,0 +1,61 @@
+name: release
+
+# Tag vX.Y.Z -> publish pythia-plsql to PyPI and npm.
+# One-time setup (see CONTRIBUTING.md): a PyPI trusted publisher for this
+# workflow (no token), and an NPM_TOKEN repository secret for npm.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # the tag is the version; every manifest must already agree with it
+      - name: tag matches all version manifests
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          grep -qF "version = \"$V\"" pyproject.toml
+          node -e "const a=require('./.claude-plugin/plugin.json').version,
+                         b=require('./npm/package.json').version;
+                   if (a!=='$V'||b!=='$V') { console.error('plugin.json='+a+' npm='+b+' tag=$V'); process.exit(1) }"
+      - run: python -m compileall scripts tests
+      - run: python tests/test_phase1.py
+      - run: python tests/test_phase2.py
+      - run: python tests/test_phase3.py
+      - run: python tests/test_phase5.py
+      - run: python tests/test_install.py
+
+  pypi:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # PyPI trusted publishing — no token stored anywhere
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  npm:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm publish
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
