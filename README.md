@@ -6,6 +6,8 @@
 
 > Oracle's MCP gives your agent a connection. **pythia gives it the judgment to use it.**
 
+**English** · [Tiếng Việt](README.vi.md)
+
 [![ci](https://github.com/thaildhe172591/pythia/actions/workflows/ci.yml/badge.svg)](https://github.com/thaildhe172591/pythia/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![python](https://img.shields.io/badge/python-3.9%2B-blue)
@@ -68,6 +70,12 @@ runs `npx skills add` (77 agents, symlinked updates; `--source <git-url>`
 for internal mirrors) — without Node it copies the bundled skill pack into
 `.claude/skills/` and `.agents/skills/`. Skills alone: `npx skills add
 thaildhe172591/pythia`, or `/plugin marketplace add thaildhe172591/pythia`.
+
+`pip install` is **once per machine**; `pythia install` is **once per
+project** — run it in each repo's root to drop the skills and a fresh
+`.pythia/connections.json` there. The CLI always reads the config of the
+project you are standing in (searched upward from the current directory,
+no global fallback), so one global CLI never mixes up databases.
 
 Running from a clone works too — `python scripts/pythia.py <command>`; every
 printed follow-up command matches how you invoked it. Windows, macOS, Linux
