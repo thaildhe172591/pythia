@@ -41,6 +41,12 @@ cd my-project && pythia install   # per project: scaffolds .pythia/connections.j
 pythia check               # fill in connections.json, then verify
 ```
 
+**`pythia: command not found` right after installing?** pip put the executable
+in a scripts directory that is not on your PATH — the default for
+`pip install --user`, and the usual outcome on Windows. Nothing is broken and
+nothing needs reinstalling: `python -m pythia <command>` works regardless, and
+`pythia install` prints the exact directory to add to PATH.
+
 **Global-first**: the skill pack lives in `~/.claude/skills` — one copy. A
 project `pythia install` that detects the global pack **skips the skills
 step** — a second copy doubles every entry in the agent's menu. Want skills

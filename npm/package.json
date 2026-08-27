@@ -1,6 +1,6 @@
 {
   "name": "pythia-plsql",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "One-command installer for pythia: PL/SQL development for AI agents on Oracle Database. Installs the Python CLI, the seven-skill pack, and the .pythia/ config scaffold.",
   "bin": {
     "pythia-plsql": "bin.js"

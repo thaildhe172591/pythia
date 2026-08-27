@@ -41,6 +41,12 @@ cd du-an && pythia install # mỗi project: chỉ scaffold .pythia/connections.j
 pythia check               # điền connections.json rồi kiểm tra
 ```
 
+**Vừa cài xong mà báo `pythia: command not found`?** pip đặt file thực thi vào
+thư mục scripts không nằm trong PATH — mặc định của `pip install --user`, và là
+kết cục thường gặp trên Windows. Không hỏng gì, không cần cài lại: `python -m
+pythia <lệnh>` chạy được bất kể PATH, và `pythia install` in ra đúng thư mục
+cần thêm vào PATH.
+
 **Mô hình global-first**: skills nằm ở `~/.claude/skills` (một bản duy nhất).
 `pythia install` trong project phát hiện pack global sẽ **tự bỏ qua bước
 skills** — vì bản thứ hai làm mỗi skill hiện đôi trong menu của agent. Muốn

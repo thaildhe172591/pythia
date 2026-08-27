@@ -185,6 +185,49 @@ def paint_diff_line(ln, enabled):
     return ln
 
 
+def installed_scripts_dir():
+    """The directory pip put our executable in. The default scheme is wrong
+    for `pip install --user` — the common case on Windows — so the candidate
+    that actually holds the executable wins."""
+    import sysconfig
+    candidates = [sysconfig.get_path("scripts")]
+    try:
+        candidates.append(
+            sysconfig.get_path("scripts", sysconfig.get_preferred_scheme("user")))
+    except (AttributeError, KeyError):      # very old Python: no user scheme
+        pass
+    exe = "pythia.exe" if os.name == "nt" else "pythia"
+    for d in candidates:
+        if d and (pathlib.Path(d) / exe).exists():
+            return d
+    return candidates[-1] if candidates else None
+
+
+def entry_point_hint(found, scripts_dir):
+    """What to say when `pythia` will not resolve as a command. pip installs
+    the executable into a scripts directory that is often not on PATH — the
+    default for `pip install --user` on Windows — and the shell's
+    CommandNotFound names nothing that helps. Seen on a real machine, at the
+    step immediately after the install the docs tell you to run."""
+    if found:
+        return None
+    out = ["`pythia` is installed but not on your PATH."]
+    if scripts_dir:
+        out.append("  It lives in: " + str(scripts_dir))
+        if os.name == "nt":
+            out.append("  Add it once, in PowerShell, then reopen the terminal:")
+            out.append("    [Environment]::SetEnvironmentVariable('PATH',")
+            out.append("      \"$env:PATH;" + str(scripts_dir) + "\", 'User')")
+        else:
+            out.append("  Add it to your shell profile:")
+            out.append("    export PATH=\"$PATH:" + str(scripts_dir) + "\"")
+    else:
+        out.append("  Add pip's scripts directory to PATH.")
+    out.append("Either way, this works right now, PATH or no PATH:")
+    out.append("  " + pathlib.Path(sys.executable).stem + " -m pythia <command>")
+    return "\n".join(out)
+
+
 def invocation():
     """How to invoke this tool, exactly as the user actually ran it. Every
     printed command must be paste-able: a bare `pythia ...` is
@@ -1930,6 +1973,11 @@ def cmd_install(conn, schema, ns):
             clean_legacy_skills(ns.project_root)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
+    hint = entry_point_hint(shutil.which("pythia"),
+                             installed_scripts_dir())
+    if hint:
+        print()
+        print(hint)
 
 
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,

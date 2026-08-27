@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.4 — 2026-08-27
+
+- **`pythia install` now says where the executable went.** A field install on
+  Windows ended with `pythia : The term 'pythia' is not recognized` at the
+  very step the guide tells you to run next: `pip install --user` — the
+  default when writing to the interpreter's own directory needs admin — puts
+  `pythia.exe` in a scripts directory that is not on PATH, and the shell's
+  error names nothing that helps. Install now checks whether its own command
+  resolves, and if not prints the exact directory, the one-line PATH command
+  for that platform, and the `python -m pythia` form that works with no PATH
+  at all. Both guides carry the same note.
+
 ## 0.4.3 — 2026-08-27
 
 - `examples/claude-code-settings.example.json`: optional Claude Code

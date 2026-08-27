@@ -183,6 +183,31 @@ def test_one_version_across_every_manifest():
     assert "oracledb" in pyproject
 
 
+def test_entry_point_hint_names_the_directory_to_add():
+    """pip install --user on Windows puts pythia.exe in a Scripts directory
+    that is not on PATH, so the very next documented command fails with
+    CommandNotFound -- naming nothing that helps. Seen on a real machine."""
+    hint = pythia.entry_point_hint(found=None, scripts_dir=r"C:\Py\Scripts")
+    assert hint is not None
+    assert r"C:\Py\Scripts" in hint          # the exact directory to add
+    assert "-m pythia" in hint                # the fallback that works now
+    # once the command resolves, say nothing
+    assert pythia.entry_point_hint(found="/usr/local/bin/pythia",
+                                   scripts_dir="/usr/local/bin") is None
+    # cannot locate the directory: still offer the fallback, claim nothing else
+    hint = pythia.entry_point_hint(found=None, scripts_dir=None)
+    assert "-m pythia" in hint and "PATH" in hint
+
+
+def test_scripts_dir_prefers_where_the_executable_really_is():
+    import sysconfig
+    user = sysconfig.get_path("scripts", sysconfig.get_preferred_scheme("user"))
+    # whichever candidate holds the executable wins; with none holding it the
+    # answer is the user scheme, which is where pip --user puts it
+    assert pythia.installed_scripts_dir() in (
+        sysconfig.get_path("scripts"), user, None)
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
