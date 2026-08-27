@@ -295,6 +295,33 @@ def test_add_to_user_path_handles_an_empty_and_untidy_value():
     assert written == [USERBIN + os.pathsep + SCRIPTS]   # no doubled separator
 
 
+def test_hint_tells_a_stale_shell_apart_from_an_unconfigured_one():
+    """The directory being in the stored PATH while the running process
+    cannot see it means one thing only: this terminal started earlier. Saying
+    "not on your PATH" there sends people to re-run an install that already
+    worked -- which is exactly what happened in the field."""
+    stale = pythia.entry_point_hint(found=None, scripts_dir=SCRIPTS,
+                                    in_stored_path=True)
+    assert "already" in stale.lower()
+    assert "new" in stale.lower() and "tab" in stale.lower()   # window, not tab
+    assert "--add-to-path" not in stale                        # nothing to redo
+    unconfigured = pythia.entry_point_hint(found=None, scripts_dir=SCRIPTS,
+                                           in_stored_path=False)
+    assert "--add-to-path" in unconfigured
+    # and once the command resolves, still silence
+    assert pythia.entry_point_hint(found="/x/pythia", scripts_dir=SCRIPTS,
+                                   in_stored_path=True) is None
+
+
+def test_long_path_is_flagged_before_it_silently_truncates():
+    """Windows tooling still truncates PATH near 2047 characters, and the
+    entry we just appended is the last one -- the first to be lost."""
+    assert pythia.path_length_warning("x" * 1000) is None
+    w = pythia.path_length_warning("x" * 2040)
+    assert w is not None and "2047" in w
+    assert "duplicate" in w.lower()      # names the usual cause
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

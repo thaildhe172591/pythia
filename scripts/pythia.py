@@ -209,10 +209,41 @@ def offer_path_fix(scripts_dir, interactive, forced=False):
         print(f"Could not update your PATH: {e}")
         return False
     print(NL + f"  {'Added' if changed else 'Already in'} your user PATH: {scripts_dir}")
+    warn = path_length_warning(os.environ.get("PATH", ""))
+    if warn:
+        print("  " + warn)
     print("  Open a NEW terminal for it to take effect — an already-running")
     print("  one keeps the environment it started with, and so do its tabs.")
     print(f"  Until then: {pathlib.Path(sys.executable).stem} -m pythia <command>")
     return True
+
+
+def path_length_warning(combined):
+    """Windows tooling still truncates PATH around 2047 characters, and a
+    freshly appended entry sits last -- so it is the first thing lost, and it
+    is lost silently. The usual cause is a PATH that had the system entries
+    copied into the user's."""
+    n = len(combined or "")
+    if n < 1900:
+        return None
+    return (f"Your PATH is {n} characters; Windows truncates near 2047, and the "
+            "entry just added is last in line.\n"
+            "  The usual cause is duplicate entries — the system PATH copied "
+            "into the user PATH by\n"
+            "  a `$env:PATH` one-liner. Compare the two scopes and remove what "
+            "appears in both.")
+
+
+def stored_path_has(directory):
+    """Is the directory in the PATH as *stored*, rather than the one this
+    process inherited? The two differ for every terminal opened before the
+    last change, which is the common confusion."""
+    if not directory or os.name != "nt":
+        return False
+    try:
+        return path_contains(_read_user_path(), directory)
+    except OSError:
+        return False
 
 
 def path_contains(path_value, directory):
@@ -280,7 +311,7 @@ def installed_scripts_dir():
     return candidates[-1] if candidates else None
 
 
-def entry_point_hint(found, scripts_dir):
+def entry_point_hint(found, scripts_dir, in_stored_path=False):
     """What to say when `pythia` will not resolve as a command. pip installs
     the executable into a scripts directory that is often not on PATH — the
     default for `pip install --user` on Windows — and the shell's
@@ -288,6 +319,21 @@ def entry_point_hint(found, scripts_dir):
     step immediately after the install the docs tell you to run."""
     if found:
         return None
+    if in_stored_path:
+        # The directory is in the stored PATH but not in this process: the
+        # terminal started before the change. Sending someone to re-run the
+        # install here wastes their time -- it already worked.
+        return (NL.join([
+            "`pythia` is already on your PATH — this terminal just started "
+            "before that was true.",
+            "  Open a NEW terminal WINDOW. A new tab is not enough: tabs "
+            "inherit the",
+            "  environment of the window that spawned them, so if you use "
+            "Windows Terminal,",
+            "  VS Code or Cursor, restart the application itself.",
+            "  In this one, keep using: "
+            + pathlib.Path(sys.executable).stem + " -m pythia <command>",
+        ]))
     out = ["`pythia` is installed but not on your PATH."]
     if scripts_dir:
         out.append("  It lives in: " + str(scripts_dir))
@@ -2055,11 +2101,13 @@ def cmd_install(conn, schema, ns):
             clean_legacy_skills(ns.project_root)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
-    hint = entry_point_hint(shutil.which("pythia"), installed_scripts_dir())
+    scripts_dir = installed_scripts_dir()
+    hint = entry_point_hint(shutil.which("pythia"), scripts_dir,
+                            in_stored_path=stored_path_has(scripts_dir))
     if hint:
         print()
         print(hint)
-        offer_path_fix(installed_scripts_dir(), interactive,
+        offer_path_fix(scripts_dir, interactive,
                        getattr(ns, "add_to_path", False))
 
 

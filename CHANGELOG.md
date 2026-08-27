@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.8 — 2026-08-27
+
+Both fixes come from a field install where everything had in fact worked.
+
+- **"Not on your PATH" now tells a stale terminal apart from an
+  unconfigured one.** After `--add-to-path` succeeds, every terminal already
+  open still carries the environment it started with, so the command stays
+  missing there and the old message sent people to re-run an install that
+  had already done its job. When the directory is in the stored PATH but not
+  in this process, pythia says so, and says that a new *window* is needed —
+  a new tab inherits from the window that spawned it, so Windows Terminal,
+  VS Code and Cursor have to be restarted.
+- **A PATH near the truncation limit is now flagged.** Windows tooling still
+  cuts PATH around 2047 characters, and a freshly appended entry is last in
+  line, so it disappears first and silently. The machine this was found on
+  sat at 2050, from system entries copied into the user PATH by a
+  `$env:PATH` one-liner.
+
 ## 0.4.7 — 2026-08-27
 
 - **`pythia install` puts itself on your PATH.** Three field installs in a
