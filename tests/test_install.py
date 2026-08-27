@@ -5,6 +5,7 @@ no network, no npx needed.
 Run: python tests/test_install.py
 """
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -187,9 +188,9 @@ def test_entry_point_hint_names_the_directory_to_add():
     """pip install --user on Windows puts pythia.exe in a Scripts directory
     that is not on PATH, so the very next documented command fails with
     CommandNotFound -- naming nothing that helps. Seen on a real machine."""
-    hint = pythia.entry_point_hint(found=None, scripts_dir=r"C:\Py\Scripts")
+    hint = pythia.entry_point_hint(found=None, scripts_dir=SCRIPTS)
     assert hint is not None
-    assert r"C:\Py\Scripts" in hint          # the exact directory to add
+    assert SCRIPTS in hint          # the exact directory to add
     assert "-m pythia" in hint                # the fallback that works now
     # once the command resolves, say nothing
     assert pythia.entry_point_hint(found="/usr/local/bin/pythia",
@@ -235,14 +236,27 @@ def test_cmd_install_runs_end_to_end():
         assert env is not None
 
 
-def test_path_contains_normalises_the_way_windows_does():
+# Native paths: on POSIX ':' is the PATH separator and would cut a
+# Windows path in half, so these are built from os.sep.
+SCRIPTS = os.path.join(os.sep + 'opt', 'a', 'Scripts')
+USERBIN = os.path.join(os.sep + 'opt', 'a', 'bin')
+SYS1 = os.sep + 'windows'
+SYS2 = os.path.join(os.sep + 'windows', 'system32')
+
+
+def test_path_contains_normalises_like_the_platform_does():
+    """Paths must be native: on POSIX the separator is ':', which cuts a
+    Windows path in half, and normcase does not fold case."""
     import os
-    sep = os.pathsep
-    p = sep.join([r"C:\Windows", r"C:\Users\A\Scripts", ""])
-    assert pythia.path_contains(p, r"C:\Users\A\Scripts")
-    assert pythia.path_contains(p, r"c:\users\a\scripts\\")   # case + trailing
-    assert not pythia.path_contains(p, r"C:\Users\A\Other")
-    assert not pythia.path_contains("", r"C:\X")
+    here = os.path.join(os.sep + "opt", "a", "Scripts")
+    other = os.path.join(os.sep + "opt", "a", "Other")
+    p = os.pathsep.join([os.sep + "usr", here, ""])   # trailing empty entry
+    assert pythia.path_contains(p, here)
+    assert pythia.path_contains(p, here + os.sep)     # trailing separator
+    assert not pythia.path_contains(p, other)
+    assert not pythia.path_contains("", here)
+    if os.name == "nt":                               # case folds on Windows only
+        assert pythia.path_contains(p, here.upper())
 
 
 def test_add_to_user_path_reads_the_stored_value_not_the_process_env():
@@ -251,21 +265,21 @@ def test_add_to_user_path_reads_the_stored_value_not_the_process_env():
     the install. This is the mistake this function exists to not repeat."""
     import os
     written = []
-    stored = r"C:\Users\A\bin"          # what the registry holds: user only
+    stored = USERBIN          # what the registry holds: user only
     os.environ["PATH"] = os.pathsep.join(   # what the process sees: much more
-        [r"C:\Windows", r"C:\Windows\System32", stored])
-    changed = pythia.add_to_user_path(r"C:\Users\A\Scripts",
+        [SYS1, SYS2, stored])
+    changed = pythia.add_to_user_path(SCRIPTS,
                                       read=lambda: stored,
                                       write=written.append)
     assert changed is True
-    assert written == [stored + os.pathsep + r"C:\Users\A\Scripts"]
-    assert r"C:\Windows" not in written[0]      # no system entries leaked in
+    assert written == [stored + os.pathsep + SCRIPTS]
+    assert SYS1 not in written[0]      # no system entries leaked in
 
 
 def test_add_to_user_path_is_idempotent():
     written = []
-    changed = pythia.add_to_user_path(r"C:\Users\A\Scripts",
-                                      read=lambda: r"C:\Users\A\Scripts",
+    changed = pythia.add_to_user_path(SCRIPTS,
+                                      read=lambda: SCRIPTS,
                                       write=written.append)
     assert changed is False and written == []
 
@@ -273,12 +287,12 @@ def test_add_to_user_path_is_idempotent():
 def test_add_to_user_path_handles_an_empty_and_untidy_value():
     import os
     written = []
-    pythia.add_to_user_path(r"C:\S", read=lambda: "", write=written.append)
-    assert written == [r"C:\S"]
+    pythia.add_to_user_path(SCRIPTS, read=lambda: "", write=written.append)
+    assert written == [SCRIPTS]
     written.clear()
-    pythia.add_to_user_path(r"C:\S", read=lambda: r"C:\A" + os.pathsep,
+    pythia.add_to_user_path(SCRIPTS, read=lambda: USERBIN + os.pathsep,
                             write=written.append)
-    assert written == [r"C:\A" + os.pathsep + r"C:\S"]   # no doubled separator
+    assert written == [USERBIN + os.pathsep + SCRIPTS]   # no doubled separator
 
 
 def main():
