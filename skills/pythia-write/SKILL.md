@@ -9,7 +9,9 @@ description: Use when writing or modifying PL/SQL source - a procedure, function
 
 **Before anything:** if the project has `.pythia/conventions.md`, read it —
 house rules there outrank every generic pattern below, and
-`pythia conventions` shows the naming patterns the apply preview will check.
+`pythia conventions` shows the naming patterns the apply preview will check. If the project has none and the developer
+describes a house style, offer `pythia conventions --init` — captured once,
+it applies to every future session instead of being re-explained.
 
 A codebase with thousands of procedures has already decided how procedures
 look. Your job is to write one that a maintainer cannot tell from the

@@ -302,12 +302,24 @@ so `pythia plscope` always has a complete index on the dev schema.
 
 ### Conventions — house style as config
 
-- `.pythia/conventions.json`: machine-checked naming patterns — apply
-  previews warn on drift (see `examples/conventions.example.json`)
-- `.pythia/conventions.md`: the prose rules — the skills make agents read
-  them first
-- `pythia conventions` shows both
+```bash
+pythia conventions --init    # writes the pair below; never overwrites
+pythia conventions           # show what is in effect
+```
 
+- `.pythia/conventions.json`: naming patterns per object type. Every apply
+  preview warns when a new object's name drifts from them. Style warns;
+  policy is what blocks.
+- `.pythia/conventions.md`: the same rules in prose, plus the ones no regex
+  can express. `pythia-write` reads this before writing anything and treats
+  it as outranking the generic patterns the pack ships with.
+
+Replace the placeholder patterns with the real ones —
+`pythia similar <A_TYPICAL_NAME>` shows what the schema already does, which
+beats inventing a scheme. In `conventions.md`, write the cost of breaking
+each rule, not just the rule: a consequence gets followed where an
+instruction gets skipped. Commit both files so the team and every agent
+session work from the same rules.
 ## 8. Exact non-ASCII literals: unistr
 
 Raw non-ASCII literals break with client/DB charsets. The rule (enforced by

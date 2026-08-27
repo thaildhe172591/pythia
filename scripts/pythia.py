@@ -1332,6 +1332,78 @@ def cmd_plscope(conn, schema, ns):
         emit_table(ns, stmt_cols, *clip(stmt_rows, ns.limit))
 
 
+CONVENTIONS_TEMPLATE = """{
+  "naming": {
+    "TABLE": "^T_[A-Z0-9_]+$",
+    "PROCEDURE": "^P_[A-Z0-9_]+$",
+    "FUNCTION": "^F_[A-Z0-9_]+$",
+    "PACKAGE": "^PKG_[A-Z0-9_]+$",
+    "SEQUENCE": "^S_[A-Z0-9_]+$",
+    "TRIGGER": "^TRG_[A-Z0-9_]+$"
+  }
+}
+"""
+
+CONVENTIONS_PROSE_TEMPLATE = """# Project conventions
+
+Rules for anyone — human or agent — writing PL/SQL in this schema. Agents are
+told to read this before writing, and it outranks the generic patterns the
+skill pack ships with.
+
+`conventions.json` next to this file holds the naming patterns as regexes;
+every `pythia apply` preview warns when a new object's name does not match.
+Keep the two in step: this file explains, that file enforces.
+
+## Naming
+
+Replace the patterns in `conventions.json` with yours, then describe them
+here so the reasoning survives. `pythia similar <A_TYPICAL_NAME>` shows what
+the schema already does — copy that rather than inventing a scheme.
+
+| Kind | Rule | Example |
+|---|---|---|
+| Table | | |
+| Procedure | | |
+| Function | | |
+
+## Rules that carry a cost when broken
+
+State the consequence, not just the rule — a rule with a named cost gets
+followed. For example: which parameter prefixes the calling layer depends on,
+which column every query must filter by, where a transaction may commit.
+
+| Rule | Cost of breaking it |
+|---|---|
+| | |
+
+## Known exceptions
+
+Objects that break the pattern on purpose, and why renaming them is worse
+than the warning they produce on every apply.
+"""
+
+
+def scaffold_conventions(root):
+    """Write the conventions pair, skipping anything that already exists.
+    Returns the paths actually created.
+
+    The docs used to say "copy examples/conventions.example.json", which is
+    no help to anyone who installed the wheel: there is no examples directory
+    there. The tool carries the templates instead.
+    """
+    d = pathlib.Path(root) / CONFIG_DIR
+    made = []
+    for name, body in (("conventions.json", CONVENTIONS_TEMPLATE),
+                       ("conventions.md", CONVENTIONS_PROSE_TEMPLATE)):
+        path = d / name
+        if path.is_file():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        made.append(path)
+    return made
+
+
 def load_conventions(root):
     """Project house style from .pythia/conventions.json — the machine half of
     the customization surface (the prose half is conventions.md, for agents).
@@ -1790,23 +1862,39 @@ def cmd_journal(conn, schema, ns):
 
 
 def cmd_conventions(conn, schema, ns):
-    conv = load_conventions(ns.project_root)
+    root = ns.project_root
+    if getattr(ns, "init", False):
+        made = scaffold_conventions(root)
+        for path in made:
+            print(f"Created {path}")
+        if not made:
+            print(f"Both files already exist in "
+                  f"{pathlib.Path(root) / CONFIG_DIR} — left untouched.")
+        else:
+            print(NL + "Edit the patterns to match this schema — "
+                  f"`{invocation()} similar <A_TYPICAL_NAME>` shows what "
+                  "it already does." + NL + "Every apply preview then "
+                  "warns when a name drifts from them.")
+        return
+    conv = load_conventions(root)
     if ns.json:
         print(json.dumps(conv or {}))
         return
     if not conv:
         print("No project conventions configured.")
-        print(f"Create {pathlib.Path(ns.project_root) / CONFIG_DIR / 'conventions.json'} "
-              "(see examples/conventions.example.json) and apply previews will "
-              "warn when a new object's name drifts from your patterns.\n"
-              "Put the prose rules in conventions.md next to it for your agents.")
+        print(f"Create the starter pair with: {invocation()} conventions --init")
+        print("  conventions.json  naming patterns; apply previews warn on drift")
+        print("  conventions.md    the prose rules your agents read first")
         return
     print("Naming patterns — apply previews warn when a name drifts:")
     for otype, pattern in conv.get("naming", {}).items():
         print(f"  {otype:<13} {pattern}")
-    md = pathlib.Path(ns.project_root) / CONFIG_DIR / "conventions.md"
+    md = pathlib.Path(root) / CONFIG_DIR / "conventions.md"
     if md.is_file():
-        print(f"\nProse rules for agents: {md}")
+        print(NL + f"Prose rules for agents: {md}")
+    else:
+        print(NL + f"No conventions.md yet — {invocation()} conventions "
+              "--init writes one.")
 
 
 AGENT_USER_SQL = """\
@@ -2254,8 +2342,11 @@ def build_parser():
                    help="apply without stopping; the full preview still prints and journals")
     s.add_argument("--depth", type=int, default=3,
                    help="impact depth for the preview (default 3)")
-    sub.add_parser("conventions", parents=[common()],
+    s = sub.add_parser("conventions", parents=[common()],
                    help="show the project's house-style naming patterns")
+    s.add_argument("--init", action="store_true",
+                   help="write starter conventions.json and conventions.md "
+                        "into .pythia/ (never overwrites)")
     s = sub.add_parser("agent-user", parents=[common()],
                        help="SQL for a least-privilege proxy agent user; "
                             "--save adds it to connections.json")

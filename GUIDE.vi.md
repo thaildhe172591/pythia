@@ -290,13 +290,25 @@ Nhóm không snapshot được mặc định `deny` — và lời từ chối n�
 Mặc định **bật**: mọi object apply qua pythia được compile kèm PL/Scope →
 `pythia plscope` luôn có index đầy đủ trên schema dev.
 
-### Conventions — house style là config
+### Conventions — quy ước nhà, dưới dạng config
 
-- `.pythia/conventions.json`: pattern đặt tên máy kiểm tra được — preview
-  apply cảnh báo khi drift (xem `examples/conventions.example.json`)
-- `.pythia/conventions.md`: luật văn xuôi — skills bắt agent đọc trước tiên
-- `pythia conventions` hiển thị cả hai
+```bash
+pythia conventions --init    # tạo cặp file dưới đây; không bao giờ ghi đè
+pythia conventions           # xem quy ước đang có hiệu lực
+```
 
+- `.pythia/conventions.json`: mẫu đặt tên theo từng loại object. Mọi preview
+  của `apply` sẽ cảnh báo khi tên object mới lệch mẫu. Style thì cảnh báo;
+  chặn là việc của policy.
+- `.pythia/conventions.md`: cùng bộ quy tắc nhưng bằng lời, kèm những điều
+  không regex nào diễn đạt được. `pythia-write` đọc file này trước khi viết
+  bất cứ thứ gì, và coi nó cao hơn các mẫu chung mà kit mang sẵn.
+
+Thay mẫu placeholder bằng mẫu thật — `pythia similar <TÊN_TIÊU_BIỂU>` cho
+thấy schema vốn đang đặt tên thế nào, tốt hơn là tự nghĩ ra quy ước mới.
+Trong `conventions.md`, hãy viết **cái giá phải trả khi phá luật**, không chỉ
+viết luật: hậu quả thì người ta tuân, mệnh lệnh thì người ta bỏ qua. Commit cả
+hai file để cả team và mọi phiên agent làm việc trên cùng một bộ luật.
 ## 8. Message tiếng Việt: unistr
 
 Literal non-ASCII paste thô sẽ vỡ theo charset client/DB. Luật (skill

@@ -75,6 +75,29 @@ server: command `sql -mcp`. Example client config:
   `V$SESSION.ACTION` the LLM's name; generated SQL carries an
   `/* LLM in use */` comment.
 
+## 4. What lives in `.pythia/`, and what creates it
+
+Only `connections.json` is written by `install`. The rest appear when you ask
+for them, so an empty `.pythia/` is a working one — nothing here is missing
+until you want it.
+
+| File | Created by | What it does |
+|---|---|---|
+| `connections.json` | `pythia install` | Where to connect. Holds credentials; gitignored. |
+| `journal/` | first write or snapshot | Every captured version, with a runnable rollback per entry. |
+| `conventions.json` | `pythia conventions --init` | Naming patterns per object type. Every apply preview warns when a new name drifts. |
+| `conventions.md` | `pythia conventions --init` | The house rules in prose. **`pythia-write` reads this before writing anything**, and it outranks the generic patterns this pack ships with. |
+| `policy.json` | `pythia policy set <group> <value>` | Pins the write policy. Absent means the built-in defaults, which are already the safe ones. |
+| `settings.json` | you, by hand | Optional switches, e.g. `{"auto_snapshot": false}`. |
+
+**Capturing a team's house style is the highest-value optional step.** Run
+`pythia conventions --init`, then replace the placeholder patterns with the
+real ones — `pythia similar <A_TYPICAL_NAME>` shows what the schema already
+does, which beats inventing a scheme. Fill in `conventions.md` with the rules
+that carry a cost when broken, and say what the cost is; a rule with a named
+consequence gets followed. Commit both files to the project repo so the whole
+team and every agent session works from the same rules.
+
 ## Done when
 
 - `pythia check` connects, shows the right schema, and prints **no**

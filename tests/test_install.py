@@ -7,6 +7,7 @@ Run: python tests/test_install.py
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -323,6 +324,28 @@ def test_long_path_is_flagged_before_it_silently_truncates():
     w = pythia.path_length_warning("x" * 2040)
     assert w is not None and "2047" in w
     assert "duplicate" in w.lower()      # names the usual cause
+
+
+def test_conventions_init_writes_both_halves_and_never_clobbers():
+    """Telling a pip user to copy examples/conventions.example.json is no help:
+    the wheel does not ship an examples directory. The tool writes the pair."""
+    import json
+    with tempfile.TemporaryDirectory() as td:
+        made = pythia.scaffold_conventions(td)
+        d = pathlib.Path(td) / ".pythia"
+        assert sorted(p.name for p in made) == ["conventions.json",
+                                                "conventions.md"]
+        rules = json.loads((d / "conventions.json").read_text(encoding="utf-8"))
+        assert "naming" in rules and rules["naming"]        # usable as written
+        for otype, pattern in rules["naming"].items():
+            re.compile(pattern)                             # every one valid
+        assert pythia.load_conventions(td) is not None      # accepted by the loader
+        prose = (d / "conventions.md").read_text(encoding="utf-8")
+        assert "conventions.json" in prose                  # the halves reference
+        # a second run leaves existing files alone
+        (d / "conventions.json").write_text('{"naming": {}}', encoding="utf-8")
+        assert pythia.scaffold_conventions(td) == []
+        assert (d / "conventions.json").read_text(encoding="utf-8") == '{"naming": {}}'
 
 
 def main():

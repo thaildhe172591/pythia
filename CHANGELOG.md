@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.10 — 2026-08-27
+
+- **`pythia conventions --init` writes the starter pair.** Capturing a house
+  style was documented as "copy `examples/conventions.example.json`" — which
+  is no help to anyone who installed the wheel, because there is no examples
+  directory there. The templates now ship inside the tool: a `conventions.json`
+  whose patterns are valid as written, and a `conventions.md` skeleton with
+  the sections that matter. Neither file is ever overwritten.
+- **The kit now says which of its files come from where.** `pythia-setup`
+  gained a table of everything that can live in `.pythia/` and the command
+  that creates each — only `connections.json` comes from `install`, and an
+  empty `.pythia/` is a working one. `pythia-write` offers `--init` when a
+  developer describes a house style with nowhere to put it, which is how a
+  rule stops being re-explained every session.
+
 ## 0.4.9 — 2026-08-27
 
 - **Connection errors Oracle has already diagnosed now carry their fix.**
