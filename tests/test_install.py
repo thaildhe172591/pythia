@@ -208,6 +208,33 @@ def test_scripts_dir_prefers_where_the_executable_really_is():
         sysconfig.get_path("scripts"), user, None)
 
 
+def test_cmd_install_runs_end_to_end():
+    """The unit tests exercised the hint functions but never cmd_install
+    itself, so a missing `import shutil` inside it reached CI. Run the whole
+    command against a temp project: it must scaffold and not raise."""
+    import argparse
+    import contextlib
+    import io
+    import os
+    with tempfile.TemporaryDirectory() as td:
+        ns = argparse.Namespace(project_root=td, glob=False, source=None,
+                                color=False, json=False)
+        buf = io.StringIO()
+        env = dict(os.environ, PATH="")      # no npx: take the bundled path
+        old = os.environ.get("PATH")
+        os.environ["PATH"] = ""
+        try:
+            with contextlib.redirect_stdout(buf):
+                pythia.cmd_install(None, None, ns)
+        finally:
+            if old is not None:
+                os.environ["PATH"] = old
+        out = buf.getvalue()
+        assert (pathlib.Path(td) / ".pythia" / "connections.json").is_file()
+        assert "Next: fill in" in out
+        assert env is not None
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

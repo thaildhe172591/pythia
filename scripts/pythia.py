@@ -1936,6 +1936,7 @@ def clean_legacy_skills(base_dir):
 
 
 def cmd_install(conn, schema, ns):
+    import shutil
     en = getattr(ns, "color", False)
     if en:
         sys.stdout.write(banner(en))
