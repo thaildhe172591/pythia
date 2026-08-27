@@ -235,6 +235,52 @@ def test_cmd_install_runs_end_to_end():
         assert env is not None
 
 
+def test_path_contains_normalises_the_way_windows_does():
+    import os
+    sep = os.pathsep
+    p = sep.join([r"C:\Windows", r"C:\Users\A\Scripts", ""])
+    assert pythia.path_contains(p, r"C:\Users\A\Scripts")
+    assert pythia.path_contains(p, r"c:\users\a\scripts\\")   # case + trailing
+    assert not pythia.path_contains(p, r"C:\Users\A\Other")
+    assert not pythia.path_contains("", r"C:\X")
+
+
+def test_add_to_user_path_reads_the_stored_value_not_the_process_env():
+    """The process PATH is system+user merged. Writing that back into user
+    scope copies every system entry into the user's -- a mess that outlives
+    the install. This is the mistake this function exists to not repeat."""
+    import os
+    written = []
+    stored = r"C:\Users\A\bin"          # what the registry holds: user only
+    os.environ["PATH"] = os.pathsep.join(   # what the process sees: much more
+        [r"C:\Windows", r"C:\Windows\System32", stored])
+    changed = pythia.add_to_user_path(r"C:\Users\A\Scripts",
+                                      read=lambda: stored,
+                                      write=written.append)
+    assert changed is True
+    assert written == [stored + os.pathsep + r"C:\Users\A\Scripts"]
+    assert r"C:\Windows" not in written[0]      # no system entries leaked in
+
+
+def test_add_to_user_path_is_idempotent():
+    written = []
+    changed = pythia.add_to_user_path(r"C:\Users\A\Scripts",
+                                      read=lambda: r"C:\Users\A\Scripts",
+                                      write=written.append)
+    assert changed is False and written == []
+
+
+def test_add_to_user_path_handles_an_empty_and_untidy_value():
+    import os
+    written = []
+    pythia.add_to_user_path(r"C:\S", read=lambda: "", write=written.append)
+    assert written == [r"C:\S"]
+    written.clear()
+    pythia.add_to_user_path(r"C:\S", read=lambda: r"C:\A" + os.pathsep,
+                            write=written.append)
+    assert written == [r"C:\A" + os.pathsep + r"C:\S"]   # no doubled separator
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

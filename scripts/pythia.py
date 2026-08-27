@@ -185,6 +185,83 @@ def paint_diff_line(ln, enabled):
     return ln
 
 
+NL = chr(10)   # a literal escape does not survive every editing path
+
+
+def offer_path_fix(scripts_dir, interactive, forced=False):
+    """Put pythia on PATH for the developer instead of handing them a command
+    to run. Only ever touches the user PATH, and only with a yes."""
+    if not scripts_dir or os.name != "nt":
+        return False
+    if not forced:
+        if not interactive:
+            return False
+        try:
+            answer = input(NL + "Add it to your PATH now? [Y/n] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if answer not in ("", "y", "yes"):
+            return False
+    try:
+        changed = add_to_user_path(scripts_dir)
+    except OSError as e:
+        print(f"Could not update your PATH: {e}")
+        return False
+    print(NL + f"  {'Added' if changed else 'Already in'} your user PATH: {scripts_dir}")
+    print("  Open a NEW terminal for it to take effect — an already-running")
+    print("  one keeps the environment it started with, and so do its tabs.")
+    print(f"  Until then: {pathlib.Path(sys.executable).stem} -m pythia <command>")
+    return True
+
+
+def path_contains(path_value, directory):
+    """Is this directory already listed in a PATH string? Compared the way
+    the platform does: case-insensitively on Windows, ignoring trailing
+    separators and empty entries."""
+    want = os.path.normcase(os.path.normpath(str(directory)))
+    return any(os.path.normcase(os.path.normpath(p)) == want
+               for p in str(path_value).split(os.pathsep) if p.strip())
+
+
+def _read_user_path():
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+        try:
+            return winreg.QueryValueEx(k, "Path")[0]
+        except FileNotFoundError:
+            return ""
+
+
+def _write_user_path(value):
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
+                        winreg.KEY_SET_VALUE) as k:
+        winreg.SetValueEx(k, "Path", 0, winreg.REG_EXPAND_SZ, value)
+
+
+def add_to_user_path(directory, read=None, write=None):
+    """Append a directory to the *user* PATH, returning whether anything
+    changed.
+
+    Reads the stored user value, never `os.environ["PATH"]`. The process
+    environment is the system and user values merged, so writing it back into
+    user scope copies every system entry into the user's -- doubling the
+    effective PATH and leaving a stale snapshot that shadows the real system
+    one after it next changes. That mistake is easy to make and outlives the
+    install, which is why this function exists rather than a one-line command.
+    """
+    read = read or _read_user_path
+    write = write or _write_user_path
+    current = read() or ""
+    if path_contains(current, directory):
+        return False
+    joined = str(directory) if not current.strip() else \
+        current.rstrip(os.pathsep) + os.pathsep + str(directory)
+    write(joined)
+    return True
+
+
 def installed_scripts_dir():
     """The directory pip put our executable in. The default scheme is wrong
     for `pip install --user` — the common case on Windows — so the candidate
@@ -215,9 +292,13 @@ def entry_point_hint(found, scripts_dir):
     if scripts_dir:
         out.append("  It lives in: " + str(scripts_dir))
         if os.name == "nt":
-            out.append("  Add it once, in PowerShell, then reopen the terminal:")
-            out.append("    [Environment]::SetEnvironmentVariable('PATH',")
-            out.append("      \"$env:PATH;" + str(scripts_dir) + "\", 'User')")
+            # Deliberately not a PowerShell one-liner over $env:PATH:
+            # that variable is system and user merged, so writing it
+            # back into user scope copies every system entry into the
+            # user's. Let the tool do it correctly instead.
+            out.append("  Put it there with: "
+                       + pathlib.Path(sys.executable).stem
+                       + " -m pythia install --add-to-path")
         else:
             out.append("  Add it to your shell profile:")
             out.append("    export PATH=\"$PATH:" + str(scripts_dir) + "\"")
@@ -1974,11 +2055,12 @@ def cmd_install(conn, schema, ns):
             clean_legacy_skills(ns.project_root)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
-    hint = entry_point_hint(shutil.which("pythia"),
-                             installed_scripts_dir())
+    hint = entry_point_hint(shutil.which("pythia"), installed_scripts_dir())
     if hint:
         print()
         print(hint)
+        offer_path_fix(installed_scripts_dir(), interactive,
+                       getattr(ns, "add_to_path", False))
 
 
 COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
@@ -2112,6 +2194,9 @@ def build_parser():
     s.add_argument("-g", "--global", dest="glob", action="store_true",
                    help="install the skill pack machine-wide (serves every "
                         "project; per-project installs then skip skills)")
+    s.add_argument("--add-to-path", action="store_true", dest="add_to_path",
+                   help="put the pythia command on your PATH without asking "
+                        "(Windows; user PATH only)")
     s.add_argument("--source", default=DEFAULT_SKILLS_SOURCE,
                    help="skills repo for `npx skills add` "
                         f"(default {DEFAULT_SKILLS_SOURCE})")

@@ -41,13 +41,26 @@ cd my-project && python -m pythia install   # per project: scaffolds .pythia/ on
 python -m pythia check        # fill in connections.json, then verify
 ```
 
-**Why `python -m pythia` and not just `pythia`?** pip installs the `pythia`
-executable into a scripts directory that is frequently not on PATH — pip
-itself warns about it — so the bare command fails immediately after install,
-most often on Windows. `python -m pythia` is the same program and never has
-that problem. Once you add that directory to PATH (pip's warning names it,
-and so does `python -m pythia install`), plain `pythia` works everywhere and
-every example below can drop the prefix.
+**`pythia: command not found`?** pip writes the executable into a scripts
+directory that is usually not on PATH — pip warns about it, and it is why the
+commands above say `python -m pythia`, which always works. To get the short
+`pythia` form, let the tool put itself there:
+
+```bash
+python -m pythia install --add-to-path   # Windows: edits your user PATH only
+```
+
+Then open a **new** terminal — a running one keeps the environment it started
+with, and so do its tabs.
+
+> **If you previously ran a `SetEnvironmentVariable('PATH', "$env:PATH;...", 'User')`
+> one-liner** (this guide once suggested one, and the shape is everywhere
+> online): it copied your system PATH into your user PATH, because `$env:PATH`
+> is the two merged. Check with
+> `[Environment]::GetEnvironmentVariable('PATH','User') -split ';'` — if you
+> see `C:\Windows\system32` and friends in there, they do not belong. Back the
+> value up to a file first, then remove the entries that also appear in
+> `[Environment]::GetEnvironmentVariable('PATH','Machine')`.
 
 **Global-first**: the skill pack lives in `~/.claude/skills` — one copy. A
 project `pythia install` that detects the global pack **skips the skills

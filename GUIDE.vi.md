@@ -41,13 +41,26 @@ cd du-an && python -m pythia install   # mỗi project: chỉ scaffold .pythia/
 python -m pythia check        # điền connections.json rồi kiểm tra
 ```
 
-**Vì sao là `python -m pythia` chứ không phải `pythia`?** pip đặt file thực thi
-`pythia` vào thư mục scripts thường không nằm trong PATH — chính pip cũng cảnh
-báo điều này — nên gõ thẳng `pythia` sẽ lỗi ngay sau khi cài, hay gặp nhất trên
-Windows. `python -m pythia` là cùng một chương trình và không bao giờ dính vấn
-đề đó. Khi nào anh thêm thư mục kia vào PATH (cảnh báo của pip có ghi tên, và
-`python -m pythia install` cũng in ra), thì gõ `pythia` là đủ và mọi ví dụ bên
-dưới có thể bỏ tiền tố.
+**Báo `pythia: command not found`?** pip đặt file thực thi vào thư mục scripts
+thường không nằm trong PATH — chính pip cũng cảnh báo, và đó là lý do các lệnh
+trên dùng `python -m pythia`, dạng luôn chạy được. Muốn gõ gọn `pythia`, để
+tool tự đặt mình vào PATH:
+
+```bash
+python -m pythia install --add-to-path   # Windows: chỉ sửa user PATH
+```
+
+Rồi mở terminal **mới** — cửa sổ đang chạy giữ nguyên môi trường lúc nó khởi
+động, các tab con cũng vậy.
+
+> **Nếu trước đây bạn từng chạy lệnh
+> `SetEnvironmentVariable('PATH', "$env:PATH;...", 'User')`** (hướng dẫn này
+> từng gợi ý, và kiểu lệnh đó đầy trên mạng): nó đã sao chép system PATH vào
+> user PATH, vì `$env:PATH` là hai cái gộp lại. Kiểm tra bằng
+> `[Environment]::GetEnvironmentVariable('PATH','User') -split ';'` — nếu thấy
+> `C:\Windows\system32` và đồng bọn trong đó thì chúng không thuộc về đây. Sao
+> lưu giá trị ra file trước, rồi xoá những mục cũng xuất hiện trong
+> `[Environment]::GetEnvironmentVariable('PATH','Machine')`.
 
 **Mô hình global-first**: skills nằm ở `~/.claude/skills` (một bản duy nhất).
 `pythia install` trong project phát hiện pack global sẽ **tự bỏ qua bước

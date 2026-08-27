@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.7 — 2026-08-27
+
+- **`pythia install` puts itself on your PATH.** Three field installs in a
+  row ended at `pythia : The term 'pythia' is not recognized`, because pip
+  writes the executable into a scripts directory that is usually not on PATH.
+  0.4.4 explained the problem and 0.4.5 documented a working invocation —
+  both handed the developer homework. Install now offers to fix it, and
+  `--add-to-path` does it without asking.
+- **The PATH edit is done properly, which a one-liner cannot be.** Earlier
+  advice in this project — and the shape found all over the internet —
+  writes `$env:PATH` back into user scope. That variable is the system and
+  user values *merged*, so it copies every system entry into the user's,
+  doubling the effective PATH and leaving a stale snapshot that shadows the
+  real system one whenever it next changes. pythia reads and writes the user
+  value in the registry, appends only if absent, and never touches system
+  scope. **If you ran that one-liner, see GUIDE section 1 for how to undo
+  it.**
+
 ## 0.4.6 — 2026-08-27
 
 - **`SECURITY.md`** — how to report a vulnerability, and the threat model
