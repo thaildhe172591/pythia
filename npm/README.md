@@ -15,7 +15,7 @@ npx pythia-plsql
 ```
 
 It finds Python, installs the [`pythia-plsql`](https://pypi.org/project/pythia-plsql/)
-package from PyPI (CLI + expert data-dictionary queries + the seven-skill
+package from PyPI (CLI + expert data-dictionary queries + the skill
 pack), installs the skills into your agents via `npx skills add`, and
 scaffolds `.pythia/connections.json`. Without Node the pip package alone
 still carries the whole kit.

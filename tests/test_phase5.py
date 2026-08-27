@@ -145,6 +145,28 @@ def test_every_skill_declares_its_phase():
             f"{name}: phase must name Learn/Ask/Do, got {m.group(1)!r}"
 
 
+def test_no_manifest_hardcodes_a_stale_skill_count():
+    """The pack grew from seven skills to eight and three shipped manifests
+    still said seven. Counting in prose is a contradiction waiting to happen,
+    so the check is: no manifest states a number the code can disprove."""
+    import json
+    n = len(EXPECTED)
+    words = {7: "seven", 8: "eight", 9: "nine"}
+    stale = [w for k, w in words.items() if k != n]
+    for rel in (".claude-plugin/marketplace.json", "npm/package.json",
+                "npm/README.md"):
+        text = (ROOT / rel).read_text(encoding="utf-8").lower()
+        for word in stale:
+            assert word + " skill" not in text and word + "-skill" not in text, \
+                f"{rel} claims {word} skills; there are {n}"
+    mk = json.loads((ROOT / ".claude-plugin/marketplace.json")
+                    .read_text(encoding="utf-8"))
+    declared = {p.rsplit("/", 1)[-1] for p in mk["plugins"][0]["skills"]}
+    assert declared == EXPECTED, (
+        f"marketplace.json and the pack disagree: "
+        f"missing {sorted(EXPECTED - declared)}, extra {sorted(declared - EXPECTED)}")
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
