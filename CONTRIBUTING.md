@@ -73,6 +73,20 @@ not just installed copies. Everything is tracked, so recovery is
 directory, and treat `.agents/`, `.claude/` and `skills-lock.json` here as
 disposable artifacts (they are gitignored).
 
+## Tests run on three platforms — write them that way
+
+CI runs every suite on Ubuntu, Windows and macOS. Three separate failures in
+this repo came from tests that quietly assumed Windows:
+
+- Paths: build them with `os.sep` / `os.path.join`. A literal `C:\dir` is
+  not a path on POSIX, and `:` is the PATH separator there, so it splits.
+- Behaviour that differs by platform: assert the difference explicitly
+  (`"x" if os.name == "nt" else "y"`), never just the half you can see.
+- The interpreter's own name: `python` on Windows, usually `python3`
+  elsewhere. Derive it from `sys.executable`.
+
+A green local run on Windows proves a third of what CI will.
+
 ## Adding a query
 
 1. Write `queries/<name>.sql` with the header and named binds.

@@ -304,10 +304,13 @@ def test_hint_tells_a_stale_shell_apart_from_an_unconfigured_one():
                                     in_stored_path=True)
     assert "already" in stale.lower()
     assert "new" in stale.lower() and "tab" in stale.lower()   # window, not tab
-    assert "--add-to-path" not in stale                        # nothing to redo
+    assert "--add-to-path" not in stale        # nothing to redo
     unconfigured = pythia.entry_point_hint(found=None, scripts_dir=SCRIPTS,
                                            in_stored_path=False)
-    assert "--add-to-path" in unconfigured
+    assert SCRIPTS in unconfigured and "-m pythia" in unconfigured
+    # how you fix it is platform-specific: pythia can edit the registry on
+    # Windows, while a POSIX shell profile is the developer's to edit
+    assert ("--add-to-path" if os.name == "nt" else "profile") in unconfigured
     # and once the command resolves, still silence
     assert pythia.entry_point_hint(found="/x/pythia", scripts_dir=SCRIPTS,
                                    in_stored_path=True) is None
