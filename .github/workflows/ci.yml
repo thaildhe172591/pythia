@@ -58,3 +58,40 @@ jobs:
           test ! -e .agents/skills/pythia-apply
           test -f .claude/skills/pythia-review/reference/antipatterns.md
           test -f .pythia/connections.json
+
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m compileall bench
+      - run: python bench/bench.py --selftest
+      # regression gate: reliability must stay 100, other axes may not drop
+      - run: python bench/bench.py --check
+
+  # after a version bump lands on main, re-score and commit the scoreboard —
+  # one row per release, so BENCHMARK.md updates itself on every upgrade.
+  # --if-new-version makes the bot commit a no-op on every other push (and on
+  # its own push), so this cannot loop.
+  bench-update:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: bench
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python bench/bench.py --if-new-version
+      - run: |
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add BENCHMARK.md bench/results/history.jsonl
+            git commit -m "bench: scoreboard for $(grep -oP '(?<=^version = ")[^"]+' pyproject.toml)"
+            git push
+          fi

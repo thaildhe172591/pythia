@@ -26,6 +26,16 @@ touches nothing, a stale token never writes, a broken apply exits 3.
 
 CI runs all four suites on Ubuntu, Windows and macOS, Python 3.9 and 3.13.
 
+The benchmark ([BENCHMARK.md](BENCHMARK.md), method in
+[bench/README.md](bench/README.md)) runs the same suites plus direct probes
+of every documented safety gate; CI fails any push where reliability drops
+below 100, and re-scores the scoreboard automatically when a new version
+lands on main:
+
+```bash
+python bench/bench.py --check   # what CI runs
+```
+
 ## Contract 1 — every SQL statement lives in `queries/`
 
 One statement per file, named binds only, a three-field header
