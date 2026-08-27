@@ -156,6 +156,8 @@ The groups that cannot be snapshotted default to `deny` — and the refusal says
 instead of "policy forbids it". Anonymous PL/SQL blocks are refused outright.
 Unrecognized statements are refused, never guessed into a group.
 
+Threat model and what a snapshot does **not** restore: [SECURITY.md](SECURITY.md).
+
 Reads may flow through Oracle's official SQLcl MCP server (`sql -mcp`, keep `-R 4`);
 it audits every interaction in `DBTOOLS$MCP_LOG`. **Writes never do** — only
 `pythia apply` has the snapshot, preview, verify and journal.
