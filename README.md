@@ -61,7 +61,7 @@ Or the same thing piecewise:
 
 ```bash
 pip install pythia-plsql   # the CLI (thin driver — no Oracle Instant Client needed)
-pythia install             # skills into your agent + .pythia/connections.json scaffold
+python -m pythia install   # skills into your agent + .pythia/ scaffold
 pythia check               # fill in connections.json first, then verify
 ```
 

@@ -36,16 +36,18 @@ Finds Python → `pip install pythia-plsql` (CLI + queries + bundled skills) →
 
 ```bash
 pip install pythia-plsql   # the CLI, thin driver — no Oracle Instant Client
-pythia install -g          # skills GLOBALLY: once per machine, serves every project
-cd my-project && pythia install   # per project: scaffolds .pythia/connections.json only
-pythia check               # fill in connections.json, then verify
+python -m pythia install -g   # skills GLOBALLY: once per machine, every project
+cd my-project && python -m pythia install   # per project: scaffolds .pythia/ only
+python -m pythia check        # fill in connections.json, then verify
 ```
 
-**`pythia: command not found` right after installing?** pip put the executable
-in a scripts directory that is not on your PATH — the default for
-`pip install --user`, and the usual outcome on Windows. Nothing is broken and
-nothing needs reinstalling: `python -m pythia <command>` works regardless, and
-`pythia install` prints the exact directory to add to PATH.
+**Why `python -m pythia` and not just `pythia`?** pip installs the `pythia`
+executable into a scripts directory that is frequently not on PATH — pip
+itself warns about it — so the bare command fails immediately after install,
+most often on Windows. `python -m pythia` is the same program and never has
+that problem. Once you add that directory to PATH (pip's warning names it,
+and so does `python -m pythia install`), plain `pythia` works everywhere and
+every example below can drop the prefix.
 
 **Global-first**: the skill pack lives in `~/.claude/skills` — one copy. A
 project `pythia install` that detects the global pack **skips the skills

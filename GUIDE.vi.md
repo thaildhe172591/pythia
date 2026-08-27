@@ -36,16 +36,18 @@ Tìm Python → `pip install pythia-plsql` (CLI + queries + skills đóng gói) 
 
 ```bash
 pip install pythia-plsql   # CLI, thin driver — không cần Oracle Instant Client
-pythia install -g          # skills GLOBAL: một lần mỗi máy, mọi project dùng chung
-cd du-an && pythia install # mỗi project: chỉ scaffold .pythia/connections.json
-pythia check               # điền connections.json rồi kiểm tra
+python -m pythia install -g   # skills GLOBAL: một lần mỗi máy, mọi project
+cd du-an && python -m pythia install   # mỗi project: chỉ scaffold .pythia/
+python -m pythia check        # điền connections.json rồi kiểm tra
 ```
 
-**Vừa cài xong mà báo `pythia: command not found`?** pip đặt file thực thi vào
-thư mục scripts không nằm trong PATH — mặc định của `pip install --user`, và là
-kết cục thường gặp trên Windows. Không hỏng gì, không cần cài lại: `python -m
-pythia <lệnh>` chạy được bất kể PATH, và `pythia install` in ra đúng thư mục
-cần thêm vào PATH.
+**Vì sao là `python -m pythia` chứ không phải `pythia`?** pip đặt file thực thi
+`pythia` vào thư mục scripts thường không nằm trong PATH — chính pip cũng cảnh
+báo điều này — nên gõ thẳng `pythia` sẽ lỗi ngay sau khi cài, hay gặp nhất trên
+Windows. `python -m pythia` là cùng một chương trình và không bao giờ dính vấn
+đề đó. Khi nào anh thêm thư mục kia vào PATH (cảnh báo của pip có ghi tên, và
+`python -m pythia install` cũng in ra), thì gõ `pythia` là đủ và mọi ví dụ bên
+dưới có thể bỏ tiền tố.
 
 **Mô hình global-first**: skills nằm ở `~/.claude/skills` (một bản duy nhất).
 `pythia install` trong project phát hiện pack global sẽ **tự bỏ qua bước

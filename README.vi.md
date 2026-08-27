@@ -70,8 +70,8 @@ Hoặc làm từng bước — nên dùng cách này vì rõ ràng hơn:
 
 ```bash
 pip install pythia-plsql        # 1. CLI (thin driver, không cần Oracle Instant Client)
-pythia install -g               # 2. skills — MỘT LẦN cho cả máy
-cd du-an && pythia install      # 3. mỗi dự án: tạo .pythia/connections.json
+python -m pythia install -g     # 2. skills — MỘT LẦN cho cả máy
+cd du-an && python -m pythia install   # 3. mỗi dự án: tạo .pythia/
 pythia check                    # 4. điền connections.json rồi kiểm tra
 ```
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.5 — 2026-08-27
+
+- **The install instructions now use a command that cannot fail.** 0.4.4 made
+  `pythia install` explain the PATH problem — but that hint is printed by the
+  very command a broken PATH prevents you from running, so the same field
+  install failed again in exactly the same place. Both READMEs and both
+  guides now show `python -m pythia install`, which is the same program and
+  is immune, and explain when the shorter `pythia` becomes available. The
+  0.4.4 hint stays: it is still what you see once you reach a working
+  invocation.
+
 ## 0.4.4 — 2026-08-27
 
 - **`pythia install` now says where the executable went.** A field install on
