@@ -341,7 +341,7 @@ beyond the BMP → `\U` + 8 hex.
 
 ## 9. The agent skill pack
 
-Seven skills, superpowers-style gates — not suggestions:
+Eight skills, superpowers-style gates — not suggestions:
 
 | Skill | Triggers when | Core job |
 |---|---|---|
@@ -351,6 +351,7 @@ Seven skills, superpowers-style gates — not suggestions:
 | `pythia-write` | writing/modifying PL/SQL once impact is known | copy conventions, anchor types to the DB, unistr |
 | `pythia-apply` | a change is ready to reach the database | the developer sees the preview and approves in chat; exit 3 ≠ success |
 | `pythia-review` | reviewing PL/SQL | the database's signals + seven antipatterns, line-anchored findings |
+| `pythia-conventions` | a standards document or base schema whose style should be adopted | scan the names, verify coverage, write conventions.json + .md |
 | `pythia-skill-author` | "make a skill for how we do X" | interviews + mines the live schema → a new skill in this pack's format |
 
 Reads may flow through Oracle's SQLcl MCP server (optional, reads only):

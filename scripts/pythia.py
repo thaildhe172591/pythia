@@ -85,6 +85,7 @@ QUERY_BINDS = {
     "object-source.sql": {"s", "n", "t"},
     "session-privileges.sql": set(),
     "name-occupants.sql": {"s", "n"},
+    "object-names.sql": {"s"},
 }
 
 
@@ -1332,6 +1333,24 @@ def cmd_plscope(conn, schema, ns):
         emit_table(ns, stmt_cols, *clip(stmt_rows, ns.limit))
 
 
+AGENT_USER_SQL = """\
+-- Least-privilege agent credential for schema {owner} — run as a DBA.
+-- Proxy authentication: the agent logs in with its OWN password but works
+-- inside {owner}; it never learns the owner password, owns nothing, and
+-- revocation is one statement. Deliberately absent: DBA, RESOURCE, ANY
+-- privileges, utility grants — the agent needs none of them to develop
+-- PL/SQL, and every extra grant widens the blast radius.
+
+{create_line}
+GRANT CREATE SESSION TO {agent};
+ALTER USER {owner} GRANT CONNECT THROUGH {agent};
+
+-- Cut the agent off later (owner untouched):
+--   ALTER USER {owner} REVOKE CONNECT THROUGH {agent};
+-- Fresh owner schema instead? See examples/agent-user-setup.example.sql.
+"""
+
+
 CONVENTIONS_TEMPLATE = """{
   "naming": {
     "TABLE": "^T_[A-Z0-9_]+$",
@@ -1381,6 +1400,109 @@ which column every query must filter by, where a transaction may commit.
 Objects that break the pattern on purpose, and why renaming them is worse
 than the warning they produce on every apply.
 """
+
+
+SCAN_SHARE = 0.9        # a token set must cover this much to count as the rule
+SCAN_MAX_ALTERNATIVES = 12
+
+
+def _dominant(tokens_at_position, total):
+    """The smallest set of tokens covering SCAN_SHARE of the names, or None.
+
+    A set only counts as a rule when its tokens repeat. As many distinct
+    tokens as there are names is a list of names, not a convention — and
+    writing that down produces a pattern that fails on the next object
+    anyone adds.
+    """
+    limit = min(SCAN_MAX_ALTERNATIVES, max(1, total // 2))
+    counts = {}
+    for tok in tokens_at_position:
+        counts[tok] = counts.get(tok, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    picked, covered = [], 0
+    for tok, n in ranked:
+        if len(picked) >= limit:
+            return None
+        picked.append(tok)
+        covered += n
+        if covered >= total * SCAN_SHARE:
+            return picked
+    return None
+
+
+def propose_pattern(names, min_names=3):
+    """Read the shape off real names: a dominant first token, and a dominant
+    last token when there is one. Returns None when the names share no
+    structure — configuring nothing beats configuring a rule that means
+    nothing."""
+    names = [str(n).upper() for n in names if n]
+    if len(names) < min_names:
+        return None
+    split = [n.split("_") for n in names]
+    if sum(1 for p in split if len(p) >= 2) < len(names) * SCAN_SHARE:
+        return None                       # mostly single-word names: no shape
+    heads = _dominant([p[0] for p in split], len(names))
+    if not heads:
+        return None
+    head = heads[0] if len(heads) == 1 else "(" + "|".join(sorted(heads)) + ")"
+    # the suffixed form needs a third token to sit in; without one for most
+    # names, an alternation at the end would exclude the short ones
+    if sum(1 for p in split if len(p) >= 3) >= len(names) * SCAN_SHARE:
+        tails = _dominant([p[-1] for p in split], len(names))
+        if tails:
+            tail = (tails[0] if len(tails) == 1
+                    else "(" + "|".join(sorted(tails)) + ")")
+            return f"^{head}_[A-Z0-9_]+_{tail}$"
+    return f"^{head}_[A-Z0-9_]+$"
+
+
+def scan_conventions(objects):
+    """Propose a naming block from the schema itself. The tool tokenizes the
+    names so the agent never has to read thousands of them into context; the
+    developer's own document decides what is kept."""
+    by_type = {}
+    for otype, name in objects:
+        by_type.setdefault(str(otype).upper(), []).append(name)
+    naming = {}
+    for otype, names in sorted(by_type.items()):
+        pattern = propose_pattern(names)
+        if pattern:
+            naming[otype] = pattern
+    return {"naming": naming}
+
+
+def pattern_coverage(conv, objects):
+    """How well each configured pattern describes the names already in the
+    schema. objects: (object_type, object_name).
+
+    A pattern derived from a document, or from reading a few examples, is a
+    guess. Measuring it against every real name turns the guess into a number
+    and names the exceptions — which is the difference between conventions
+    that hold and conventions that produce a warning on every apply.
+    """
+    patterns = (conv or {}).get("naming") or {}
+    out = {}
+    for otype, pattern in patterns.items():
+        rx = re.compile(pattern)
+        names = sorted(n for t, n in objects if str(t).upper() == otype.upper())
+        misses = [n for n in names if not rx.match(str(n))]
+        out[otype] = {"pattern": pattern, "total": len(names),
+                      "matched": len(names) - len(misses), "misses": misses}
+    return out
+
+
+def coverage_verdict(matched, total):
+    """Read the numbers so nobody has to. A low rate means the pattern is
+    wrong far more often than it means the schema is."""
+    if total == 0:
+        return "nothing of that type in this schema — untested rule"
+    if matched == total:
+        return "every name matches"
+    pct = round(100 * matched / total)
+    if pct >= 90:
+        return f"{pct}% match — the rest are worth listing as exceptions"
+    return (f"only {pct}% match — the derived pattern is probably wrong; "
+            "widen it or split it before writing it down")
 
 
 def scaffold_conventions(root):
@@ -1861,6 +1983,11 @@ def cmd_journal(conn, schema, ns):
         sys.exit("unreachable: restore is dispatched with a connection in main")
 
 
+def _schema_objects(conn, schema):
+    _, rows = run_query(conn, load_query("object-names.sql"), {"s": schema})
+    return [(r[0], r[1]) for r in rows]
+
+
 def cmd_conventions(conn, schema, ns):
     root = ns.project_root
     if getattr(ns, "init", False):
@@ -1872,19 +1999,54 @@ def cmd_conventions(conn, schema, ns):
                   f"{pathlib.Path(root) / CONFIG_DIR} — left untouched.")
         else:
             print(NL + "Edit the patterns to match this schema — "
-                  f"`{invocation()} similar <A_TYPICAL_NAME>` shows what "
-                  "it already does." + NL + "Every apply preview then "
-                  "warns when a name drifts from them.")
+                  f"`{invocation()} conventions --scan` reads them off it.")
         return
+
+    if getattr(ns, "scan", False):
+        proposed = scan_conventions(_schema_objects(conn, schema))
+        if ns.json:
+            print(json.dumps(proposed, indent=2))
+            return
+        print(f"Patterns read off {schema}. Review against your own standards, "
+              "then save as" + NL + f"{CONFIG_DIR}/conventions.json:" + NL)
+        print(json.dumps(proposed, indent=2))
+        if not proposed["naming"]:
+            print(NL + "Nothing proposed: too few objects, or names with no "
+                  "shared shape.")
+        return
+
+    if getattr(ns, "check", False):
+        conv = load_conventions(root)
+        if not conv:
+            sys.exit(f"No conventions to check. {invocation()} conventions "
+                     "--scan proposes some from this schema.")
+        cov = pattern_coverage(conv, _schema_objects(conn, schema))
+        if ns.json:
+            print(json.dumps(cov, indent=2))
+            return
+        worst = 0
+        for otype, s in sorted(cov.items()):
+            print(f"{otype:<14} {s['matched']}/{s['total']}  "
+                  f"{coverage_verdict(s['matched'], s['total'])}")
+            if s["misses"]:
+                shown, more = s["misses"][:8], len(s["misses"]) - 8
+                print("               not matching: " + ", ".join(shown)
+                      + (f", +{more} more" if more > 0 else ""))
+                worst = max(worst, len(s["misses"]))
+        if worst:
+            print(NL + "Every name above warns on `apply`. Widen the pattern "
+                  "if it is the rule that is wrong," + NL + "or record them in "
+                  "conventions.md as deliberate exceptions.")
+        return
+
     conv = load_conventions(root)
     if ns.json:
         print(json.dumps(conv or {}))
         return
     if not conv:
         print("No project conventions configured.")
-        print(f"Create the starter pair with: {invocation()} conventions --init")
-        print("  conventions.json  naming patterns; apply previews warn on drift")
-        print("  conventions.md    the prose rules your agents read first")
+        print(f"  {invocation()} conventions --scan   read patterns off this schema")
+        print(f"  {invocation()} conventions --init   start from a blank template")
         return
     print("Naming patterns — apply previews warn when a name drifts:")
     for otype, pattern in conv.get("naming", {}).items():
@@ -1892,28 +2054,7 @@ def cmd_conventions(conn, schema, ns):
     md = pathlib.Path(root) / CONFIG_DIR / "conventions.md"
     if md.is_file():
         print(NL + f"Prose rules for agents: {md}")
-    else:
-        print(NL + f"No conventions.md yet — {invocation()} conventions "
-              "--init writes one.")
-
-
-AGENT_USER_SQL = """\
--- Least-privilege agent credential for schema {owner} — run as a DBA.
--- Proxy authentication: the agent logs in with its OWN password but works
--- inside {owner}; it never learns the owner password, owns nothing, and
--- revocation is one statement. Deliberately absent: DBA, RESOURCE, ANY
--- privileges, utility grants — the agent needs none of them to develop
--- PL/SQL, and every extra grant widens the blast radius.
-
-{create_line}
-GRANT CREATE SESSION TO {agent};
-ALTER USER {owner} GRANT CONNECT THROUGH {agent};
-
--- Cut the agent off later (owner untouched):
---   ALTER USER {owner} REVOKE CONNECT THROUGH {agent};
--- Fresh owner schema instead? See examples/agent-user-setup.example.sql.
-"""
-
+    print(f"{NL}Measure them against the schema: {invocation()} conventions --check")
 
 def agent_user_sql(owner, agent, password, exists):
     """exists True: the user is already there — CREATE would be ORA-01920,
@@ -2244,7 +2385,7 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "unistr": cmd_unistr, "agent-user": cmd_agent_user,
             "history": cmd_history}
 
-NO_DB_COMMANDS = {"policy", "journal", "conventions", "install", "unistr",
+NO_DB_COMMANDS = {"policy", "journal", "install", "unistr",
                   "history"}
 
 
@@ -2347,6 +2488,12 @@ def build_parser():
     s.add_argument("--init", action="store_true",
                    help="write starter conventions.json and conventions.md "
                         "into .pythia/ (never overwrites)")
+    s.add_argument("--scan", action="store_true",
+                   help="read naming patterns off the live schema and "
+                        "propose them (needs a connection)")
+    s.add_argument("--check", action="store_true",
+                   help="measure the configured patterns against the "
+                        "schema: coverage and the names that miss")
     s = sub.add_parser("agent-user", parents=[common()],
                        help="SQL for a least-privilege proxy agent user; "
                             "--save adds it to connections.json")
@@ -2405,7 +2552,11 @@ def main(argv=None):
     cwd = pathlib.Path.cwd()
     cfg, root = find_config(cwd, os.environ)
     ns.project_root = root if root is not None else cwd
-    if ns.command in NO_DB_COMMANDS and not (
+    # conventions reads the schema only for --scan and --check; listing what
+    # is configured, or writing the template, must work with no database at all
+    offline_conventions = ns.command == "conventions" and not (
+        getattr(ns, "scan", False) or getattr(ns, "check", False))
+    if (ns.command in NO_DB_COMMANDS or offline_conventions) and not (
             ns.command == "journal" and getattr(ns, "action", "") == "restore"):
         COMMANDS[ns.command](None, None, ns)
         return

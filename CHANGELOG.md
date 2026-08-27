@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0 — 2026-08-27
+
+**Adopting a house style is now one flow the agent runs, not a form you fill
+in.** Hand it a standards document, or point it at the base schema your team
+already runs, and it derives the conventions, proves them against the real
+names, and writes both halves of the config.
+
+- **`pythia conventions --scan`** reads the patterns off the live schema. It
+  tokenises every object name and proposes a regex per type — dominant
+  prefixes and suffixes become alternations, and a position with no repeating
+  token is left open rather than invented. The agent never pages thousands of
+  names into its context to work this out.
+- **`pythia conventions --check`** measures the configured patterns against
+  the schema: coverage per type, and the names that miss. Below 90% it says
+  the pattern is probably wrong rather than the schema — which is almost
+  always true of a pattern derived from a document.
+- **`pythia conventions --init`** still writes a blank pair for starting from
+  scratch. Listing and `--init` need no database; `--scan` and `--check` do.
+- **New skill `pythia-conventions`** owns the flow: scan, read the
+  developer's document, reconcile and *ask* where the two disagree, write,
+  verify, then record real exceptions with the reason they are exceptions.
+  Its Iron Law is that no pattern gets written down before the schema has
+  agreed with it.
+
+On the schema this was built against, `--check` independently found the two
+exceptions a developer had documented by hand.
+
 ## 0.4.10 — 2026-08-27
 
 - **`pythia conventions --init` writes the starter pair.** Capturing a house

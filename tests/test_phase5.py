@@ -12,7 +12,7 @@ SKILLS = ROOT / "skills"
 
 EXPECTED = {"pythia-setup", "pythia-explore", "pythia-impact",
             "pythia-write", "pythia-apply", "pythia-review",
-            "pythia-skill-author"}
+            "pythia-skill-author", "pythia-conventions"}
 
 # spec: SKILL.md under 150 lines, detail pushed to reference/
 MAX_LINES = 150

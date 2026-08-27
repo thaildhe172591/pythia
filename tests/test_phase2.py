@@ -114,6 +114,70 @@ def test_plscope_message_distinguishes_disabled_from_missing():
     assert "CALC_TAX" in missing
 
 
+def test_pattern_coverage_measures_patterns_against_real_names():
+    """A derived pattern is a guess until the schema agrees. Coverage turns
+    'I think procedures look like this' into a number, and names the
+    exceptions instead of leaving them to surface one apply at a time."""
+    conv = {"naming": {"PROCEDURE": "^P_[A-Z0-9_]+_(NH|LKE)$",
+                       "FUNCTION": "^F_[A-Z0-9_]+$"}}
+    objects = [("PROCEDURE", "P_ORDER_NH"), ("PROCEDURE", "P_ORDER_LKE"),
+               ("PROCEDURE", "LEGACY_THING"), ("FUNCTION", "F_TAX"),
+               ("TABLE", "T_ORDER")]          # no TABLE pattern: not reported
+    cov = pythia.pattern_coverage(conv, objects)
+    assert cov["PROCEDURE"]["matched"] == 2
+    assert cov["PROCEDURE"]["total"] == 3
+    assert cov["PROCEDURE"]["misses"] == ["LEGACY_THING"]
+    assert cov["FUNCTION"]["matched"] == 1 and cov["FUNCTION"]["misses"] == []
+    assert "TABLE" not in cov
+
+    # a pattern for a type the schema has none of is reported, not hidden:
+    # it is a rule nothing has tested yet
+    cov2 = pythia.pattern_coverage({"naming": {"TRIGGER": "^TRG_"}}, objects)
+    assert cov2["TRIGGER"]["total"] == 0
+
+
+def test_coverage_verdict_reads_the_numbers_for_you():
+    assert "every" in pythia.coverage_verdict(7, 7).lower()
+    poor = pythia.coverage_verdict(2, 10)
+    assert "20%" in poor and "derived" in poor.lower()   # suspect the pattern
+    assert "nothing of that type" in pythia.coverage_verdict(0, 0).lower()
+
+
+def test_propose_pattern_reads_the_shape_off_real_names():
+    """The tool tokenizes thousands of names so the agent does not have to
+    read them. Dominant first and last tokens become alternations."""
+    names = ["PHT_NSD_LKE", "PHT_NSD_CT", "PHT_NSD_NH",
+             "PBH_HD_LKE", "PBH_HD_CT", "PBH_HD_NH"]
+    p = pythia.propose_pattern(names)
+    import re
+    assert all(re.match(p, n) for n in names), p
+    assert "PBH" in p and "PHT" in p and "LKE" in p        # both ends captured
+
+    # no dominant suffix: leave the tail open rather than invent one
+    tables = ["HT_NSD", "HT_QUYEN", "HT_VAI_TRO", "HT_MA_BENH_VIEN"]
+    p2 = pythia.propose_pattern(tables)
+    assert all(re.match(p2, n) for n in tables), p2
+    assert p2.startswith("^HT_") and p2.endswith("$")
+
+    # nothing in common: say so with None rather than a pattern matching all
+    assert pythia.propose_pattern(["ALPHA", "B_TWO", "ZZZ_9"]) is None
+    assert pythia.propose_pattern([]) is None
+
+
+def test_scan_proposal_covers_what_it_proposes():
+    """Whatever it proposes must match the names it was derived from —
+    otherwise the very first check would contradict the scan."""
+    objects = [("PROCEDURE", "PHT_A_LKE"), ("PROCEDURE", "PHT_B_CT"),
+               ("PROCEDURE", "PHT_C_NH"),
+               ("TABLE", "HT_A"), ("TABLE", "HT_B"), ("TABLE", "HT_C"),
+               ("SEQUENCE", "SEQ_ONE")]      # too few to infer: left alone
+    conv = pythia.scan_conventions(objects)
+    cov = pythia.pattern_coverage(conv, objects)
+    for otype, stats in cov.items():
+        assert stats["misses"] == [], (otype, stats)
+    assert set(conv["naming"]) == {"PROCEDURE", "TABLE"}
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

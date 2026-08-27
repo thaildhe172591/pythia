@@ -337,6 +337,7 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | `pythia-explore` | cần hiểu bất cứ gì trong schema | hỏi DB, không đọc dump |
 | `pythia-impact` | **trước** mọi đề xuất thay đổi | ≥10 dependent hoặc cross-schema → hỏi dev trước |
 | `pythia-write` | viết/sửa PL/SQL sau khi biết impact | copy convention, neo kiểu vào DB, unistr |
+| `pythia-conventions` | có tài liệu chuẩn hoặc schema base cần nạp quy ước | quét tên thật, đo độ phủ, sinh conventions.json + .md |
 | `pythia-apply` | thay đổi sẵn sàng chạm DB | dev thấy preview, duyệt trong chat; exit 3 ≠ thành công |
 | `pythia-review` | review code PL/SQL | tín hiệu DB + 7 antipattern, findings theo dòng |
 | `pythia-skill-author` | "làm skill cho cách bọn tôi làm X" | phỏng vấn + mine schema → skill mới đúng format pack |
