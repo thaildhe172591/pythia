@@ -135,6 +135,62 @@ project; đứng ngoài mọi project thì lỗi rõ ràng.
 
 ## 3. User agent least-privilege
 
+### Bố cục 3 vai trò — chốt một lần, dùng mọi nơi
+
+Một database, ba tài khoản, ba việc không được trộn lẫn:
+
+| Tài khoản | Quyền | Việc | Chứa object? |
+|---|---|---|---|
+| `APP_ADMIN` | DBA (hoặc role quản trị của nơi bạn) | chỉ quản trị — tạo user, grant, Data Pump | không bao giờ |
+| `APP_OWNER` | 8 quyền CREATE + quota. **Không DBA, không RESOURCE** | chủ schema; tài khoản dev dùng hằng ngày | có — nguồn duy nhất |
+| `APP_AGENT` | chỉ `CREATE SESSION` | credential của AI agent; proxy vào owner | không bao giờ |
+
+**Vì sao ba chứ không phải hai.** Phiên proxy kế thừa *toàn bộ* quyền của
+owner. Để DBA trên owner "cho tiện" thì mọi phiên agent là DBA cấp instance —
+nên việc quản trị phải nằm ở một tài khoản agent không bao giờ với tới, còn
+owner chỉ giữ đúng thứ việc dev cần.
+
+**Vì sao không làm schema riêng cho agent kèm quyền `ANY`.** `CREATE ANY
+PROCEDURE` phủ *mọi schema trên instance*. Instance dùng chung thì một lần
+chạy sai là chạm vào code của team khác — hay tenant khác. `ANY` không bao
+giờ là câu trả lời ở đây; proxy mới là: toàn quyền trong đúng một schema,
+bằng không ở mọi nơi khác.
+
+```sql
+-- Chạy bằng DBA của site, một lần mỗi môi trường. Tên tùy bạn đổi;
+-- mật khẩu là mật khẩu thật ngay từ đầu, không bao giờ trùng tên user.
+CREATE USER app_admin IDENTIFIED BY "<mật khẩu mạnh riêng>";
+GRANT DBA TO app_admin;                     -- chỉ việc quản trị; không chứa gì
+
+CREATE USER app_owner IDENTIFIED BY "<mật khẩu mạnh riêng>"
+  QUOTA UNLIMITED ON users;
+GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE SEQUENCE,
+      CREATE PROCEDURE, CREATE TRIGGER, CREATE TYPE, CREATE SYNONYM
+  TO app_owner;
+
+CREATE USER app_agent IDENTIFIED BY "<mật khẩu mạnh riêng>";
+GRANT CREATE SESSION TO app_agent;
+ALTER USER app_owner GRANT CONNECT THROUGH app_agent;
+-- Cắt agent sau này, owner không suy suyển:
+--   ALTER USER app_owner REVOKE CONNECT THROUGH app_agent;
+```
+
+`connections.json` phản chiếu đúng bố cục đó. Entry agent là mặc định; entry
+trỏ thẳng owner dành cho dev, và khi dùng nó `check` sẽ cảnh báo — cảnh báo
+đó là thiết kế đang hoạt động, không phải lỗi:
+
+```json
+{
+  "default": "agent_dev",
+  "agent_dev": { "user": "app_agent[app_owner]", "schema": "APP_OWNER", "...": "..." },
+  "dev":       { "user": "app_owner",            "schema": "APP_OWNER", "...": "..." }
+}
+```
+
+Kiểm cả tam giác bằng hai lệnh: `pythia connections` (ai tồn tại, không lộ
+mật khẩu) và `pythia check` (proxy vào owner, không cảnh báo quyền). Phần còn
+lại của mục này tự động hóa chân agent và dọn một owner đã phình quyền.
+
 **Tài khoản DB là lớp bảo vệ thật** — policy chỉ là hàng rào ứng dụng. Mô
 hình: **proxy authentication** — agent có credential riêng, đăng nhập *xuyên
 qua* schema owner: không biết password owner, thu hồi một lệnh, audit trail

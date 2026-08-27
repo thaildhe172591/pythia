@@ -1,22 +1,25 @@
--- Least-privilege setup for an AI agent working on one development schema.
--- Run as a DBA-capable user. Replace APP_OWNER, APP_AGENT and the passwords.
+-- The three-role layout for AI-agent development on Oracle — run as a DBA.
+-- Replace APP_ADMIN / APP_OWNER / APP_AGENT and every password. Full
+-- reasoning: GUIDE.md section 3. The short version:
 --
--- The design is proxy authentication, because Oracle least-privilege for
--- PL/SQL development has no clean per-object form: compiling into another
--- schema needs CREATE ANY PROCEDURE (too broad), and the ALL_* views only
--- show what the session has rights on. A proxy session authenticates with
--- the agent's own credential but runs as the schema owner, which gives:
+--   APP_ADMIN  admin work only (users, grants, Data Pump). Owns nothing.
+--   APP_OWNER  owns the schema; the developer's daily account. NEVER holds
+--              DBA or RESOURCE — a proxy session inherits the owner's whole
+--              power, so anything the owner holds, the agent holds.
+--   APP_AGENT  the agent's credential: logon only, owns nothing, can own
+--              nothing. Proxies into APP_OWNER.
 --
---   * blast radius limited to the one development schema
---   * the agent never learns the owner's password
---   * revocation is one statement, without touching the owner account
---   * the audit trail still shows who really connected (PROXY_USER)
+-- Why proxy and not ANY grants: CREATE ANY PROCEDURE spans every schema on
+-- the instance; on a shared instance one wrong run touches someone else's
+-- code. Proxy gives full power inside exactly one schema, zero outside.
 --
--- The session still holds full power INSIDE that schema — contain the risk
--- by pointing it at a dedicated development schema, never production.
+-- Passwords are real passwords from day one — never the username.
 
--- 1. The development schema owner, with only what development needs.
---    (Skip if the schema already exists; then just review its grants.)
+-- 1. The admin account (skip if your site already has one)
+CREATE USER app_admin IDENTIFIED BY "ChangeMe_Admin";
+GRANT DBA TO app_admin;
+
+-- 2. The schema owner, with only what development needs
 CREATE USER app_owner IDENTIFIED BY "ChangeMe_Owner"
   QUOTA UNLIMITED ON users;
 GRANT CREATE SESSION,
@@ -28,20 +31,21 @@ GRANT CREATE SESSION,
       CREATE TYPE,
       CREATE SYNONYM
   TO app_owner;
--- Deliberately absent: any ANY privilege, DROP USER, ALTER SYSTEM, DBA.
--- Note: the RESOURCE role lacks CREATE VIEW — grant privileges explicitly.
+-- Deliberately absent: DBA, RESOURCE, any ANY privilege, ALTER SYSTEM.
+-- (RESOURCE also lacks CREATE VIEW — grant privileges explicitly instead.)
 
--- 2. The agent's credential: logon only, owns nothing, can own nothing.
+-- 3. The agent's credential: logon only
 CREATE USER app_agent IDENTIFIED BY "ChangeMe_Agent";
 GRANT CREATE SESSION TO app_agent;
 
--- 3. Let the agent proxy into the schema owner.
+-- 4. Let the agent proxy into the owner
 ALTER USER app_owner GRANT CONNECT THROUGH app_agent;
 
 -- The agent then connects with:  user = "app_agent[app_owner]"
 -- and the agent's own password. In pythia's connections.json:
---   "dev": { "user": "app_agent[app_owner]", "password": "...",
---            "schema": "APP_OWNER", ... }
+--   "default": "agent_dev",
+--   "agent_dev": { "user": "app_agent[app_owner]", "schema": "APP_OWNER", ... }
+-- (`pythia agent-user --save` generates steps 3-4 plus the config entry.)
 
 -- To cut the agent off later, one statement — the owner is untouched:
 --   ALTER USER app_owner REVOKE CONNECT THROUGH app_agent;
@@ -50,6 +54,6 @@ ALTER USER app_owner GRANT CONNECT THROUGH app_agent;
 --   select sys_context('userenv','proxy_user') from dual;   -- in-session
 --   V$SESSION rows for the agent show the proxy in AUTHENTICATION_TYPE.
 
--- Review what a schema can actually do (run for APP_OWNER and APP_AGENT):
---   select * from dba_sys_privs where grantee = 'APP_OWNER';
+-- Review what an account can actually do (run for each of the three):
+--   select * from dba_sys_privs  where grantee = 'APP_OWNER';
 --   select * from dba_role_privs where grantee = 'APP_OWNER';

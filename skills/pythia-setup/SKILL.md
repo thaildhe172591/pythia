@@ -38,7 +38,11 @@ layer an agent cannot walk around.** Oracle has no clean per-object form of
 "may edit PL/SQL in that schema" — compiling into another schema needs
 `CREATE ANY PROCEDURE`, which spans every schema on the instance.
 
-The workable pattern is **proxy authentication**: a logon-only user that
+The full layout is three accounts — admin (administration only), owner
+(the schema, never DBA: a proxy session inherits everything the owner
+holds), agent (logon only) — see GUIDE section 3 and
+`examples/agent-user-setup.example.sql`. The core of it is **proxy
+authentication**: a logon-only user that
 connects *through* the schema owner. The agent never learns the owner's
 password, revocation is one statement, the audit trail shows who really
 connected, and the blast radius is the one development schema.

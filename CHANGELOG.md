@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.1 — 2026-08-27
+
+- **The three-role layout is now documented as the named pattern** (GUIDE
+  section 3, both languages, and the example SQL): ADMIN for administration
+  only, OWNER holding the schema and *never* DBA — because a proxy session
+  inherits the owner's entire power — and AGENT with logon only, proxying
+  into the owner. Straight from a field restructure where the missing third
+  role was the lesson: after stripping DBA off the owner, admin work needs
+  somewhere unreachable by the agent to live. Includes the connections.json
+  shape (agent entry as default, direct-owner entries that make `check` warn
+  by design) and the standing answer to "why not ANY grants" — on a shared
+  instance, one wrong run with CREATE ANY PROCEDURE touches someone else's
+  code.
+- `examples/agent-user-setup.example.sql` upgraded from two roles to three;
+  `pythia-setup` names the trio and points at both.
+
 ## 0.7.0 — 2026-08-27
 
 **The asking release.** A field session built a complete forgot-password flow

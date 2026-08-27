@@ -140,6 +140,63 @@ databases between projects; outside any project it errors plainly.
 
 ## 3. The least-privilege agent user
 
+### The three-role layout — settled once, reused everywhere
+
+One database, three accounts, three jobs that must not mix:
+
+| Account | Privileges | Job | Owns objects? |
+|---|---|---|---|
+| `APP_ADMIN` | DBA (or your site's admin role) | administration only — create users, grants, Data Pump | never |
+| `APP_OWNER` | the eight CREATE privileges + quota. **Never DBA, never RESOURCE** | owns the schema; the developer's daily account | yes — the single source |
+| `APP_AGENT` | `CREATE SESSION`, nothing else | the AI agent's credential; proxies into the owner | never |
+
+**Why three and not two.** A proxy session inherits the owner's *entire*
+power. Leave DBA on the owner "for convenience" and every agent session is an
+instance-wide DBA — which is why admin duties live in a separate account the
+agent can never reach, and the owner keeps only what development needs.
+
+**Why not an agent schema with `ANY` grants instead.** `CREATE ANY PROCEDURE`
+spans *every schema on the instance*. On a shared instance, one wrong run
+touches another team's — or another tenant's — code. `ANY` is never the
+answer here; proxy scoping is: full power inside exactly one schema, zero
+outside it.
+
+```sql
+-- Run as the site DBA, once per environment. Names are yours to change;
+-- passwords are real passwords from day one, never the username.
+CREATE USER app_admin IDENTIFIED BY "<its own strong password>";
+GRANT DBA TO app_admin;                     -- admin work only; owns nothing
+
+CREATE USER app_owner IDENTIFIED BY "<its own strong password>"
+  QUOTA UNLIMITED ON users;
+GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE SEQUENCE,
+      CREATE PROCEDURE, CREATE TRIGGER, CREATE TYPE, CREATE SYNONYM
+  TO app_owner;
+
+CREATE USER app_agent IDENTIFIED BY "<its own strong password>";
+GRANT CREATE SESSION TO app_agent;
+ALTER USER app_owner GRANT CONNECT THROUGH app_agent;
+-- Cut the agent off later, owner untouched:
+--   ALTER USER app_owner REVOKE CONNECT THROUGH app_agent;
+```
+
+`connections.json` mirrors the split. The agent entry is the default; the
+direct-owner entry exists for the developer and makes `check` warn when used
+— that warning is the design working, not a problem:
+
+```json
+{
+  "default": "agent_dev",
+  "agent_dev": { "user": "app_agent[app_owner]", "schema": "APP_OWNER", "...": "..." },
+  "dev":       { "user": "app_owner",            "schema": "APP_OWNER", "...": "..." }
+}
+```
+
+Verify the whole triangle in two commands: `pythia connections` (who exists,
+no secrets shown) and `pythia check` (connected as the owner via proxy, no
+privilege warning). The rest of this section automates the agent leg and
+cleans up an owner that grew too powerful.
+
 **The database account is the real security layer** — the policy file is an
 application-side fence. The pattern is **proxy authentication**: the agent
 has its own credential and connects *through* the schema owner — it never
