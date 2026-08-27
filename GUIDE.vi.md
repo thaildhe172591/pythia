@@ -5,6 +5,16 @@
 Tài liệu này đi từ cài đặt đến quy trình làm việc hàng ngày, mô hình bảo mật
 và xử lý sự cố. Mọi lệnh đều paste được nguyên văn.
 
+## Mô hình vận hành — đọc trước tiên
+
+Học → Hỏi → Làm. Agent học schema và phong cách dự án trước khi đề xuất
+(`deps`, `impact`, `src`, `similar`, `conventions`); dừng lại hỏi đúng những
+chỗ phán đoán của dev là mảnh còn thiếu (cổng preview, blast radius lớn,
+tài liệu và schema cãi nhau, mọi lời từ chối, mọi exit 3); rồi mới làm, qua
+một cửa ghi duy nhất có snapshot, token và verify. `pythia guide` in cả mô
+hình từ chính công cụ — nền tảng không có skill support thì trang đó là bản
+hợp đồng. Mỗi skill khai báo nhịp nó phục vụ ở dòng `**Phase:**`.
+
 ## Mục lục
 
 1. [Cài đặt](#1-cài-đặt)

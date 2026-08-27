@@ -37,26 +37,64 @@ package mà dump không hề có. Mọi lệnh pythia đều hỏi thẳng data 
 đang chạy. Và khi output bị cắt bớt, nó luôn nói rõ là đã cắt — để agent
 không tưởng nhầm câu trả lời thiếu là câu trả lời đủ.
 
-## Hoạt động thế nào
+## Mô hình vận hành: Học → Hỏi → Làm
 
-```
-dev trao đổi với agent
-        │
-skills/  dạy agent: khi nào hỏi DB, khi nào dừng lại, khi nào phải hỏi BẠN
-        │
-pythia   CLI — truy vấn chuyên sâu, phân tích ảnh hưởng, quy trình ghi 6 bước
-        │
-Oracle   data dictionary: ALL_SOURCE, ALL_DEPENDENCIES, ALL_ERRORS, PL/Scope
-```
+pythia là một bộ **harness** — cuốn cẩm nang mà agent học và tuân theo khi
+ngồi cạnh dev, như một trợ giảng giỏi: **có kiến thức** (hỏi schema đang
+chạy, không tin trí nhớ), **biết suy nghĩ** (đo lường trước khi đề xuất), và
+**tuân thủ luật mà nó đọc thuộc** (gặp cổng thì dừng và trích lại luật, không
+lẳng lặng bỏ qua). Giao cho nó một bài toán — "thêm cột và mọi procedure nuôi
+cột đó", "vì sao báo cáo này nhân đôi dòng" — nó đi đúng ba nhịp của một
+senior cẩn thận:
 
-Phần quan trọng nhất là quy trình ghi:
-**snapshot → impact → preview → apply → verify → report**.
+### 1 · Học — hiểu rồi mới đề xuất
 
-Trong Oracle, DDL tự commit — không có `ROLLBACK` nào cứu được. Vì vậy
-snapshot luôn chạy đầu tiên, và không cờ nào tắt được nó. Mã xác nhận 6 ký
-tự hex gắn chặt lần ghi vào đúng nội dung bạn đã xem ở preview. Exit code
-nói thẳng kết quả: `0` sạch · `1` bị từ chối · `3` **đã ghi nhưng hỏng —
-tuyệt đối không được báo là thành công**.
+| Học cái gì | Bằng gì | Thay cho |
+|---|---|---|
+| hình dạng thật của bài toán | `deps` · `impact` · `plscope` — đồ thị phụ thuộc chính xác | đọc lướt code rồi đoán |
+| sự thật của schema | `src` · `cols` · `args` · `ddl` · `errors` trên DB đang chạy | tin một bản dump đã trôi |
+| phong cách của dự án | `.pythia/conventions.md` + `conventions --scan/--check` | mỗi phiên tự chế một kiểu |
+| cách nơi này vẫn giải | `similar` — hàng xóm để bắt chước | viết đại thứ compile được |
+
+Pha này không ghi gì. Luật sắt: **chưa đo blast radius thì chưa đề xuất**,
+**chưa đọc hàng xóm thì chưa viết dòng nào**.
+
+### 2 · Hỏi — câu hỏi là một phần của phương pháp
+
+Kit buộc agent dừng đúng những khoảnh khắc mà phán đoán của dev là mảnh còn
+thiếu — và cấm đoán bừa để đi tiếp:
+
+- **Trước mọi lần ghi**: đưa nguyên văn preview (diff, dependents, cảnh báo)
+  rồi chờ một cái gật thật. Khen không phải là gật. Im lặng cũng không.
+- **Blast radius lớn** (≥10 dependents, hoặc dính schema khác): trình dev
+  *trước khi viết code*, không phải sau.
+- **Hai nguồn sự thật cãi nhau**: tài liệu nói một đằng, schema làm một nẻo
+  — đó là câu hỏi (luật không ai theo / luật cho code mới / drift?), không
+  phải chỗ để tự chọn.
+- **Hỏng thì nói hỏng**: exit 3 = đã ghi nhưng gãy. Báo đúng như vậy kèm
+  lệnh rollback in sẵn — báo thành công lúc này là tội duy nhất cả bộ kit
+  sinh ra để chặn.
+- **Policy từ chối**: chuyển lời từ chối cho dev như một thông tin, không
+  tìm đường vòng.
+
+### 3 · Làm — hành động trong đường ống không nói dối được
+
+Chỉ sau Học và Hỏi mới được chạm database, và chỉ qua một cửa:
+**snapshot → impact → preview → token → apply → verify → report**. DDL trong
+Oracle tự commit nên snapshot là đường lùi duy nhất — nó chạy đầu tiên và
+không cờ nào tắt được. Token gắn nội dung bảo đảm thứ được ghi đúng từng
+byte với thứ đã duyệt. Và CLI tự cưỡng chế: agent chạy không người không thể
+`--yes` cho chính nó hay nới policy — việc đó cần một con người ở terminal
+thật.
+
+Dev tự sửa tay cũng được đỡ: `src` và `impact` lặng lẽ snapshot những gì
+chúng đọc, nên sửa bằng SQL Developer vẫn có file rollback chờ sẵn
+(`history` liệt kê; source trôi mà không có apply nào phía sau sẽ bị báo là
+drift).
+
+**Học – Hỏi – Làm.** Agent không nói được mình đang ở nhịp nào nghĩa là nó
+không ở nhịp nào cả. Cả cuốn luật in ra từ chính công cụ: `pythia guide` —
+nền tảng nào không có skill support thì trang đó là bản hợp đồng.
 
 ## Cài đặt
 

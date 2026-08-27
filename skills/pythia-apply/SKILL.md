@@ -7,6 +7,8 @@ description: Use when a PL/SQL change is ready to reach the database - applying 
 
 **Announce at start:** "Using pythia-apply — I'll preview the change first."
 
+**Phase:** Ask → Do — the preview is relayed and approved before the one write door opens
+
 DDL in Oracle commits itself. There is no transaction to roll back — the
 snapshot pythia takes before writing is the only undo that exists. This skill
 exists so that safety net is always used, and used honestly.

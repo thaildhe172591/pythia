@@ -1988,6 +1988,60 @@ def _schema_objects(conn, schema):
     return [(r[0], r[1]) for r in rows]
 
 
+OPERATING_GUIDE = """\
+THE OPERATING MODEL — Learn, Ask, Do (Hoc - Hoi - Lam)
+
+pythia is a harness: a book of working rules for an AI agent sitting next to
+a developer. Every task moves through the same three movements. If you cannot
+say which movement you are in, you are in none of them.
+
+=== 1. LEARN — understand before proposing ======================
+Nothing here writes. Reading is free; guessing is not.
+
+  the problem's shape     deps · impact · plscope     the exact graph, not a skim
+  the schema's truth      src · args · cols · ddl · errors · invalid · check · ls · grep · sql
+  the house style         conventions (--scan / --check) · the project's conventions.md
+  how it is done here     similar · history            neighbours to imitate, versions that exist
+
+Iron laws: no proposal before the blast radius is known; no line written
+before the neighbours have been read.
+
+=== 2. ASK — the questions are the method =======================
+Stop at exactly these moments; a guess past any of them is a defect.
+
+  before any write        relay the full preview (diff, dependents, warnings)
+                          verbatim, then wait. A compliment is not a yes.
+  blast radius >= 10      or anything cross-schema: show the developer the
+                          list BEFORE writing code.
+  truths disagree         document says one thing, schema another - ask which:
+                          rule nobody follows, new-code-only, or drift.
+  policy refuses          relay the refusal (policy shows the rules). Never
+                          route around it.
+  it broke                exit 3 = written but broken. Say exactly that, with
+                          the rollback line. journal (show/diff) is your evidence.
+
+=== 3. DO — act inside a pipeline that cannot lie ===============
+One door for writes: snapshot -> impact -> preview -> token -> apply ->
+verify -> report.
+
+  apply                   the six-step write; --confirm binds to the preview
+  journal restore         undo, through the same six steps
+  unistr                  exact non-ASCII literals for what you are writing
+  install · agent-user · guide    setting the harness itself up
+
+The CLI enforces the gates: headless --yes is refused, policy cannot be
+loosened without a human at a terminal, the snapshot cannot be switched off.
+
+Skills carry the full method (pythia-explore, -impact, -conventions, -write,
+-apply, -review, -setup, -skill-author). No skill support on this platform?
+This page is the contract; follow it as written.
+"""
+
+
+def cmd_guide(conn, schema, ns):
+    print(OPERATING_GUIDE)
+
+
 def cmd_conventions(conn, schema, ns):
     root = ns.project_root
     if getattr(ns, "init", False):
@@ -2381,11 +2435,11 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
             "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
-            "conventions": cmd_conventions, "install": cmd_install,
+            "conventions": cmd_conventions, "guide": cmd_guide, "install": cmd_install,
             "unistr": cmd_unistr, "agent-user": cmd_agent_user,
             "history": cmd_history}
 
-NO_DB_COMMANDS = {"policy", "journal", "install", "unistr",
+NO_DB_COMMANDS = {"policy", "journal", "install", "unistr", "guide",
                   "history"}
 
 
@@ -2483,6 +2537,9 @@ def build_parser():
                    help="apply without stopping; the full preview still prints and journals")
     s.add_argument("--depth", type=int, default=3,
                    help="impact depth for the preview (default 3)")
+    sub.add_parser("guide", parents=[common()],
+                   help="the operating model: Learn, Ask, Do — the whole "
+                        "harness on one page, no database needed")
     s = sub.add_parser("conventions", parents=[common()],
                    help="show the project's house-style naming patterns")
     s.add_argument("--init", action="store_true",

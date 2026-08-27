@@ -11,7 +11,11 @@ pythia-plsql`), or `python scripts/pythia.py <command>` from a clone. Every pyth
 paste-able form — prefer running exactly those. `--json` gives structured
 output on any command.
 
-## Standing rules
+## Standing rules — the Learn, Ask, Do model
+
+Every task moves Learn → Ask → Do (`pythia guide` prints the whole model).
+The rules below are those movements in enforceable form:
+Learn: 1, 2, 6, 8 · Ask: 4, 5 (and 2's threshold) · Do: 3, 7.
 
 1. **Ask the database, never the dump.** Repo exports drift (a real audit:
    all types and packages missing, 89% of indexes). Use `ls / src / args /

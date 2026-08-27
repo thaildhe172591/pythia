@@ -7,6 +7,8 @@ description: Use when you need to understand anything in an Oracle schema - find
 
 **Announce at start:** "Using pythia-explore — asking the database directly."
 
+**Phase:** Learn
+
 ## The principle: ask the database, never the dump
 
 Repositories of exported `.sql` files go stale the day after export. A real

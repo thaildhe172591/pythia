@@ -7,6 +7,8 @@ description: Use when writing or modifying PL/SQL source - a procedure, function
 
 **Announce at start:** "Using pythia-write — mining the codebase's conventions first."
 
+**Phase:** Learn → Do — mine the neighbours first, then draft; landing it is pythia-apply's job
+
 **Before anything:** if the project has `.pythia/conventions.md`, read it —
 house rules there outrank every generic pattern below, and
 `pythia conventions` shows the naming patterns the apply preview will check. If the project has none and the developer

@@ -7,6 +7,8 @@ description: Use when the developer wants their own way of working captured as a
 
 **Announce at start:** "Using pythia-skill-author — let's capture how you actually work."
 
+**Phase:** Learn → Ask → Do — interview, mine the schema, verify triggering
+
 A skill is a decision captured so it never has to be re-argued. Capture what
 the team *actually does* — with evidence from the database — not what anyone
 remembers about it.

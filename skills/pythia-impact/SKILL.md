@@ -7,6 +7,8 @@ description: Use before proposing or writing any change to an Oracle object - a 
 
 **Announce at start:** "Using pythia-impact to measure the blast radius first."
 
+**Phase:** Learn — and the first Ask gate: a large blast radius reaches the developer before any code is written
+
 Changing an Oracle object recompiles or invalidates everything that depends
 on it — immediately, schema-wide, for every user of a shared database. The
 cost of knowing first is one command.

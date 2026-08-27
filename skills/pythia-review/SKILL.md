@@ -7,6 +7,8 @@ description: Use when reviewing PL/SQL - a changed procedure or package, a propo
 
 **Announce at start:** "Using pythia-review — checking the database's signals first."
 
+**Phase:** Learn → Ask — the database's own signals first, findings back to the developer
+
 Review in two passes: what the database *knows* is wrong, then what the
 checklist says is *likely* wrong. Machine signals first — they are free and
 exact.

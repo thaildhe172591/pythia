@@ -348,6 +348,19 @@ def test_conventions_init_writes_both_halves_and_never_clobbers():
         assert (d / "conventions.json").read_text(encoding="utf-8") == '{"naming": {}}'
 
 
+def test_guide_places_every_command_in_the_model():
+    """`pythia guide` is the book an agent can open on any platform, skills
+    support or not. Coherence is enforced: every command the CLI exposes must
+    appear somewhere in the guide -- adding a command without giving it a
+    place in Learn/Ask/Do fails here."""
+    text = pythia.OPERATING_GUIDE
+    for phase in ("LEARN", "ASK", "DO"):
+        assert phase in text, f"guide missing the {phase} movement"
+    for cmd in pythia.COMMANDS:
+        assert cmd in text, f"command {cmd!r} has no place in the guide"
+    assert "guide" in pythia.NO_DB_COMMANDS   # the book opens with no database
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

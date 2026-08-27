@@ -7,6 +7,8 @@ description: Use when a project's house style already exists somewhere and needs
 
 **Announce at start:** "Using pythia-conventions — I'll read the patterns off the schema first."
 
+**Phase:** Learn → Ask — derive from the schema, ask where the document disagrees, only then write the config
+
 Conventions already exist in every mature schema. They are in the object
 names, in a standards document, or in a senior developer's head. This turns
 them into two files: patterns the tool checks on every write, and prose every

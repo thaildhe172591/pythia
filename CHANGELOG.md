@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.0 — 2026-08-27
+
+**The kit now states its own operating model — Learn, Ask, Do (Học – Hỏi –
+Làm) — and wires it through everything, not just the docs.** The owner's
+framing: a harness an agent studies and follows like a book, the way a good
+teaching assistant works — knowledge, judgment, and rules it can recite.
+
+- **`pythia guide`** prints the whole model from the tool itself: the three
+  movements, every command's place in them, the ask-gates verbatim. No
+  database needed. On platforms with no skill support, that page *is* the
+  contract — the harness no longer depends on a skills-capable agent.
+- **Every skill declares its movement** in a `**Phase:**` line (explore is
+  Learn; apply is Ask → Do; conventions is Learn → Ask; ...). The skill lint
+  enforces the declaration.
+- **Coherence is tested**: every CLI command must have a place in the guide
+  — adding a command without deciding where it lives in Learn/Ask/Do fails
+  CI. The model cannot silently rot.
+- **Docs rebuilt around the model.** Both READMEs open with Learn → Ask → Do
+  as the core (the 200-line cap is retired by the owner's call — pinned
+  content checks remain); both GUIDEs gain "read this first"; AGENTS.md maps
+  its standing rules onto the three movements.
+
 ## 0.5.0 — 2026-08-27
 
 **Adopting a house style is now one flow the agent runs, not a form you fill

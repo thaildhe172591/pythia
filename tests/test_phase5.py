@@ -109,17 +109,40 @@ def test_reference_files_exist_where_promised():
 
 
 def test_readme_carries_the_required_tables():
-    """The spec's completion criteria: drift table up top, honest-rollback and
-    policy tables present, install channels, under 200 lines."""
+    """The line cap is gone by the owner's call — the README now explains
+    the operating model in full. What stays pinned is content: the drift
+    table, the honest-rollback and policy tables, the install channels, and
+    the Learn-Ask-Do frame the whole kit is organised around."""
     text = (ROOT / "README.md").read_text(encoding="utf-8")
-    for needle in ("1,016",                              # drift table, index row
+    for needle in ("1,016",                              # drift table
                    "Flashback Query", "Recycle Bin",     # rollback honesty
                    "plsql_source", "data_dml",           # policy table
                    "npx skills add",                     # install channel
-                   "star-history.com",                   # star chart
+                   "Learn", "Ask", "Do",                 # the operating model
+                   "star-history.com",
                    "MIT"):
         assert needle in text, f"README missing {needle!r}"
-    assert text.count("\n") + 1 <= 200, "README must stay under 200 lines"
+
+
+def test_vietnamese_readme_carries_the_operating_model():
+    text = (ROOT / "README.vi.md").read_text(encoding="utf-8")
+    for needle in ("Học", "Hỏi", "Làm"):
+        assert needle in text, f"README.vi missing {needle!r}"
+
+
+def test_every_skill_declares_its_phase():
+    """The kit's operating model is Learn - Ask - Do. A skill that cannot say
+    which movement it serves is not part of the method, it is a loose page."""
+    for name in sorted(EXPECTED):
+        path = SKILLS / name / "SKILL.md"
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        m = re.search(r"\*\*Phase:\*\* (.+)", text)
+        assert m, f"{name}: no '**Phase:**' declaration"
+        words = set(re.findall(r"Learn|Ask|Do", m.group(1)))
+        assert words and words <= {"Learn", "Ask", "Do"}, \
+            f"{name}: phase must name Learn/Ask/Do, got {m.group(1)!r}"
 
 
 def main():

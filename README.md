@@ -12,10 +12,16 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![python](https://img.shields.io/badge/python-3.9%2B-blue)
 
-An Agent Skills + CLI kit for developing PL/SQL on Oracle Database with AI coding
-agents (Claude Code, Codex, Cursor — any of the 76 agents `npx skills` supports).
-Explore schemas too big to dump, measure blast radius **before** touching anything,
-and land changes through a snapshot-verified write path that never lies about rollback.
+An Agent Skills + CLI kit for developing PL/SQL on Oracle Database with AI
+coding agents (Claude Code, Codex, Cursor — any of the 76 agents `npx skills`
+supports).
+
+pythia is a **harness**: a book of working rules an agent studies and follows
+when it sits next to a developer. Not a chatbot, not an autopilot — a
+disciplined assistant with three properties a good one has: **knowledge** (it
+asks the live schema, never its memory of one), **judgment** (it measures
+before it proposes), and **obedience to rules it can recite** (gates it will
+quote back to you rather than quietly skip).
 
 ## Why ask the database instead of reading dumps
 
@@ -33,23 +39,63 @@ Code that "reads fine" against the dump references types and packages the dump n
 heard of. Every pythia command asks the live data dictionary instead — and every
 truncated output says so, so an agent never mistakes a partial answer for a full one.
 
-## How it works
+## The operating model: Learn → Ask → Do
 
-```
-developer chats with the agent
-        │
-skills/  teach the agent when to ask, when to stop, when to ask YOU
-        │
-pythia   CLI — expert queries, impact analysis, the six-step write path
-        │
-Oracle   data dictionary: ALL_SOURCE, ALL_DEPENDENCIES, ALL_ERRORS, PL/Scope
-```
+Give the agent a problem — "add a column and every procedure that maintains
+it", "why does this report double rows", "port this fix" — and the kit walks
+it through the same three movements a careful senior developer makes.
 
-The write path is the heart: **snapshot → impact → preview → apply → verify → report**.
-DDL self-commits in Oracle — the snapshot is the only real undo, so it always runs
-first and no flag can turn it off. A 6-hex token binds the write to exactly what was
-previewed; exit codes make honesty machine-readable
-(`0` clean · `1` refused · `3` **written but broken — never reported as success**).
+### 1 · Learn — understand before proposing
+
+The agent studies four things, in order, with tools instead of guesses:
+
+| It learns | How | Instead of |
+|---|---|---|
+| the problem's real shape | `deps`, `impact`, `plscope` — the exact dependency graph and usage sites | skimming code and hoping |
+| the schema's ground truth | `src`, `cols`, `args`, `ddl`, `errors` against the live database | trusting a dump that drifted |
+| the house style | `.pythia/conventions.md` + `conventions --scan/--check` — rules measured against real names | inventing a style per session |
+| how this codebase already solves it | `similar` — the neighbours to imitate | writing the first thing that compiles |
+
+Nothing in this phase writes. Reading is free, so the bar is: **no proposal
+before the blast radius is known** (`pythia-impact`'s iron law) and **no line
+written before the neighbours have been read** (`pythia-write`'s).
+
+### 2 · Ask — the questions are part of the method, not an interruption
+
+The kit makes the agent stop at exactly the moments where a human's judgment
+is the missing input, and forbids it to guess past them:
+
+- **Before any write**: the full preview — diff, dependents, warnings — is
+  relayed verbatim, and the agent waits for a real yes. A compliment is not a
+  yes. Silence is not a yes.
+- **When the blast radius is large**: ten or more dependents, or anything
+  cross-schema, goes to the developer *before code is written*, not after.
+- **When sources of truth disagree**: a standards document says one thing,
+  the schema does another — that gap is a question ("rule nobody follows,
+  new-code-only, or drift?"), never a silent pick.
+- **When something breaks**: exit 3 means *written but broken*. The agent
+  reports it exactly so, with the ready rollback — reporting success here is
+  the one sin the whole kit is built to prevent.
+- **When policy refuses**: the refusal is relayed as information, not routed
+  around.
+
+### 3 · Do — act inside a pipeline that cannot lie
+
+Only after Learn and Ask does anything touch the database, and then only
+through one door: **snapshot → impact → preview → token → apply → verify →
+report**. DDL self-commits in Oracle, so the snapshot is the only real undo —
+it runs first and no flag disables it. A content-bound token guarantees what
+lands is byte-for-byte what was approved. And the CLI enforces the gates
+itself: a headless agent cannot `--yes` its own writes or loosen policy —
+that takes a human at a real terminal.
+
+The same discipline holds when the *developer* does the work: `src` and
+`impact` silently snapshot what they read, so even a change made by hand in
+SQL Developer has a rollback file waiting (`history` lists them, drift is
+reported when source moved with no apply behind it).
+
+**Học – Hỏi – Làm** — Learn, Ask, Do. If the agent cannot show which phase it
+is in, it is doing none of them.
 
 ## Install
 

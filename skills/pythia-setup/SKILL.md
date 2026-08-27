@@ -7,6 +7,8 @@ description: Use when setting pythia up for a project or a machine - writing con
 
 **Announce at start:** "Using pythia-setup to configure the database access."
 
+**Phase:** Do — one-time harness setup; everything after runs through Learn → Ask → Do
+
 Set up in this order: connection first (everything else needs it), the
 least-privilege user second (the only protection that cannot be bypassed),
 SQLcl MCP last (optional, reads only).

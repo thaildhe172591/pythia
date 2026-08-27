@@ -5,6 +5,18 @@
 From install to daily workflow, the security model and troubleshooting.
 Every command pastes as written.
 
+## The operating model — read this first
+
+Learn → Ask → Do. The agent studies the schema and the house style before
+proposing (`deps`, `impact`, `src`, `similar`, `conventions`); it stops and
+asks at the moments where the developer's judgment is the missing input (the
+preview gate, large blast radius, document-vs-schema conflicts, every
+refusal, every exit 3); only then does it act, through the one write door
+with snapshot, token and verify. `pythia guide` prints the full model from
+the tool itself — on platforms with no skill support, that page is the
+contract. Each skill declares which movement it serves in its `**Phase:**`
+line.
+
 ## Contents
 
 1. [Installing](#1-installing)
