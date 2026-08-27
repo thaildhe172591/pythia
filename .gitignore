@@ -11,8 +11,12 @@ docs/
 tool-oracle-v1/
 NOTES-research.md
 
-# Local dogfood project material (developed WITH pythia, not part of it)
+# Local dogfood project material (developed WITH pythia, not part of it).
+# The conventions document is measured on a live company schema and names
+# its host, schemas and tenants — it is the single most leak-prone file
+# anyone will ever put in this working copy.
 sql/
+*_ORACLE_CONVENTIONS.md
 
 # Agent-installed skill copies (the canonical pack lives in skills/)
 .claude/
