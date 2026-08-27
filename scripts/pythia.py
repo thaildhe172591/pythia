@@ -1988,6 +1988,24 @@ def _schema_objects(conn, schema):
     return [(r[0], r[1]) for r in rows]
 
 
+BRIEF_GUIDE = """\
+PYTHIA HARNESS ACTIVE - Learn, Ask, Do. Before any Oracle/PL-SQL action:
+
+ROUTE  build/change with open decisions -> pythia-spec asks FIRST (questions
+       mandatory; written spec/plan offered, skippable). explain -> explore.
+       review -> review. landing a change -> apply.
+LEARN  impact before any change. Ask the live database, never a dump. Read
+       .pythia/conventions.md if present. List connections with `pythia
+       connections` - never open connections.json (it holds passwords).
+ASK    relay apply previews verbatim and wait for a real yes. >=10 dependents
+       or cross-schema: show the developer before writing code. Refusals and
+       exit 3 (written-but-broken) are relayed, never routed around. Do not
+       read exit codes through a pipe.
+DO     writes go through `pythia apply` only - snapshot, token, verify. The
+       full contract: `pythia guide`.
+"""
+
+
 OPERATING_GUIDE = """\
 THE OPERATING MODEL — Learn, Ask, Do (Hoc - Hoi - Lam)
 
@@ -2013,6 +2031,13 @@ before the neighbours have been read.
 === 2. ASK — the questions are the method =======================
 Stop at exactly these moments; a guess past any of them is a defect.
 
+  the request is open     a feature with more than one reasonable shape:
+                          list the spec decisions you would otherwise settle
+                          silently - options, trade-offs, a recommendation -
+                          and get them chosen BEFORE building. Building first
+                          turns the developer's choice into agree-or-rework.
+                          Then OFFER a written spec/plan - the developer may
+                          skip the documents; the questions were the point.
   before any write        relay the full preview (diff, dependents, warnings)
                           verbatim, then wait. A compliment is not a yes.
   blast radius >= 10      or anything cross-schema: show the developer the
@@ -2036,9 +2061,11 @@ verify -> report.
 The CLI enforces the gates: headless --yes is refused, policy cannot be
 loosened without a human at a terminal, the snapshot cannot be switched off.
 
-Skills carry the full method (pythia-explore, -impact, -conventions, -write,
+using-pythia routes to the right skill before any action; the skills
+carry the full method (pythia-spec, -explore, -impact, -conventions, -write,
 -apply, -review, -setup, -skill-author). No skill support on this platform?
-This page is the contract; follow it as written.
+This page is the contract; follow it as written. `pythia guide --brief`
+is its one-page form, sized for a session preamble.
 """
 
 
@@ -2096,7 +2123,7 @@ def cmd_connections(conn, schema, ns):
 
 
 def cmd_guide(conn, schema, ns):
-    print(OPERATING_GUIDE)
+    print(BRIEF_GUIDE if getattr(ns, "brief", False) else OPERATING_GUIDE)
 
 
 def cmd_conventions(conn, schema, ns):
@@ -2597,9 +2624,11 @@ def build_parser():
     sub.add_parser("connections", parents=[common()],
                    help="list configured connections — names, users, "
                         "targets; never passwords")
-    sub.add_parser("guide", parents=[common()],
+    s = sub.add_parser("guide", parents=[common()],
                    help="the operating model: Learn, Ask, Do — the whole "
                         "harness on one page, no database needed")
+    s.add_argument("--brief", action="store_true",
+                   help="the one-page version, sized for a session preamble")
     s = sub.add_parser("conventions", parents=[common()],
                    help="show the project's house-style naming patterns")
     s.add_argument("--init", action="store_true",

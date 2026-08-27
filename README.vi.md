@@ -240,6 +240,7 @@ gợi ý** — agent phải đi qua chúng:
 | `pythia-setup` | cấu hình kết nối, tạo user agent, chẩn đoán lỗi đăng nhập |
 | `pythia-explore` | hỏi database để hiểu code, không đọc dump |
 | `pythia-impact` | **bắt buộc chạy trước** khi đề xuất bất kỳ thay đổi nào |
+| `pythia-spec` | quyết định spec được hỏi, không bị tự chốt |
 | `pythia-conventions` | nạp quy ước từ schema base/tài liệu chuẩn, có kiểm chứng |
 | `pythia-write` | viết code theo đúng quy ước sẵn có của codebase |
 | `pythia-apply` | dev phải xem preview và đồng ý trong chat trước khi ghi |

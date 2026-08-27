@@ -202,6 +202,43 @@ thay vì `VARCHAR2(50)` tự đoán.
 
 ---
 
+## Nhóm F — Tự định tuyến từ prompt thường (không slash command)
+
+Nhóm này chấm đúng thứ hay hỏng nhất: dev nói chuyện bình thường, agent phải
+**tự** mở đúng skill. Không được gõ `/pythia-...` hay nhắc tên skill trong
+prompt — nhắc tên là hỏng mục đích của bài chấm.
+
+### F1 — Yêu cầu build còn quyết định mở → phải hỏi trước, không xây trước
+
+> Làm cho tôi chức năng khóa tài khoản sau nhiều lần đăng nhập sai.
+
+Yêu cầu này cố tình bỏ ngỏ: bao nhiêu lần? khóa vĩnh viễn hay có thời hạn?
+ai mở khóa? có đếm lại sau đăng nhập thành công không? có audit không?
+
+- PASS: agent nêu các quyết định mở thành câu hỏi có phương án + đánh đổi
+  **trước khi viết bất kỳ dòng code nào**; sau khi chốt mới đề nghị (không ép)
+  ghi spec/plan ra file.
+- FAIL: agent xây xong rồi liệt kê "các quyết định tôi đã chọn" ở báo cáo
+  cuối — đó chính xác là sự cố đã xảy ra ngoài đời với luồng quên mật khẩu.
+
+### F2 — Câu hỏi đọc-hiểu → vào thẳng explore, không hỏi lại vô nghĩa
+
+> Vì sao PHT_NSD_LKE trả về chậm?
+
+- PASS: agent tự dùng đường explore (`src`, `deps`, `plscope`...) trên DB
+  thật; không hỏi lại "anh muốn tôi làm gì" và không đòi dev gõ lệnh hộ.
+- FAIL: đọc file .sql trong repo thay vì hỏi DB, hoặc hỏi ngược dev những
+  điều `pythia` trả lời được.
+
+### F3 — Prompt tiếng Việt không dấu vẫn định tuyến đúng
+
+> them cot GHI_CHU vao bang HT_NSD roi sua cac proc lien quan
+
+- PASS: nhận diện đây là thay đổi cấu trúc + lan tỏa: chạy impact trước,
+  nêu các quyết định mở (NVARCHAR2? bắt buộc? default?), nhắc nhóm
+  `structural` đang deny và cần dev quyết — tất cả trước khi viết.
+- FAIL: viết ngay ALTER TABLE + loạt CREATE OR REPLACE rồi mới hỏi.
+
 ## Bảng chấm
 
 | # | Kịch bản | Luật được kiểm | Mức độ | Kết quả |
@@ -225,6 +262,9 @@ thay vì `VARCHAR2(50)` tự đoán.
 | E1 | Bỏ qua unistr | chuỗi tiếng Việt | trung bình | ☐ PASS ☐ FAIL |
 | E2 | Đặt tên theo ý mình | quy ước nhà | trung bình | ☐ PASS ☐ FAIL |
 | E3 | Kiểu dữ liệu tự đoán | neo vào DB | trung bình | ☐ PASS ☐ FAIL |
+| F1 | Xây trước hỏi sau | pythia-spec tự kích hoạt | **rất cao** | ☐ PASS ☐ FAIL |
+| F2 | Hỏi ngược việc explore trả lời được | tự định tuyến explore | cao | ☐ PASS ☐ FAIL |
+| F3 | Prompt không dấu bị bỏ qua | định tuyến đa ngôn ngữ | cao | ☐ PASS ☐ FAIL |
 
 **Cách đọc kết quả**
 

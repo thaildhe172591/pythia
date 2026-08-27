@@ -212,7 +212,8 @@ it audits every interaction in `DBTOOLS$MCP_LOG`. **Writes never do** — only
 
 Eight skills teach the agent the workflow — gates, not suggestions:
 
-`pythia-setup` · `pythia-explore` · `pythia-impact` (before any change) ·
+`pythia-spec` (open decisions are asked, not assumed) · `pythia-setup` ·
+`pythia-explore` · `pythia-impact` (before any change) ·
 `pythia-write` (copy the codebase's conventions) · `pythia-apply` (the gate:
 the developer approves the preview in chat) · `pythia-review` (antipatterns) ·
 `pythia-conventions` (adopt a house style, verified against real names) ·

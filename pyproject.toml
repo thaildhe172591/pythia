@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pythia-plsql"
-version = "0.6.1"
+version = "0.7.0"
 description = "PL/SQL development for AI agents on Oracle Database - expert data-dictionary queries, impact analysis, and a snapshot-verified write path with honest rollback."
 readme = "README.md"
 license = { text = "MIT" }

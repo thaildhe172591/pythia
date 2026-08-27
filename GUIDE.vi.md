@@ -344,6 +344,7 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | Skill | Kích hoạt khi | Việc chính |
 |---|---|---|
 | `pythia-setup` | cấu hình máy/project, lỗi kết nối, cảnh báo quyền | connections, agent-user, SQLcl MCP |
+| `pythia-spec` | yêu cầu còn quyết định mở | đưa phương án + đánh đổi cho dev TRƯỚC khi xây; phát hiện giữa chừng thì dừng xây |
 | `pythia-explore` | cần hiểu bất cứ gì trong schema | hỏi DB, không đọc dump |
 | `pythia-impact` | **trước** mọi đề xuất thay đổi | ≥10 dependent hoặc cross-schema → hỏi dev trước |
 | `pythia-write` | viết/sửa PL/SQL sau khi biết impact | copy convention, neo kiểu vào DB, unistr |
@@ -374,6 +375,11 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | `Loosening the write policy ... no terminal` | tương tự: đưa dev đúng lệnh `policy set` đã in để họ tự chạy |
 
 ## 11. Tuỳ chọn: cấu hình quyền cho Claude Code
+
+Bản settings mẫu giờ kèm hook `SessionStart` chạy `python -m pythia guide
+--brief`: ~15 dòng bơm vào đầu mỗi phiên — chính nó làm việc định tuyến skill
+trở nên tất định: yêu cầu build đến được `pythia-spec` bất kể hôm đó agent
+có "nhớ" kiểm tra skills hay không. Không thích thì xoá khối `hooks`.
 
 Claude Code tự quyết có chạy một lệnh hay không, và ở auto mode thì một
 classifier chấm từng lệnh theo ngữ cảnh. Kéo theo hai chuyện.

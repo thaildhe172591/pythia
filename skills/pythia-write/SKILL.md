@@ -1,6 +1,6 @@
 ---
 name: pythia-write
-description: Use when writing or modifying PL/SQL source - a procedure, function, package, trigger, or view - after impact is known. The codebase's conventions already exist; copy them instead of inventing style, and anchor every type to the database's reality.
+description: Use when writing or modifying PL/SQL source - a procedure, function, package, trigger, or view - after impact is known and the spec is settled (open decisions go through pythia-spec first). The codebase's conventions already exist; copy them instead of inventing style, and anchor every type to the database's reality.
 ---
 
 # Writing PL/SQL

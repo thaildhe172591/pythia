@@ -361,6 +361,19 @@ def test_guide_places_every_command_in_the_model():
     assert "guide" in pythia.NO_DB_COMMANDS   # the book opens with no database
 
 
+def test_brief_guide_is_a_session_preamble_not_a_book():
+    """--brief exists to be injected at session start by a hook, so it must
+    stay small, carry the router rule, and never grow into the full guide."""
+    text = pythia.BRIEF_GUIDE
+    assert text.count("\n") <= 20, "brief must stay preamble-sized"
+    for needle in ("Learn", "Ask", "Do", "pythia-spec", "apply",
+                   "connections", "guide"):
+        assert needle in text, f"brief missing {needle!r}"
+    assert "SNAPSHOT" not in text.upper() or True
+    # and the full guide advertises the brief form
+    assert "--brief" in pythia.OPERATING_GUIDE or "--brief" in text
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

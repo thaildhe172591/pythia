@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "PL/SQL development kit for AI agents on Oracle Database",
-    "version": "0.6.1"
+    "version": "0.7.0"
   },
   "plugins": [
     {
@@ -14,8 +14,10 @@
       "description": "Explore Oracle schemas, measure blast radius before changing anything, and write PL/SQL through a snapshot-verified pipeline. The skill pack teaches the agent the workflow -- Learn, Ask, Do -- and the CLI enforces it.",
       "license": "MIT",
       "skills": [
+        "./skills/using-pythia",
         "./skills/pythia-setup",
         "./skills/pythia-explore",
+        "./skills/pythia-spec",
         "./skills/pythia-impact",
         "./skills/pythia-write",
         "./skills/pythia-conventions",

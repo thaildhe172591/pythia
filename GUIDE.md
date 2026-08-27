@@ -358,6 +358,7 @@ Eight skills, superpowers-style gates — not suggestions:
 | Skill | Triggers when | Core job |
 |---|---|---|
 | `pythia-setup` | configuring a machine/project, connection failures, privilege warnings | connections, agent-user, SQLcl MCP |
+| `pythia-spec` | a request leaves real decisions open | options + trade-offs to the developer BEFORE building; mid-build discoveries stop the build |
 | `pythia-explore` | understanding anything in a schema | ask the database, never a dump |
 | `pythia-impact` | **before** proposing any change | ≥10 dependents or cross-schema → show the developer first |
 | `pythia-write` | writing/modifying PL/SQL once impact is known | copy conventions, anchor types to the DB, unistr |
@@ -388,7 +389,15 @@ go through MCP.**
 | `--yes ... no terminal is attached` | an agent tried to self-approve — by design: preview, relay verbatim, stop; the developer approves, then `--confirm <token>` |
 | `Loosening the write policy ... no terminal` | same design: hand the developer the printed `policy set` command to run themselves |
 
-## 11. Optional: Claude Code permission settings
+## 11. Optional: Claude Code permission settings and the session hook
+
+The example settings now also carry a `SessionStart` hook running
+`python -m pythia guide --brief`: ~15 lines injected once per session, which
+is what makes skill routing deterministic — build requests reach
+`pythia-spec` whether or not the agent felt like checking its skills that
+day. Remove the `hooks` block if you prefer trigger-matching alone.
+
+### The original section
 
 Claude Code decides for itself whether to run a command, and in auto mode a
 classifier makes that call per command, in context. Two things follow.

@@ -15,7 +15,7 @@ output on any command.
 
 Every task moves Learn → Ask → Do (`pythia guide` prints the whole model).
 The rules below are those movements in enforceable form:
-Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6 (and 2's threshold) · Do: 3, 8.
+Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11 (and 2's threshold) · Do: 3, 8.
 
 1. **Ask the database, never the dump.** Repo exports drift (a real audit:
    all types and packages missing, 89% of indexes). Use `ls / src / args /
@@ -47,6 +47,13 @@ Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6 (and 2's threshold) · Do: 3, 8.
 10. **Never open `.pythia/connections.json`.** It holds passwords, and a
     permission gate should stop you. `pythia connections` lists the names,
     users, schemas and targets with no secrets in the output.
+11. **The spec is settled before the build starts.** A request that
+    leaves real decisions open — data kept or deleted, expiry and retry
+    behaviour, channels, scope, any security/audit trade-off — becomes
+    questions with options and a recommendation, asked *before* code is
+    written. A new decision discovered mid-build stops the build. The
+    questions are mandatory; a written spec/plan is offered afterwards
+    and the developer may skip it.
 
 ## Where things are
 

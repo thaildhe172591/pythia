@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.7.0 — 2026-08-27
+
+**The asking release.** A field session built a complete forgot-password flow
+and silently settled seven spec decisions — expiry times, channels, audit
+trade-offs — that belonged to the developer. Challenged, the agent's own
+diagnosis was exact: the construction chain starts after the spec is settled,
+and nothing in the kit owned the moment before. Now two things do, and a
+third makes them fire reliably.
+
+- **New skill `pythia-spec`** owns the moment a request arrives with open
+  decisions. Its Iron Law: spec decisions belong to the developer — you
+  propose, they choose. The line that decides who decides: if two senior
+  developers could reasonably ship different behaviour, it is spec (ask);
+  if the codebase or conventions already answer it, it is technical (decide,
+  and cite the căn cứ). The questions are mandatory; the written spec/plan
+  documents are offered afterwards and the developer may skip them. A new
+  decision discovered mid-build stops the build.
+- **New skill `using-pythia`** — the pocket handbook, after Superpowers'
+  router pattern (credited, rebuilt from scratch): route by what the
+  developer *said*, in any language, before any action. No slash command is
+  ever needed — descriptions now carry the natural phrases, Vietnamese with
+  or without diacritics included.
+- **`pythia guide --brief`** prints the one-page harness, and the Claude
+  Code settings example gains a `SessionStart` hook that injects it every
+  session. That hook is what turns "some sessions ask, some don't" into
+  deterministic routing — ~15 lines of context, once.
+- **Conformance group F** scores exactly this: natural prompts, no skill
+  names — does the agent ask before building (F1), explore instead of
+  asking back (F2), and route diacritic-free Vietnamese (F3)?
+- AGENTS.md rule 11; the guide's Ask movement opens with the request gate;
+  `pythia-write` requires a settled spec.
+
 ## 0.6.1 — 2026-08-27
 
 - **`pythia connections`** — the configured connections with everything

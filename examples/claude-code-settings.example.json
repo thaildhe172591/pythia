@@ -1,8 +1,6 @@
 {
   "//": "Optional Claude Code settings for a project using pythia. Copy to .claude/settings.json (merge if one exists). NOT installed by pythia: this is another product's security config, and yours to own. See GUIDE.md section 11.",
-
   "//permissions": "DETERMINISTIC rule matching. These are pythia's read-only commands: sql refuses anything that is not SELECT/WITH, and none of the rest can write. Allowing them removes prompts that carry no decision. Everything absent from this list still prompts as usual - including every form of apply.",
-
   "permissions": {
     "allow": [
       "Bash(pythia check *)",
@@ -29,9 +27,7 @@
       "Bash(pythia journal export *)"
     ]
   },
-
   "//autoMode": "ADVISORY, not enforcement: these lines are fed to the auto-mode classifier as guidance, so they shift the odds rather than decide. Do not read them as a guarantee that a write will pause. The guarantees live elsewhere - in pythia's confirm token, in the policy file, and above all in the agent's Oracle grants. soft_deny means 'pause unless the developer's own words clear it', which is exactly right here: you saying 'apply it' should clear the pause; the agent deciding alone should not.",
-
   "autoMode": {
     "allow": [
       "$defaults",
@@ -43,6 +39,19 @@
       "`pythia apply <file> --confirm <token>` writes to the Oracle database, and DDL self-commits there - no transaction can roll it back. Pause for the developer, even though pythia already required a preview.",
       "`pythia journal restore <id> --confirm <token>` is also a write. Pause the same way.",
       "`pythia policy set <group> <value>` changes which kinds of write are allowed at all. Pause; loosening it is the developer's decision, never the agent's."
+    ]
+  },
+  "//hooks": "DETERMINISTIC skill routing. Skill descriptions are advisory - the agent decides whether to open one, which is why some sessions ask the right questions and some silently build. This hook injects the one-page harness at every session start, so routing stops depending on the agent's mood: build requests go through pythia-spec, writes through apply, no slash commands ever needed. Costs ~15 lines of context once per session.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m pythia guide --brief"
+          }
+        ]
+      }
     ]
   }
 }
