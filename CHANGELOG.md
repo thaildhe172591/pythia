@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.6 — 2026-08-27
+
+- **`SECURITY.md`** — how to report a vulnerability, and the threat model
+  stated plainly: what each layer stops, which layers can be walked around
+  and by whom, and what a snapshot does **not** restore (rows, a dropped
+  column, a revoked grant). Includes the honest reading of the marketplace
+  risk score on `pythia-apply`: the substance is fair — it is the skill that
+  authorizes writes — while the words that trigger it all sit inside
+  prohibitions. Safety rules will not be reworded to score better.
+- CI: GitHub Actions bumped to v7, clearing the Node-runtime deprecation
+  warning every run was printing; Dependabot now watches them monthly.
+- CI: the npm wrapper is executed for real, not just syntax-checked. It is
+  the install path most Windows users take.
+
 ## 0.4.5 — 2026-08-27
 
 - **The install instructions now use a command that cannot fail.** 0.4.4 made
