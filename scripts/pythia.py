@@ -967,10 +967,46 @@ def json_envelope(command, connection, schema, cols, rows, truncated, **extra):
 
 # --- database access ---------------------------------------------------------
 
-def connect_failure_message(exc, conn_name):
-    """A failure to connect should say which entry failed and what to check —
-    a driver stack trace tells the reader nothing actionable."""
-    return (f"Could not connect using connection {conn_name!r}: {exc}\n"
+def authenticating_account(user):
+    """The Oracle account that actually authenticates. With proxy
+    authentication the connect string is `agent[owner]` and it is the agent
+    whose password is checked, whose account locks, and whose name a DBA
+    needs — not the schema in front of you."""
+    if not user:
+        return None
+    return str(user).split("[", 1)[0].strip().upper()
+
+
+def connect_failure_message(exc, conn_name, user=None):
+    """A failure to connect should say which entry failed and what to do. For
+    the three errors Oracle has already diagnosed precisely, generic advice
+    wastes the reader's time, so name the actual next step instead."""
+    text = str(exc)
+    account = authenticating_account(user)
+    who = account or "<the connecting user>"
+    head = f"Could not connect using connection {conn_name!r}: {text}"
+    if "ORA-28000" in text:
+        return (f"{head}\n"
+                f"The account {who} is locked. A DBA or superuser unlocks it:\n"
+                f"  ALTER USER {who} ACCOUNT UNLOCK;\n"
+                "Then find out why, or it locks again — a run of wrong "
+                "passwords trips\nFAILED_LOGIN_ATTEMPTS:\n"
+                f"  SELECT account_status, lock_date, profile FROM dba_users "
+                f"WHERE username = '{who}';")
+    if "ORA-28001" in text or "ORA-28002" in text:
+        return (f"{head}\n"
+                f"The password for {who} has expired. A DBA sets a new one:\n"
+                f"  ALTER USER {who} IDENTIFIED BY \"<new password>\";\n"
+                "Update it in connections.json in the same breath. To stop the "
+                "clock for a\nservice account, put it on a profile with "
+                "PASSWORD_LIFE_TIME UNLIMITED.")
+    if "ORA-01017" in text:
+        return (f"{head}\n"
+                f"Wrong username or password for {who}. Check the entry in "
+                "connections.json —\nand check it before retrying: repeated "
+                "attempts trip FAILED_LOGIN_ATTEMPTS and\nlock the account, "
+                "which needs a DBA to undo.")
+    return (f"{head}\n"
             "Check host/port/service_name, the credentials, and that the database "
             "is reachable from here. Use --conn NAME to try a different entry.")
 
@@ -2298,7 +2334,7 @@ def main(argv=None):
     except (oracledb.Error, OSError) as e:
         # OSError too: a DNS or socket failure arrives raw from the socket layer,
         # not wrapped as an oracledb.Error.
-        sys.exit(connect_failure_message(e, name))
+        sys.exit(connect_failure_message(e, name, c.get("user")))
     try:
         if ns.command == "journal":           # only restore reaches here
             if not ns.id:

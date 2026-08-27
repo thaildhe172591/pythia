@@ -301,6 +301,32 @@ def test_json_envelope():
     assert d["rows"] == [{"A": 1, "B": "2026-01-02"}]
 
 
+def test_connect_failure_names_the_fix_for_common_oracle_errors():
+    """Generic advice is useless for an error Oracle already diagnosed. The
+    three that actually strand people each have one specific next step."""
+    locked = pythia.connect_failure_message(
+        Exception("ORA-28000: The account is locked."), "dev", user="agent[owner]")
+    assert "ACCOUNT UNLOCK" in locked and "AGENT" in locked   # the real account
+    assert "DBA" in locked or "superuser" in locked.lower()
+
+    expired = pythia.connect_failure_message(
+        Exception("ORA-28001: the password has expired"), "dev", user="agent")
+    assert "PASSWORD EXPIRE" in expired or "new password" in expired.lower()
+
+    wrong = pythia.connect_failure_message(
+        Exception("ORA-01017: invalid username/password"), "dev", user="agent")
+    assert "lock the account" in wrong.lower()   # warn before they retry into one
+
+    plain = pythia.connect_failure_message(OSError("getaddrinfo failed"), "dev")
+    assert "ORA-" not in plain and "dev" in plain     # unchanged for the rest
+
+
+def test_oracle_account_taken_from_a_proxy_connect_string():
+    assert pythia.authenticating_account("agent[owner]") == "AGENT"
+    assert pythia.authenticating_account("plain_user") == "PLAIN_USER"
+    assert pythia.authenticating_account(None) is None
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

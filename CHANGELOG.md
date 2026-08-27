@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.9 — 2026-08-27
+
+- **Connection errors Oracle has already diagnosed now carry their fix.**
+  `ORA-28000` used to arrive under generic advice to check host, port and
+  credentials — none of which is the problem when the account is simply
+  locked. It now names the statement a DBA runs, and the query that says why
+  it locked, so it does not lock again. Same for `ORA-28001`/`28002`
+  (expired) and `ORA-01017` (wrong password — with the warning that retrying
+  is what trips `FAILED_LOGIN_ATTEMPTS` in the first place).
+- **The account named is the one that actually authenticates.** Under proxy
+  authentication the connect string is `agent[owner]`, and it is the agent
+  that locks — not the schema in front of you. Naming the wrong one sends a
+  DBA to unlock an account that was never locked.
+
 ## 0.4.8 — 2026-08-27
 
 Both fixes come from a field install where everything had in fact worked.
