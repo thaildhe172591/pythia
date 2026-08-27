@@ -15,6 +15,10 @@
   code.
 - `examples/agent-user-setup.example.sql` upgraded from two roles to three;
   `pythia-setup` names the trio and points at both.
+- Framed explicitly as **advisory**: the layout is the author's guidance —
+  one extra hardening layer at the role tier. Sites own their security
+  model; the kit works with whatever accounts it is pointed at and takes
+  no responsibility for a site's privilege design.
 
 ## 0.7.0 — 2026-08-27
 

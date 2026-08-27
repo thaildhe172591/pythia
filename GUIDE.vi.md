@@ -137,6 +137,12 @@ project; đứng ngoài mọi project thì lỗi rõ ràng.
 
 ### Bố cục 3 vai trò — chốt một lần, dùng mọi nơi
 
+**Là khuyến nghị, không phải yêu cầu.** Bố cục này là lời khuyên của tác giả
+— một tầng gia cố thêm ở tầng phân quyền role, đưa ra để tham khảo. Mô hình
+bảo mật là của DBA nơi bạn; pythia làm việc với bất kỳ tài khoản nào bạn trỏ
+tới, và không nhận trách nhiệm về thiết kế phân quyền của một site. Dùng,
+chỉnh, hay bỏ qua — tùy bạn.
+
 Một database, ba tài khoản, ba việc không được trộn lẫn:
 
 | Tài khoản | Quyền | Việc | Chứa object? |

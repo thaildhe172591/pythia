@@ -24,6 +24,11 @@ one development schema, via proxy authentication — see
 **Never point it at production.** This is Oracle's own guidance for LLM
 access and it is ours.
 
+Everything in this tier — the three-role layout, the proxy pattern, the
+grants we suggest — is the author's guidance, not a requirement the tool
+imposes or takes responsibility for. It is one additional hardening layer
+at the role tier; your site's security model belongs to your DBA.
+
 ### The layers, and what each is worth
 
 | Layer | Stops | Can be bypassed by |

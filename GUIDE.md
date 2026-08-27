@@ -142,6 +142,12 @@ databases between projects; outside any project it errors plainly.
 
 ### The three-role layout — settled once, reused everywhere
 
+**Advisory, not a requirement.** This layout is the author's recommendation —
+one extra hardening layer at the role tier, offered as guidance. Your DBA
+owns your security model; pythia works with whatever accounts you point it
+at, and takes no responsibility for a site's privilege design. Use it, adapt
+it, or ignore it.
+
 One database, three accounts, three jobs that must not mix:
 
 | Account | Privileges | Job | Owns objects? |
