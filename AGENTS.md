@@ -15,7 +15,7 @@ output on any command.
 
 Every task moves Learn → Ask → Do (`pythia guide` prints the whole model).
 The rules below are those movements in enforceable form:
-Learn: 1, 2, 6, 8 · Ask: 4, 5 (and 2's threshold) · Do: 3, 7.
+Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6 (and 2's threshold) · Do: 3, 8.
 
 1. **Ask the database, never the dump.** Repo exports drift (a real audit:
    all types and packages missing, 89% of indexes). Use `ls / src / args /
@@ -44,14 +44,17 @@ Learn: 1, 2, 6, 8 · Ask: 4, 5 (and 2's threshold) · Do: 3, 7.
 9. **House style outranks generic style.** If `.pythia/conventions.md`
    exists, read it before writing any object; `pythia conventions` shows the
    machine-checked naming patterns, and apply previews warn on drift.
+10. **Never open `.pythia/connections.json`.** It holds passwords, and a
+    permission gate should stop you. `pythia connections` lists the names,
+    users, schemas and targets with no secrets in the output.
 
 ## Where things are
 
 - `scripts/pythia.py` — the CLI (stdlib + python-oracledb, thin mode)
 - `queries/*.sql` — every SQL statement the tool runs, reviewable in isolation
-- `skills/` — the seven workflow skills (`pythia-apply` is the write gate)
+- `skills/` — the workflow skills (`pythia-apply` is the write gate)
 - `examples/` — connection config and the least-privilege agent-user setup
-- `tests/` — four suites, no database required; run them before claiming done
+- `tests/` — the suites, no database required; run them before claiming done
 
 ## Contributing changes to pythia itself
 

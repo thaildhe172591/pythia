@@ -85,7 +85,7 @@ until you want it.
 
 | File | Created by | What it does |
 |---|---|---|
-| `connections.json` | `pythia install` | Where to connect. Holds credentials; gitignored. |
+| `connections.json` | `pythia install` | Where to connect. **Holds passwords — never open it**; `pythia connections` lists names, users, schemas and targets with no secrets. Gitignored. |
 | `journal/` | first write or snapshot | Every captured version, with a runnable rollback per entry. |
 | `conventions.json` | `pythia conventions --init` | Naming patterns per object type. Every apply preview warns when a new name drifts. |
 | `conventions.md` | `pythia conventions --init` | The house rules in prose. **`pythia-write` reads this before writing anything**, and it outranks the generic patterns this pack ships with. |

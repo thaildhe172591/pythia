@@ -327,6 +327,46 @@ def test_oracle_account_taken_from_a_proxy_connect_string():
     assert pythia.authenticating_account(None) is None
 
 
+SECRET = "hunter2-do-not-leak"
+
+
+def _cfg():
+    return {
+        "dev": {"host": "db.example.com", "port": 1521,
+                "service_name": "orcl", "user": "app_agent[app_owner]",
+                "password": SECRET, "schema": "APP_OWNER"},
+        "stage": {"dsn": "stage.example.com:1521/orcl", "user": "u2",
+                  "password": SECRET},
+        "default": "dev",
+    }
+
+
+def test_connection_summary_never_carries_a_secret():
+    """An agent needs to know which connections exist. Until it could ask,
+    it parsed connections.json itself -- which is exactly the read a
+    permission classifier should block. This is the sanctioned answer, so it
+    must be provably secret-free, in every field and both output modes."""
+    import json
+    rows = pythia.connection_summary(_cfg())
+    blob = json.dumps(rows)
+    assert SECRET not in blob
+    assert "password" not in blob.lower()
+    names = [r["name"] for r in rows]
+    assert names == ["dev", "stage"]          # the "default" key is not one
+    dev = rows[0]
+    assert dev["default"] is True and rows[1]["default"] is False
+    assert dev["user"] == "app_agent[app_owner]"     # proxy shape is safe to show
+    assert dev["target"] == "db.example.com:1521/orcl"
+    assert rows[1]["target"] == "stage.example.com:1521/orcl"   # dsn form
+    assert dev["schema"] == "APP_OWNER"
+
+
+def test_connection_summary_survives_a_thin_entry():
+    rows = pythia.connection_summary({"env": {"user": "u"}})
+    assert rows[0]["target"] == "—" and rows[0]["schema"] == "U"
+    assert pythia.connection_summary(None) == []
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

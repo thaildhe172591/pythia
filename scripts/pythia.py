@@ -2000,6 +2000,10 @@ Nothing here writes. Reading is free; guessing is not.
 
   the problem's shape     deps · impact · plscope     the exact graph, not a skim
   the schema's truth      src · args · cols · ddl · errors · invalid · check · ls · grep · sql
+  what you can reach      connections - names, users, targets. NEVER open
+                          connections.json yourself: it holds passwords, a
+                          permission gate should stop you, and this command
+                          is the answer you were reaching for.
   the house style         conventions (--scan / --check) · the project's conventions.md
   how it is done here     similar · history            neighbours to imitate, versions that exist
 
@@ -2036,6 +2040,59 @@ Skills carry the full method (pythia-explore, -impact, -conventions, -write,
 -apply, -review, -setup, -skill-author). No skill support on this platform?
 This page is the contract; follow it as written.
 """
+
+
+def connection_summary(cfg):
+    """Everything about the configured connections except the secrets.
+
+    An agent has to know which connections exist. Without a sanctioned way to
+    ask, it reads connections.json itself — which is exactly the access a
+    permission classifier should stop, and did. So this exists, and it is
+    built to be provably safe: fields are copied in by name, never by
+    iterating the entry, so a key added to the config later cannot leak
+    through here by accident.
+    """
+    cfg = dict(cfg or {})
+    default = cfg.pop("default", None)
+    rows = []
+    for name, entry in cfg.items():
+        if not isinstance(entry, dict):
+            continue
+        dsn = entry.get("dsn") or ""
+        if not dsn and entry.get("host"):
+            svc = entry.get("service_name") or entry.get("sid") or ""
+            dsn = f"{entry['host']}:{entry.get('port', 1521)}"
+            if svc:
+                dsn += f"/{svc}"
+        user = str(entry.get("user") or "")
+        rows.append({
+            "name": name,
+            "user": user,
+            "target": dsn or "\u2014",
+            "schema": (entry.get("schema") or user.split("[")[-1].rstrip("]")
+                       or "\u2014").upper(),
+            "default": isinstance(default, str) and default.upper() == name.upper(),
+        })
+    return rows
+
+
+def cmd_connections(conn, schema, ns):
+    cfg, _ = find_config(pathlib.Path.cwd(), os.environ)
+    rows = connection_summary(cfg)
+    if ns.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("No connections configured. "
+              f"{invocation()} install scaffolds .pythia/connections.json.")
+        return
+    print(f"{'':1} {'NAME':<16} {'USER':<26} {'SCHEMA':<20} TARGET")
+    for r in rows:
+        mark = "*" if r["default"] else " "
+        print(f"{mark} {r['name']:<16} {r['user']:<26} {r['schema']:<20} "
+              f"{r['target']}")
+    print("\n* default. Passwords are never printed — this command reads the "
+          "config so you\n  do not have to open it. Pick one with --conn NAME.")
 
 
 def cmd_guide(conn, schema, ns):
@@ -2435,11 +2492,11 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
             "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
-            "conventions": cmd_conventions, "guide": cmd_guide, "install": cmd_install,
+            "conventions": cmd_conventions, "guide": cmd_guide, "connections": cmd_connections, "install": cmd_install,
             "unistr": cmd_unistr, "agent-user": cmd_agent_user,
             "history": cmd_history}
 
-NO_DB_COMMANDS = {"policy", "journal", "install", "unistr", "guide",
+NO_DB_COMMANDS = {"policy", "journal", "install", "unistr", "guide", "connections",
                   "history"}
 
 
@@ -2537,6 +2594,9 @@ def build_parser():
                    help="apply without stopping; the full preview still prints and journals")
     s.add_argument("--depth", type=int, default=3,
                    help="impact depth for the preview (default 3)")
+    sub.add_parser("connections", parents=[common()],
+                   help="list configured connections — names, users, "
+                        "targets; never passwords")
     sub.add_parser("guide", parents=[common()],
                    help="the operating model: Learn, Ask, Do — the whole "
                         "harness on one page, no database needed")

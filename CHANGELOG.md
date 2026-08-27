@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.1 — 2026-08-27
+
+- **`pythia connections`** — the configured connections with everything
+  except the secrets: name, user (proxy form included), schema, target, and
+  which one is the default. Found the hard way: a Claude Code permission
+  classifier blocked an agent for reading `connections.json`, and it was
+  right to. The agent only wanted the connection names — but the kit gave it
+  no sanctioned way to ask, so it reached for the credentials file. Now there
+  is one, and a test pins the safety property: fields are copied by name, so
+  a key added to the config later cannot leak through, and a configured
+  password appears nowhere in either output mode.
+- The rule is taught where the temptation is: `pythia guide` puts it in the
+  Learn movement, AGENTS.md carries it as a standing rule, and the
+  `pythia-setup` file table says it on the `connections.json` row itself.
+
 ## 0.6.0 — 2026-08-27
 
 **The kit now states its own operating model — Learn, Ask, Do (Học – Hỏi –
