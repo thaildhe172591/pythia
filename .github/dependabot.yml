@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # The CI logs already warn that actions/checkout@v4 and setup-python@v5
+  # target a deprecated Node runtime. Nothing else here needs watching: the
+  # runtime dependency list is one entry long, on purpose.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore"
+    labels:
+      - ci

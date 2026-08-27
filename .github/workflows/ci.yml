@@ -35,6 +35,15 @@ jobs:
       - run: node --check npm/bin.js
       - run: pip wheel . --no-deps -w dist
       - run: pip install --no-deps dist/*.whl
+      # ...and then actually run it. `node --check` is a syntax check; the
+      # npm path is the one most Windows users take, and the one that dodges
+      # the PATH problem by calling `python -m pythia`. Its pip step finds the
+      # locally built wheel already installed and newer than the published
+      # one, so this exercises the wrapper against this commit.
+      - run: |
+          mkdir /tmp/npmkit && cd /tmp/npmkit
+          node $GITHUB_WORKSPACE/npm/bin.js
+          test -f .pythia/connections.json
       # the entry point must run outside the repo layout, with queries and
       # skills resolving from the wheel's package data
       - run: cd /tmp && pythia --help && pythia policy
