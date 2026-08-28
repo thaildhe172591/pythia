@@ -98,7 +98,8 @@ def test_apply_skill_keeps_the_honest_rollback_table():
         return
     text = path.read_text(encoding="utf-8")
     for needle in ("Yes — completely", "Flashback Query", "Recycle Bin",
-                   "Almost never", "exit 3", "run-sql"):
+                   "Almost never", "exit 3", "run-sql",
+                   "revalidat"):                   # 0.9.0: the row-set gate
         assert needle in text, f"pythia-apply: missing {needle!r}"
 
 

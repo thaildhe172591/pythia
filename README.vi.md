@@ -220,7 +220,7 @@ Chính sách ghi chia theo nhóm trong `.pythia/policy.json` (mặc định):
 | Nhóm | Mặc định | Có rollback thật không? |
 |---|---|---|
 | `plsql_source` | `confirm` | **Có, hoàn toàn** — lấy lại source từ `ALL_SOURCE`. |
-| `data_dml` | `deny` | **Không.** Commit rồi thì chỉ còn Flashback Query, trong thời hạn undo retention. |
+| `data_dml` | `deny` | **Không.** Commit rồi thì chỉ còn Flashback Query, trong thời hạn undo retention. Revalidation soi tập hàng *trước* khi ghi; nó không phải undo. |
 | `structural` | `deny` | **Gần như không.** `DROP COLUMN` là mất vĩnh viễn; bảng bị drop may lắm còn trong Recycle Bin. |
 | `grants` | `deny` | Có, nhưng phải làm tay. |
 | `session` | `allow` | Không cần. |

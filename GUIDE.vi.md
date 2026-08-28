@@ -370,7 +370,7 @@ pythia policy set structural confirm # đổi một nhóm
 | Nhóm | Mặc định | Rollback có thật không? |
 |---|---|---|
 | `plsql_source` | `confirm` | **Có — hoàn toàn** (ALL_SOURCE) |
-| `data_dml` | `deny` | **Không.** Sau commit chỉ còn Flashback Query |
+| `data_dml` | `deny` | **Không.** Sau commit chỉ còn Flashback Query. Revalidation soi tập hàng trước khi ghi; nó không phải undo |
 | `structural` | `deny` | **Gần như không.** `DROP COLUMN` là vĩnh viễn |
 | `grants` | `deny` | Có, nhưng làm tay |
 | `session` | `allow` | Không cần |

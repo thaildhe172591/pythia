@@ -964,6 +964,7 @@ ROLLBACK_TABLE = """\
 Is rollback real?  (this table also appears in README.md and pythia-apply)
   plsql_source  Yes - completely. Source is recoverable from ALL_SOURCE.
   data_dml      No. After commit only Flashback Query remains, within undo retention.
+                Revalidation checks the row set before the write; it is not an undo.
   structural    Almost never. DROP COLUMN is permanent; a dropped table may be in the Recycle Bin.
   grants        Yes, but by hand.
   session       Not needed."""
@@ -2043,7 +2044,10 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             "invalid_before": invalid_before, **(origin or {})}
     entry = write_journal_entry(ns.project_root, otype, name, db_source,
                                 file_text, meta)
-    created = not db_source.strip()
+    # "created" is about an OBJECT that did not exist. A DML/DDL statement has
+    # no object identity, so it is never "new" — and saying so would promise a
+    # DROP-shaped undo that does not exist for those groups.
+    created = not db_source.strip() and group == "plsql_source"
 
     # 2. IMPACT
     summary = ""
@@ -2069,13 +2073,17 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                           "journal": entry, "will_apply": confirmed}))
     else:
         en = getattr(ns, "color", False)
-        if created:
-            head = "new object"
-        elif changed == 0:
-            head = "no source change (recompile)"
+        if group != "plsql_source":
+            print(f"\n  {paint(group, 'bold', en)} statement on {schema}")
         else:
-            head = f"{changed} lines changed"
-        print(f"\n  {paint(f'{name} ({otype})', 'bold', en)} in {schema} — {head}")
+            if created:
+                head = "new object"
+            elif changed == 0:
+                head = "no source change (recompile)"
+            else:
+                head = f"{changed} lines changed"
+            print(f"\n  {paint(f'{name} ({otype})', 'bold', en)} in {schema} "
+                  f"— {head}")
         if summary:
             print(f"  {summary.lstrip('- ')}")
         if row_set is not None:
@@ -2095,7 +2103,9 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                 print(f"  {paint_diff_line(ln, en)}")
         print(paint(f"\n  Snapshot saved: {journal_root(ns.project_root) / entry}",
                     "dim", en))
-        if not confirmed:
+        if not confirmed and group == "plsql_source":
+            # only this group has a restore.sql worth running: the others get a
+            # generated DROP that nothing would accept
             print(paint("  Rollback file for the current database version — "
                         "use it if this is\n  run by hand instead: "
                         f"{journal_root(ns.project_root) / entry / 'restore.sql'}",

@@ -54,6 +54,16 @@ yet shipped. And what the grant raises is the *bar*, not a wall: it turns a
 write an agent could complete on its own authority into one that takes
 deliberate forgery, which is the same tier as editing `policy.json`.
 
+Row-set revalidation, added in 0.9.0, brings a limit of its own worth naming:
+previewing a `data_dml` statement now runs a `SELECT` derived from that
+statement, so a predicate calling a function executes that function at preview
+time — before anyone has approved anything. This opens no trust boundary the
+statement does not open already (the same file is asking to run its own DML,
+and only a `SELECT` is built from it), but it is a new moment, and the preview
+printing the whole statement is what makes it visible. The fingerprint itself
+tracks *which rows* are in the set, by ROWID; it does not notice a value
+changed in place inside a row that stays in the set.
+
 ## Credentials
 
 `.pythia/connections.json` holds them in plaintext and is gitignored by the

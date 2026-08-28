@@ -359,6 +359,21 @@ def test_a_moved_row_set_refuses_the_confirm():
         assert conn.commits == 0 and wrote_dml(conn) == []
 
 
+def test_dml_preview_promises_no_object_and_no_rollback_file():
+    """A DML statement is not a "new object", and the restore.sql generated
+    for it is a DROP nothing would accept — the preview must offer neither."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        allow_dml(td)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            pythia.run_apply(FakeConn(dml_script()), "APP", dml_ns(td), DML_FILE)
+        text = out.getvalue()
+        assert "data_dml statement on APP" in text
+        assert "new object" not in text and "restore.sql" not in text
+
+
 def test_restore_refuses_an_entry_that_has_no_undo():
     with tempfile.TemporaryDirectory() as td:
         entry = pythia.write_journal_entry(
