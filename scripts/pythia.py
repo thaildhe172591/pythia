@@ -1128,9 +1128,11 @@ def grant_path(root, token):
     return grants_root(root) / f"{token}.json"
 
 
-def mint_grant(root, token, conn_name, now=None):
+def mint_grant(root, token, conn_name, now=None, revalidate=None):
     """Record one developer approval. Single use, short-lived, bound to the
-    connection the preview ran on."""
+    connection the preview ran on. `revalidate` is the row-set fingerprint the
+    human was shown — audit data, not a second gate: the enforcement is the
+    token, which already hashes that same fingerprint."""
     import datetime
     now = now or datetime.datetime.now()
     rec = {"token": token,
@@ -1139,8 +1141,7 @@ def mint_grant(root, token, conn_name, now=None):
            "expires_at": (now + datetime.timedelta(
                minutes=GRANT_TTL_MINUTES)).isoformat(timespec="seconds"),
            "used_at": None,
-           # reserved: the data_dml spec re-checks the affected row set here
-           "revalidate": None}
+           "revalidate": revalidate or None}
     d = grants_root(root)
     d.mkdir(parents=True, exist_ok=True)
     grant_path(root, token).write_text(json.dumps(rec, indent=2) + "\n",
@@ -2276,12 +2277,15 @@ def cmd_approve(conn, schema, ns):
                  f"  {invocation()} apply <file>")
     conn_name = meta.get("connection") or ""
     prune_expired_grants(ns.project_root)
-    rec = mint_grant(ns.project_root, token, conn_name)
+    row_set = meta.get("row_set")
+    rec = mint_grant(ns.project_root, token, conn_name,
+                     revalidate=fingerprint_text(row_set))
     obj, otype = meta.get("object", "?"), meta.get("type", "?")
     group = meta.get("group", "")
     if ns.json:
         print(json.dumps({"ok": True, "token": token, "conn": conn_name,
                           "object": obj, "type": otype, "group": group,
+                          "rows": (row_set or {}).get("count"),
                           "entry": entry, "minted_at": rec["minted_at"],
                           "expires_at": rec["expires_at"],
                           "ttl_minutes": GRANT_TTL_MINUTES}))
@@ -2295,6 +2299,12 @@ def cmd_approve(conn, schema, ns):
         print(f"  Approving a {group} statement on {meta.get('schema', '?')}:")
         for ln in stmt.splitlines():
             print(f"    {ln}")
+        if row_set:
+            # the rows themselves, exactly as the preview showed them: what is
+            # approved has to be what was seen
+            print()
+            for ln in render_row_set(row_set, en, indent="    "):
+                print(ln)
         print(paint("\n  There is no snapshot for this group — after commit "
                     "it cannot be undone from the journal.", "yellow", en))
     else:

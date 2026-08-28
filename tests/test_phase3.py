@@ -359,6 +359,21 @@ def test_a_moved_row_set_refuses_the_confirm():
         assert conn.commits == 0 and wrote_dml(conn) == []
 
 
+def test_approve_records_the_row_set_it_showed():
+    with tempfile.TemporaryDirectory() as td:
+        allow_dml(td)
+        pythia.run_apply(FakeConn(dml_script(count=2)), "APP",
+                         dml_ns(td), DML_FILE)
+        meta = pythia.read_journal_entry(
+            td, pythia.list_journal_entries(td)[0])["meta"]
+        rec = pythia.mint_grant(
+            td, meta["token"], "DEV",
+            revalidate=pythia.fingerprint_text(meta["row_set"]))
+        assert rec["revalidate"].startswith("rows=2 hash=")
+        assert pythia.read_grant(td, meta["token"])["revalidate"] \
+            == rec["revalidate"]
+
+
 def test_insert_needs_no_row_set():
     with tempfile.TemporaryDirectory() as td:
         allow_dml(td)
