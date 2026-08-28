@@ -887,6 +887,76 @@ def dml_probe(stmt):
     return verb, target, pred
 
 
+def count_sql(target, pred):
+    """The fingerprint query. Interpolated, not bound: a table name and a
+    predicate are not bindable. The text comes from the very file whose DML is
+    about to run, so this opens no trust boundary that statement does not open
+    already — but it runs BEFORE approval, which SECURITY.md says out loud."""
+    return ("select count(*) n, sum(ora_hash(rowidtochar(rowid))) s, "
+            "min(ora_hash(rowidtochar(rowid))) lo, "
+            "max(ora_hash(rowidtochar(rowid))) hi from "
+            + target + (f" where {pred}" if pred else ""))
+
+
+def sample_sql(target, pred):
+    return ("select * from " + target + (f" where {pred}" if pred else "")
+            + " fetch first :n rows only")
+
+
+def measure_row_set(conn, target, pred, limit=10):
+    """Count, fingerprint and sample the rows the statement will touch.
+    Failing to measure is a refusal, never a reason to proceed: a write
+    approved on a row set nobody could see is what this exists to prevent.
+
+    ponytail: ROWID tracks set membership, not row contents — an in-place
+    update to an approved row keeps its ROWID. Hash the sampled columns too if
+    content drift ever needs catching."""
+    try:
+        _, agg = run_query(conn, count_sql(target, pred))
+        cols, rows = run_query(conn, sample_sql(target, pred),
+                               {"n": fetch_n(limit)})
+    except Exception as e:            # the driver's exception class is imported
+        sys.exit("Refused: pythia could not measure the rows this "  # in main()
+                 f"statement would touch.\n  {target} — {e}\n"
+                 "Revalidation is mandatory for UPDATE and DELETE, so a set "
+                 "that cannot be measured cannot be approved.")
+    n, s, lo, hi = (list(agg[0]) + [None] * 4)[:4] if agg else (0, 0, 0, 0)
+    return {"target": target, "predicate": pred or "", "count": int(n or 0),
+            "hash": f"{s or 0}/{lo or 0}/{hi or 0}",
+            "columns": list(cols),
+            "sample": [[cell(v) for v in r] for r in rows[:limit]],
+            "truncated": len(rows) > limit}
+
+
+def fingerprint_text(row_set):
+    """What the token hashes. Empty when there is no row set, so plsql_source
+    tokens stay byte-identical to the ones 0.8.0 printed."""
+    if not row_set:
+        return ""
+    return f"rows={row_set['count']} hash={row_set['hash']}"
+
+
+def render_row_set(row_set, en=False, indent="  "):
+    """The rows an approval is about — printed identically by the preview and
+    by approve, because what is approved must be what was shown."""
+    n = row_set["count"]
+    where = f" where {row_set['predicate']}" if row_set["predicate"] else ""
+    out = [f"{indent}{paint(str(n) + ' rows', 'bold', en)} in "
+           f"{row_set['target']}{where}"]
+    if n > 1000:
+        out.append(indent + paint("! more rows than anyone can read one by "
+                                  "one — the count and the fingerprint are "
+                                  "the whole of what you are approving",
+                                  "yellow", en))
+    if row_set["sample"]:
+        out.append(indent + "\t".join(row_set["columns"]))
+        out.extend(indent + "\t".join(r) for r in row_set["sample"])
+        if row_set["truncated"]:
+            out.append(f"{indent}-- truncated at {len(row_set['sample'])} of "
+                       f"{n} rows")
+    return out
+
+
 POLICY_DEFAULTS = {"plsql_source": "confirm", "data_dml": "deny",
                    "structural": "deny", "grants": "deny", "session": "allow"}
 
@@ -1926,11 +1996,19 @@ def run_apply(conn, schema, ns, file_text, origin=None):
 
     # 1. SNAPSHOT — before anything else, unconditionally.
     db_source = ""
+    row_set = None
     if group == "plsql_source":
         _, rows = run_query(conn, load_query("object-source.sql"),
                             {"s": schema, "n": name, "t": otype})
         db_source = "".join(cell(r[0]) for r in rows)
-    token = apply_token(otype, name, file_text, db_source)
+    elif group == "data_dml":
+        # the row set IS the snapshot here: nothing can undo a committed DML,
+        # so what the developer approves is the set, and the token carries it
+        probe = dml_probe(stmt)
+        if probe:
+            row_set = measure_row_set(conn, probe[1], probe[2])
+    token = apply_token(otype, name, file_text,
+                        db_source + fingerprint_text(row_set))
     if ns.yes and not human_at_the_keyboard():
         sys.exit(HEADLESS_YES_MSG)
     if ns.confirm and ns.confirm != token:
@@ -1954,6 +2032,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             "token": token, "applied": False,
             "confirmed_via": ("yes" if ns.yes else
                               "grant" if confirmed else "preview"),
+            "row_set": row_set,
             "grant_minted_at": (grant or {}).get("minted_at"),
             "tty": human_at_the_keyboard(),
             "invalid_before": invalid_before, **(origin or {})}
@@ -1980,6 +2059,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         print(json.dumps({"ok": True, "object": name, "type": otype,
                           "created": created, "changed_lines": changed,
                           "summary": summary, "warning": warn,
+                          "row_set": row_set,
                           "naming_warning": style, "token": token,
                           "journal": entry, "will_apply": confirmed}))
     else:
@@ -1993,6 +2073,13 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         print(f"\n  {paint(f'{name} ({otype})', 'bold', en)} in {schema} — {head}")
         if summary:
             print(f"  {summary.lstrip('- ')}")
+        if row_set is not None:
+            print()
+            for ln in render_row_set(row_set, en):
+                print(ln)
+        elif group == "data_dml":
+            print("\n  INSERT — no rows exist beforehand, so there is no row "
+                  "set to revalidate.")
         if warn:
             print(f"\n  {paint(warn, 'yellow', en)}")
         if style:

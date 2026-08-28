@@ -172,9 +172,10 @@ def test_newly_invalid_and_diff():
 
 
 class FakeCursor:
-    def __init__(self, script, executed):
+    def __init__(self, script, executed, rowcount=0):
         self.script, self.executed = script, executed
         self.description, self._rows = None, []
+        self.rowcount = rowcount
 
     def execute(self, sql, binds=None):
         self.executed.append((sql, dict(binds or {})))
@@ -203,11 +204,19 @@ class FakeCursor:
 
 
 class FakeConn:
-    def __init__(self, script):
+    def __init__(self, script, rowcount=0):
         self.script, self.executed = script, []
+        self.rowcount = rowcount
+        self.commits, self.rollbacks = 0, 0
 
     def cursor(self):
-        return FakeCursor(self.script, self.executed)
+        return FakeCursor(self.script, self.executed, self.rowcount)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
 
 
 OLD_SRC = "PACKAGE BODY pkg_order AS\n  old line;\nEND;\n"
@@ -249,6 +258,74 @@ def apply_ns(root, **kw):
 
 def wrote_ddl(conn):
     return [s for s, _ in conn.executed if s.lstrip().lower().startswith("create")]
+
+
+DML_FILE = "delete from t_order where status = 'DRAFT'\n"
+
+
+def dml_script(count=2, hashes=(11, 1, 9), rows=((7, "DRAFT"), (8, "DRAFT"))):
+    s = base_script()
+    s["ora_hash"] = (("N", "S", "LO", "HI"), [(count,) + tuple(hashes)])
+    s["select * from"] = (("ID", "STATUS"), list(rows))
+    return s
+
+
+def dml_ns(root, **kw):
+    ns = apply_ns(root, **kw)
+    ns.file = "d.sql"
+    return ns
+
+
+def allow_dml(root):
+    d = pathlib.Path(root) / ".pythia"
+    d.mkdir(exist_ok=True)
+    (d / "policy.json").write_text(json.dumps({"data_dml": "confirm"}),
+                                   encoding="utf-8")
+
+
+def wrote_dml(conn):
+    return [s for s, _ in conn.executed
+            if s.lstrip().lower().startswith(("delete", "update", "insert"))]
+
+
+def test_dml_preview_measures_the_row_set_and_writes_nothing():
+    with tempfile.TemporaryDirectory() as td:
+        allow_dml(td)
+        conn = FakeConn(dml_script())
+        code = pythia.run_apply(conn, "APP", dml_ns(td), DML_FILE)
+        assert code == 0
+        assert wrote_dml(conn) == [] and conn.commits == 0
+        entry = pythia.list_journal_entries(td)[0]
+        rs = pythia.read_journal_entry(td, entry)["meta"]["row_set"]
+        assert rs["count"] == 2 and rs["target"] == "t_order"
+        assert rs["predicate"] == "status = 'DRAFT'"
+        assert rs["sample"] == [["7", "DRAFT"], ["8", "DRAFT"]]
+
+
+def test_the_row_set_moves_the_token():
+    with tempfile.TemporaryDirectory() as td:
+        allow_dml(td)
+        pythia.run_apply(FakeConn(dml_script(count=2)), "APP",
+                         dml_ns(td), DML_FILE)
+        first = pythia.read_journal_entry(
+            td, pythia.list_journal_entries(td)[0])["meta"]["token"]
+        pythia.run_apply(FakeConn(dml_script(count=3)), "APP",
+                         dml_ns(td), DML_FILE)
+        second = pythia.read_journal_entry(
+            td, pythia.list_journal_entries(td)[0])["meta"]["token"]
+        assert first != second, "the fingerprint must reach the token"
+
+
+def test_insert_needs_no_row_set():
+    with tempfile.TemporaryDirectory() as td:
+        allow_dml(td)
+        conn = FakeConn(base_script())
+        code = pythia.run_apply(conn, "APP", dml_ns(td),
+                                "insert into t_order (id) values (1)\n")
+        assert code == 0
+        assert not [s for s, _ in conn.executed if "ora_hash" in s.lower()]
+        entry = pythia.list_journal_entries(td)[0]
+        assert pythia.read_journal_entry(td, entry)["meta"]["row_set"] is None
 
 
 def test_apply_preview_writes_nothing_and_gives_token():
