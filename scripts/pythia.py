@@ -2012,9 +2012,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
     if ns.yes and not human_at_the_keyboard():
         sys.exit(HEADLESS_YES_MSG)
     if ns.confirm and ns.confirm != token:
-        sys.exit("The confirmation token does not match: the file or the "
-                 "database object changed since that preview. Preview again:\n"
-                 f"  {invocation()} apply {ns.file}")
+        sys.exit(token_mismatch_message(ns, row_set))
     # The token proves the content did not move; the grant proves a human
     # approved it. --yes is itself that human act, at a real console.
     grant = None
@@ -2116,6 +2114,17 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         "'IDENTIFIERS:ALL, STATEMENTS:ALL'")
     with conn.cursor() as cur:
         cur.execute(stmt)
+        affected = cur.rowcount if group == "data_dml" else None
+    if group == "data_dml":
+        # the last-millisecond check: the probe ran before this statement, and
+        # READ COMMITTED lets the world move in between
+        if row_set is not None and affected != row_set["count"]:
+            conn.rollback()
+            sys.exit(f"Rolled back: the statement touched {affected} rows, but "
+                     f"{row_set['count']} were approved.\nNothing was "
+                     "committed — the rows moved between the check and the "
+                     "write. Preview again.")
+        conn.commit()          # DDL commits itself; DML never did until now
     if grant is not None:
         spend_grant(ns.project_root, token)   # one approval, one write
 
@@ -2144,14 +2153,20 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         print(json.dumps({"ok": ok, "applied": True, "object": name,
                           "type": otype, "errors": [list(r) for r in own_errors],
                           "newly_invalid": [list(x) for x in broke],
-                          "restore": f"{invocation()} journal restore {entry}",
+                          "rows": affected,
+                          "restore": (f"{invocation()} journal restore {entry}"
+                                      if group == "plsql_source" else None),
+                          "no_undo": group != "plsql_source",
                           "restore_is_drop": created,
                           "restore_blocked_by_policy": (
                               created and undo_group_action(ns) == "deny"),
                           "exit": 0 if ok else 3}))
     else:
         en = getattr(ns, "color", False)
-        if ok:
+        if ok and group == "data_dml":
+            print(paint(f"\n  Applied — {affected} rows changed and "
+                        "committed.", "green", en))
+        elif ok:
             print(paint(f"\n  Applied {name} ({otype}).", "green", en))
             print(paint("  Compiled clean. No new INVALID objects.", "green", en))
         else:
@@ -2168,21 +2183,28 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                 print(f"  {len(broke)} objects were VALID before and are INVALID now:")
                 for n2, t2 in broke:
                     print(paint(f"    {n2} ({t2})", "red", en))
-        if created:
-            print("\n  To undo — note: undo means DROPPING it "
-                  "(it did not exist before):")
+        if group != "plsql_source":
+            # no snapshot was taken, so there is nothing to restore — say that
+            # instead of printing a restore command that would be refused
+            print(paint("\n  There is no undo: the journal kept the statement "
+                        "that ran, not a way back.", "yellow", en))
         else:
-            print("\n  To undo:")
-        print("    " + paint(f"{invocation()} journal restore {entry}",
-                             "cyan", en))
-        if created and undo_group_action(ns) == "deny":
-            # the honest half: that restore is a DROP, DROP is structural,
-            # and structural is deny — so the line above would be refused
-            print(paint("  ...but that restore is a DROP, and structural is "
-                        "set to deny, so it will be refused.", "yellow", en))
-            print(paint("  The developer decides: "
-                        f"{invocation()} policy set structural confirm",
-                        "yellow", en))
+            if created:
+                print("\n  To undo — note: undo means DROPPING it "
+                      "(it did not exist before):")
+            else:
+                print("\n  To undo:")
+            print("    " + paint(f"{invocation()} journal restore {entry}",
+                                 "cyan", en))
+            if created and undo_group_action(ns) == "deny":
+                # the honest half: that restore is a DROP, DROP is structural,
+                # and structural is deny — so the line above would be refused
+                print(paint("  ...but that restore is a DROP, and structural "
+                            "is set to deny, so it will be refused.",
+                            "yellow", en))
+                print(paint("  The developer decides: "
+                            f"{invocation()} policy set structural confirm",
+                            "yellow", en))
     return 0 if ok else 3
 
 
@@ -2207,6 +2229,32 @@ def find_preview_by_token(root, token):
         if str(meta.get("token", "")) == token:
             return eid, meta
     return None, None
+
+
+def token_mismatch_message(ns, row_set):
+    """Why the token no longer matches. For DML the interesting answer is
+    almost always the rows, and the preview's own journal entry still holds
+    what they were — so say which, instead of a generic 'something moved'."""
+    base = ("The confirmation token does not match: the file or the "
+            "database object changed since that preview. Preview again:\n"
+            f"  {invocation()} apply {ns.file}")
+    if not row_set:
+        return base
+    _, meta = find_preview_by_token(ns.project_root,
+                                    str(ns.confirm).strip().lower())
+    then = (meta or {}).get("row_set") or {}
+    if not then or fingerprint_text(then) == fingerprint_text(row_set):
+        return base                       # the file moved, not the rows
+    if then["count"] != row_set["count"]:
+        moved = (f"{then['count']} rows when you approved it, "
+                 f"{row_set['count']} now")
+    else:
+        moved = (f"still {row_set['count']} rows, but not the same ones — the "
+                 "row fingerprint changed")
+    return ("Refused: the row set moved — " + moved + ".\n"
+            "Nothing was written. The approval covered the rows as they were.\n"
+            "Preview again to see them as they are now:\n"
+            f"  {invocation()} apply {ns.file}")
 
 
 def cmd_approve(conn, schema, ns):

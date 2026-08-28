@@ -316,6 +316,49 @@ def test_the_row_set_moves_the_token():
         assert first != second, "the fingerprint must reach the token"
 
 
+def approved(td, conn):
+    """Preview, then approve — the two-step gate, in test form. Returns the
+    token the agent would pass to --confirm."""
+    pythia.run_apply(conn, "APP", dml_ns(td), DML_FILE)
+    entry = pythia.list_journal_entries(td)[0]
+    token = pythia.read_journal_entry(td, entry)["meta"]["token"]
+    pythia.mint_grant(td, token, "DEV")
+    return token
+
+
+def test_dml_commits_once_when_the_rowcount_matches():
+    with tempfile.TemporaryDirectory() as td:
+        allow_dml(td)
+        token = approved(td, FakeConn(dml_script(count=2)))
+        conn = FakeConn(dml_script(count=2), rowcount=2)
+        code = pythia.run_apply(conn, "APP", dml_ns(td, confirm=token), DML_FILE)
+        assert code == 0
+        assert conn.commits == 1 and conn.rollbacks == 0
+        assert wrote_dml(conn)
+
+
+def test_dml_rolls_back_when_the_rowcount_diverges():
+    with tempfile.TemporaryDirectory() as td:
+        allow_dml(td)
+        token = approved(td, FakeConn(dml_script(count=2)))
+        conn = FakeConn(dml_script(count=2), rowcount=5)
+        expect_exit(lambda: pythia.run_apply(
+            conn, "APP", dml_ns(td, confirm=token), DML_FILE),
+            "rolled back", "5", "2")
+        assert conn.rollbacks == 1 and conn.commits == 0
+
+
+def test_a_moved_row_set_refuses_the_confirm():
+    with tempfile.TemporaryDirectory() as td:
+        allow_dml(td)
+        token = approved(td, FakeConn(dml_script(count=2)))
+        conn = FakeConn(dml_script(count=3), rowcount=3)
+        expect_exit(lambda: pythia.run_apply(
+            conn, "APP", dml_ns(td, confirm=token), DML_FILE),
+            "row set moved", "2 rows", "3")
+        assert conn.commits == 0 and wrote_dml(conn) == []
+
+
 def test_insert_needs_no_row_set():
     with tempfile.TemporaryDirectory() as td:
         allow_dml(td)
