@@ -9,9 +9,9 @@ description: Use when a PL/SQL change is ready to reach the database - applying 
 
 **Phase:** Ask → Do — the preview is relayed and approved before the one write door opens
 
-DDL in Oracle commits itself. There is no transaction to roll back — the
-snapshot pythia takes before writing is the only undo there is, and this skill
-exists so that net is always used, and used honestly.
+DDL in Oracle commits itself, so the snapshot pythia takes before writing is
+the only undo there is — and for DML not even that. This skill exists so that
+net is always used, and used honestly.
 
 ## The Iron Law
 
@@ -41,9 +41,8 @@ message.
 Sometimes the developer runs the file themselves — a DBA executes it, a
 release process owns it, or policy denies the group. The preview still ran, so
 a rollback file for the live version exists at
-`.pythia/journal/<entry>/restore.sql`. Never let a change leave your hands for
-manual execution without naming that path alongside the .sql file (`pythia
-history <OBJECT>` lists every captured version).
+`.pythia/journal/<entry>/restore.sql` (`pythia history <OBJECT>` lists every
+captured version). Never let a change leave your hands without naming it.
 
 ## The Workflow
 
@@ -92,10 +91,9 @@ means DROP — policy refuses it under `structural: deny`, and that is correct.
 
 ## Batch mode
 
-`--yes` skips the pause, not the preview — and it is the developer's flag: at
-their terminal it *is* the approval, so no separate approve is needed. A
-frustrated "stop asking" grants it for the task at hand, not from now on:
-confirm the scope once and default to this-batch-only. It never covers restores.
+`--yes` skips the pause, not the preview — it is the developer's flag, and at
+their terminal it *is* the approval. A frustrated "stop asking" grants it for
+the task at hand, not from now on; it never covers restores.
 
 - **Stop at the first exit 3.** Never keep applying onto a broken state.
 - Afterwards report: one line per success, full detail (errors, newly INVALID,
@@ -114,13 +112,17 @@ information for the developer, not an obstacle to route around.
 | Group | Is rollback real? |
 |---|---|
 | `plsql_source` | **Yes — completely.** The source is recoverable from `ALL_SOURCE`. |
-| `data_dml` | **No.** After commit only Flashback Query remains, and only within undo retention. |
+| `data_dml` | **No.** After commit only Flashback Query remains, and only within undo retention. Revalidation checks the row set *before* the write; it is not an undo. |
 | `structural` | **Almost never.** `DROP COLUMN` is permanent; a dropped table may be in the Recycle Bin. |
 | `grants` | Yes, but by hand. |
 | `session` | Not needed. |
 
 Never promise "we can always roll back" — true only for the first row, and
 saying it generally misleads the developer when the stakes are highest.
+
+`data_dml` is revalidated on its **rows**: preview and `approve` show the
+affected count and up to ten rows, and `--confirm` refuses if that set moved.
+`MERGE`, and anything unmeasurable, is refused rather than guessed at.
 
 ## Red Flags — STOP if you catch yourself thinking
 
@@ -133,9 +135,7 @@ saying it generally misleads the developer when the stakes are highest.
 | "apply refused it; run-sql will take it" | The refusal is the product working. Relay it. |
 | "I'll restore quietly to clean up my mistake" | Restores are writes. Same gate, same visibility. |
 | "`$?` said 0 after I piped to tail" | That was tail's 0. Read pythia's own words, or its unpiped code. |
-| "The dev said 'stop asking' once" | That covered that task, not forever. Re-confirm scope on the next one. |
 | "I'll run approve myself to unblock this" | The developer's console act. It refuses you, and routing around it is what this gate exists to stop. |
-| "No approval on file — I'll retry until it works" | Retrying does not create approval. Relay the line, wait for a human. |
 
 ## When NOT to use this skill
 

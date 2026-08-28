@@ -384,7 +384,7 @@ pythia policy set structural confirm # change one group
 | Group | Default | Is rollback real? |
 |---|---|---|
 | `plsql_source` | `confirm` | **Yes — completely** (ALL_SOURCE) |
-| `data_dml` | `deny` | **No.** After commit only Flashback Query remains |
+| `data_dml` | `deny` | **No.** After commit only Flashback Query remains. Revalidation checks the row set before the write; it is not an undo |
 | `structural` | `deny` | **Almost never.** `DROP COLUMN` is permanent |
 | `grants` | `deny` | Yes, but by hand |
 | `session` | `allow` | Not needed |

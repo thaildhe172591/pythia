@@ -27,11 +27,6 @@ write them down here, do not implement them on impulse.
 - **From the 15-repo survey (2026-08-27).** The approval gate shipped as
   0.8.0; these are the rest, in the order they earned:
 
-  - **Row-set revalidation for `data_dml`.** Approve on a preview of N rows,
-    refuse at apply if the affected set moved. The grant already reserves a
-    `revalidate` field for it. This is the thing that would let `data_dml`
-    stop being a hard deny — the reason it is denied today is that no
-    snapshot can undo it, and revalidation is the closest honest substitute.
   - **MCP elicitation as approver #2.** The client renders the approval
     dialog and mints the same grant file; a click instead of a paste, and
     `apply` never learns the difference. Closes the remote-developer gap
@@ -62,3 +57,6 @@ write them down here, do not implement them on impulse.
 
 Shipped from this list in 0.2.0: PL/Scope compile inside `apply`
 (settings.json switch), proxy-aware privilege warnings, `journal prune`.
+
+Shipped in 0.9.0: row-set revalidation for `data_dml` — approve on the rows,
+refuse if the set moved, and the `commit` that group had never had.

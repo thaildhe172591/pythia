@@ -798,6 +798,165 @@ def prepare_statement(sql, group):
     return text
 
 
+REVALIDATE_REFUSAL = """\
+Refused: pythia cannot work out which rows this statement would touch, because
+%s.
+A data_dml write is approved on the rows it affects, so a row set that cannot
+be measured is refused rather than guessed at.
+Rewrite it as one UPDATE or DELETE over one table with one WHERE."""
+
+
+def mask_literals(sql):
+    """A same-length copy with quoted text and comments blanked to spaces.
+    Length is the contract: an index found in the mask points at the same
+    character in the original, which is what lets dml_probe trust a keyword
+    scan without carrying a real parser."""
+    out, i, n = [], 0, len(sql)
+    while i < n:
+        if sql[i] == "'":
+            out.append(" ")
+            i += 1
+            while i < n:                    # a doubled '' simply closes and
+                out.append(" ")             # reopens — blanked either way
+                i += 1
+                if sql[i - 1] == "'":
+                    break
+        elif sql.startswith("--", i):
+            while i < n and sql[i] != "\n":
+                out.append(" ")
+                i += 1
+        elif sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            out.append(" " * (end - i))
+            i = end
+        else:
+            out.append(sql[i])
+            i += 1
+    return "".join(out)
+
+
+def dml_probe(stmt):
+    """(verb, target, predicate|None): the SELECT-able description of the rows
+    an UPDATE or DELETE will touch. None for INSERT — nothing exists
+    beforehand, so there is nothing to revalidate. Everything else is refused,
+    for classify()'s reason: a parser that guesses generously is a parser that
+    lets deny be bypassed.
+
+    target is a span of text, not a parsed identifier, so a schema qualifier
+    and an alias survive and a predicate written against the alias resolves."""
+    s = skip_leading_noise(stmt)
+    m = re.match(r"(insert|update|delete|merge)\b", s, re.I)
+    verb = m.group(1).lower() if m else ""
+    if verb == "insert":
+        return None
+    if verb == "merge":
+        sys.exit("Refused: a MERGE cannot be revalidated — the rows it touches "
+                 "are decided by a join against its source query, so pythia "
+                 "cannot show you the set you would be approving.\n"
+                 "Express it as an UPDATE and/or a DELETE, or run it by hand "
+                 "with a DBA watching.")
+    if re.search(r"q'", s, re.I):
+        sys.exit(REVALIDATE_REFUSAL % "it uses an alternative-quoted (q'...') "
+                                      "literal, which this parser does not read")
+    masked = mask_literals(s)
+    if re.search(r"\bselect\b", masked, re.I):
+        sys.exit(REVALIDATE_REFUSAL % "it contains a subquery, so its row set "
+                                      "is not one predicate over one table")
+    wheres = [w.start() for w in re.finditer(r"\bwhere\b", masked, re.I)]
+    if len(wheres) > 1:
+        sys.exit(REVALIDATE_REFUSAL % "it has more than one WHERE, so which "
+                                      "one selects the rows would be a guess")
+    head = re.match(r"delete\s+(?:from\s+)?" if verb == "delete"
+                    else r"update\s+", masked, re.I)
+    start = head.end()
+    if verb == "update":
+        sets = re.search(r"\bset\b", masked[start:], re.I)
+        if not sets:
+            sys.exit(REVALIDATE_REFUSAL % "the UPDATE has no SET clause")
+        end = start + sets.start()
+    else:
+        end = wheres[0] if wheres else len(masked)
+    if wheres and wheres[0] < end:
+        sys.exit(REVALIDATE_REFUSAL % "its WHERE comes before the table it "
+                                      "reads, which this parser does not expect")
+    target = s[start:end].strip()
+    if not target:
+        sys.exit(REVALIDATE_REFUSAL % "no table name follows the verb")
+    pred = s[wheres[0] + 5:].strip() if wheres else None
+    return verb, target, pred
+
+
+def count_sql(target, pred):
+    """The fingerprint query. Interpolated, not bound: a table name and a
+    predicate are not bindable. The text comes from the very file whose DML is
+    about to run, so this opens no trust boundary that statement does not open
+    already — but it runs BEFORE approval, which SECURITY.md says out loud."""
+    return ("select count(*) n, sum(ora_hash(rowidtochar(rowid))) s, "
+            "min(ora_hash(rowidtochar(rowid))) lo, "
+            "max(ora_hash(rowidtochar(rowid))) hi from "
+            + target + (f" where {pred}" if pred else ""))
+
+
+def sample_sql(target, pred):
+    return ("select * from " + target + (f" where {pred}" if pred else "")
+            + " fetch first :n rows only")
+
+
+def measure_row_set(conn, target, pred, limit=10):
+    """Count, fingerprint and sample the rows the statement will touch.
+    Failing to measure is a refusal, never a reason to proceed: a write
+    approved on a row set nobody could see is what this exists to prevent.
+
+    ponytail: ROWID tracks set membership, not row contents — an in-place
+    update to an approved row keeps its ROWID. Hash the sampled columns too if
+    content drift ever needs catching."""
+    try:
+        _, agg = run_query(conn, count_sql(target, pred))
+        cols, rows = run_query(conn, sample_sql(target, pred),
+                               {"n": fetch_n(limit)})
+    except Exception as e:            # the driver's exception class is imported
+        sys.exit("Refused: pythia could not measure the rows this "  # in main()
+                 f"statement would touch.\n  {target} — {e}\n"
+                 "Revalidation is mandatory for UPDATE and DELETE, so a set "
+                 "that cannot be measured cannot be approved.")
+    n, s, lo, hi = (list(agg[0]) + [None] * 4)[:4] if agg else (0, 0, 0, 0)
+    return {"target": target, "predicate": pred or "", "count": int(n or 0),
+            "hash": f"{s or 0}/{lo or 0}/{hi or 0}",
+            "columns": list(cols),
+            "sample": [[cell(v) for v in r] for r in rows[:limit]],
+            "truncated": len(rows) > limit}
+
+
+def fingerprint_text(row_set):
+    """What the token hashes. Empty when there is no row set, so plsql_source
+    tokens stay byte-identical to the ones 0.8.0 printed."""
+    if not row_set:
+        return ""
+    return f"rows={row_set['count']} hash={row_set['hash']}"
+
+
+def render_row_set(row_set, en=False, indent="  "):
+    """The rows an approval is about — printed identically by the preview and
+    by approve, because what is approved must be what was shown."""
+    n = row_set["count"]
+    where = f" where {row_set['predicate']}" if row_set["predicate"] else ""
+    out = [f"{indent}{paint(str(n) + ' rows', 'bold', en)} in "
+           f"{row_set['target']}{where}"]
+    if n > 1000:
+        out.append(indent + paint("! more rows than anyone can read one by "
+                                  "one — the count and the fingerprint are "
+                                  "the whole of what you are approving",
+                                  "yellow", en))
+    if row_set["sample"]:
+        out.append(indent + "\t".join(row_set["columns"]))
+        out.extend(indent + "\t".join(r) for r in row_set["sample"])
+        if row_set["truncated"]:
+            out.append(f"{indent}-- truncated at {len(row_set['sample'])} of "
+                       f"{n} rows")
+    return out
+
+
 POLICY_DEFAULTS = {"plsql_source": "confirm", "data_dml": "deny",
                    "structural": "deny", "grants": "deny", "session": "allow"}
 
@@ -805,6 +964,7 @@ ROLLBACK_TABLE = """\
 Is rollback real?  (this table also appears in README.md and pythia-apply)
   plsql_source  Yes - completely. Source is recoverable from ALL_SOURCE.
   data_dml      No. After commit only Flashback Query remains, within undo retention.
+                Revalidation checks the row set before the write; it is not an undo.
   structural    Almost never. DROP COLUMN is permanent; a dropped table may be in the Recycle Bin.
   grants        Yes, but by hand.
   session       Not needed."""
@@ -969,9 +1129,11 @@ def grant_path(root, token):
     return grants_root(root) / f"{token}.json"
 
 
-def mint_grant(root, token, conn_name, now=None):
+def mint_grant(root, token, conn_name, now=None, revalidate=None):
     """Record one developer approval. Single use, short-lived, bound to the
-    connection the preview ran on."""
+    connection the preview ran on. `revalidate` is the row-set fingerprint the
+    human was shown — audit data, not a second gate: the enforcement is the
+    token, which already hashes that same fingerprint."""
     import datetime
     now = now or datetime.datetime.now()
     rec = {"token": token,
@@ -980,8 +1142,7 @@ def mint_grant(root, token, conn_name, now=None):
            "expires_at": (now + datetime.timedelta(
                minutes=GRANT_TTL_MINUTES)).isoformat(timespec="seconds"),
            "used_at": None,
-           # reserved: the data_dml spec re-checks the affected row set here
-           "revalidate": None}
+           "revalidate": revalidate or None}
     d = grants_root(root)
     d.mkdir(parents=True, exist_ok=True)
     grant_path(root, token).write_text(json.dumps(rec, indent=2) + "\n",
@@ -1798,7 +1959,13 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         extra = ("no snapshot can undo it after commit"
                  if group in ("data_dml", "structural", "grants")
                  else "policy forbids it")
-        sys.exit(f"Refused: {group} is set to deny — {extra}.\n"
+        note = ("\nRevalidation narrows that risk without removing it: the "
+                "preview shows the rows and the count, apply refuses if that "
+                "set moved, and the write is rolled back if the statement "
+                "touches a different number of rows. What nothing here can do "
+                "is undo a committed DELETE."
+                if group == "data_dml" else "")
+        sys.exit(f"Refused: {group} is set to deny — {extra}.{note}\n"
                  f"To allow it once you have weighed that: "
                  f"{invocation()} policy set {group} confirm")
     stmt = prepare_statement(file_text, group)
@@ -1837,17 +2004,23 @@ def run_apply(conn, schema, ns, file_text, origin=None):
 
     # 1. SNAPSHOT — before anything else, unconditionally.
     db_source = ""
+    row_set = None
     if group == "plsql_source":
         _, rows = run_query(conn, load_query("object-source.sql"),
                             {"s": schema, "n": name, "t": otype})
         db_source = "".join(cell(r[0]) for r in rows)
-    token = apply_token(otype, name, file_text, db_source)
+    elif group == "data_dml":
+        # the row set IS the snapshot here: nothing can undo a committed DML,
+        # so what the developer approves is the set, and the token carries it
+        probe = dml_probe(stmt)
+        if probe:
+            row_set = measure_row_set(conn, probe[1], probe[2])
+    token = apply_token(otype, name, file_text,
+                        db_source + fingerprint_text(row_set))
     if ns.yes and not human_at_the_keyboard():
         sys.exit(HEADLESS_YES_MSG)
     if ns.confirm and ns.confirm != token:
-        sys.exit("The confirmation token does not match: the file or the "
-                 "database object changed since that preview. Preview again:\n"
-                 f"  {invocation()} apply {ns.file}")
+        sys.exit(token_mismatch_message(ns, row_set))
     # The token proves the content did not move; the grant proves a human
     # approved it. --yes is itself that human act, at a real console.
     grant = None
@@ -1865,12 +2038,16 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             "token": token, "applied": False,
             "confirmed_via": ("yes" if ns.yes else
                               "grant" if confirmed else "preview"),
+            "row_set": row_set,
             "grant_minted_at": (grant or {}).get("minted_at"),
             "tty": human_at_the_keyboard(),
             "invalid_before": invalid_before, **(origin or {})}
     entry = write_journal_entry(ns.project_root, otype, name, db_source,
                                 file_text, meta)
-    created = not db_source.strip()
+    # "created" is about an OBJECT that did not exist. A DML/DDL statement has
+    # no object identity, so it is never "new" — and saying so would promise a
+    # DROP-shaped undo that does not exist for those groups.
+    created = not db_source.strip() and group == "plsql_source"
 
     # 2. IMPACT
     summary = ""
@@ -1891,19 +2068,31 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         print(json.dumps({"ok": True, "object": name, "type": otype,
                           "created": created, "changed_lines": changed,
                           "summary": summary, "warning": warn,
+                          "row_set": row_set,
                           "naming_warning": style, "token": token,
                           "journal": entry, "will_apply": confirmed}))
     else:
         en = getattr(ns, "color", False)
-        if created:
-            head = "new object"
-        elif changed == 0:
-            head = "no source change (recompile)"
+        if group != "plsql_source":
+            print(f"\n  {paint(group, 'bold', en)} statement on {schema}")
         else:
-            head = f"{changed} lines changed"
-        print(f"\n  {paint(f'{name} ({otype})', 'bold', en)} in {schema} — {head}")
+            if created:
+                head = "new object"
+            elif changed == 0:
+                head = "no source change (recompile)"
+            else:
+                head = f"{changed} lines changed"
+            print(f"\n  {paint(f'{name} ({otype})', 'bold', en)} in {schema} "
+                  f"— {head}")
         if summary:
             print(f"  {summary.lstrip('- ')}")
+        if row_set is not None:
+            print()
+            for ln in render_row_set(row_set, en):
+                print(ln)
+        elif group == "data_dml":
+            print("\n  INSERT — no rows exist beforehand, so there is no row "
+                  "set to revalidate.")
         if warn:
             print(f"\n  {paint(warn, 'yellow', en)}")
         if style:
@@ -1914,7 +2103,9 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                 print(f"  {paint_diff_line(ln, en)}")
         print(paint(f"\n  Snapshot saved: {journal_root(ns.project_root) / entry}",
                     "dim", en))
-        if not confirmed:
+        if not confirmed and group == "plsql_source":
+            # only this group has a restore.sql worth running: the others get a
+            # generated DROP that nothing would accept
             print(paint("  Rollback file for the current database version — "
                         "use it if this is\n  run by hand instead: "
                         f"{journal_root(ns.project_root) / entry / 'restore.sql'}",
@@ -1940,6 +2131,17 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         "'IDENTIFIERS:ALL, STATEMENTS:ALL'")
     with conn.cursor() as cur:
         cur.execute(stmt)
+        affected = cur.rowcount if group == "data_dml" else None
+    if group == "data_dml":
+        # the last-millisecond check: the probe ran before this statement, and
+        # READ COMMITTED lets the world move in between
+        if row_set is not None and affected != row_set["count"]:
+            conn.rollback()
+            sys.exit(f"Rolled back: the statement touched {affected} rows, but "
+                     f"{row_set['count']} were approved.\nNothing was "
+                     "committed — the rows moved between the check and the "
+                     "write. Preview again.")
+        conn.commit()          # DDL commits itself; DML never did until now
     if grant is not None:
         spend_grant(ns.project_root, token)   # one approval, one write
 
@@ -1968,14 +2170,20 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         print(json.dumps({"ok": ok, "applied": True, "object": name,
                           "type": otype, "errors": [list(r) for r in own_errors],
                           "newly_invalid": [list(x) for x in broke],
-                          "restore": f"{invocation()} journal restore {entry}",
+                          "rows": affected,
+                          "restore": (f"{invocation()} journal restore {entry}"
+                                      if group == "plsql_source" else None),
+                          "no_undo": group != "plsql_source",
                           "restore_is_drop": created,
                           "restore_blocked_by_policy": (
                               created and undo_group_action(ns) == "deny"),
                           "exit": 0 if ok else 3}))
     else:
         en = getattr(ns, "color", False)
-        if ok:
+        if ok and group == "data_dml":
+            print(paint(f"\n  Applied — {affected} rows changed and "
+                        "committed.", "green", en))
+        elif ok:
             print(paint(f"\n  Applied {name} ({otype}).", "green", en))
             print(paint("  Compiled clean. No new INVALID objects.", "green", en))
         else:
@@ -1992,21 +2200,28 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                 print(f"  {len(broke)} objects were VALID before and are INVALID now:")
                 for n2, t2 in broke:
                     print(paint(f"    {n2} ({t2})", "red", en))
-        if created:
-            print("\n  To undo — note: undo means DROPPING it "
-                  "(it did not exist before):")
+        if group != "plsql_source":
+            # no snapshot was taken, so there is nothing to restore — say that
+            # instead of printing a restore command that would be refused
+            print(paint("\n  There is no undo: the journal kept the statement "
+                        "that ran, not a way back.", "yellow", en))
         else:
-            print("\n  To undo:")
-        print("    " + paint(f"{invocation()} journal restore {entry}",
-                             "cyan", en))
-        if created and undo_group_action(ns) == "deny":
-            # the honest half: that restore is a DROP, DROP is structural,
-            # and structural is deny — so the line above would be refused
-            print(paint("  ...but that restore is a DROP, and structural is "
-                        "set to deny, so it will be refused.", "yellow", en))
-            print(paint("  The developer decides: "
-                        f"{invocation()} policy set structural confirm",
-                        "yellow", en))
+            if created:
+                print("\n  To undo — note: undo means DROPPING it "
+                      "(it did not exist before):")
+            else:
+                print("\n  To undo:")
+            print("    " + paint(f"{invocation()} journal restore {entry}",
+                                 "cyan", en))
+            if created and undo_group_action(ns) == "deny":
+                # the honest half: that restore is a DROP, DROP is structural,
+                # and structural is deny — so the line above would be refused
+                print(paint("  ...but that restore is a DROP, and structural "
+                            "is set to deny, so it will be refused.",
+                            "yellow", en))
+                print(paint("  The developer decides: "
+                            f"{invocation()} policy set structural confirm",
+                            "yellow", en))
     return 0 if ok else 3
 
 
@@ -2033,6 +2248,32 @@ def find_preview_by_token(root, token):
     return None, None
 
 
+def token_mismatch_message(ns, row_set):
+    """Why the token no longer matches. For DML the interesting answer is
+    almost always the rows, and the preview's own journal entry still holds
+    what they were — so say which, instead of a generic 'something moved'."""
+    base = ("The confirmation token does not match: the file or the "
+            "database object changed since that preview. Preview again:\n"
+            f"  {invocation()} apply {ns.file}")
+    if not row_set:
+        return base
+    _, meta = find_preview_by_token(ns.project_root,
+                                    str(ns.confirm).strip().lower())
+    then = (meta or {}).get("row_set") or {}
+    if not then or fingerprint_text(then) == fingerprint_text(row_set):
+        return base                       # the file moved, not the rows
+    if then["count"] != row_set["count"]:
+        moved = (f"{then['count']} rows when you approved it, "
+                 f"{row_set['count']} now")
+    else:
+        moved = (f"still {row_set['count']} rows, but not the same ones — the "
+                 "row fingerprint changed")
+    return ("Refused: the row set moved — " + moved + ".\n"
+            "Nothing was written. The approval covered the rows as they were.\n"
+            "Preview again to see them as they are now:\n"
+            f"  {invocation()} apply {ns.file}")
+
+
 def cmd_approve(conn, schema, ns):
     """The developer's half of the gate: one human act, at a real console,
     that lets the agent's next `apply --confirm` through. Touches no
@@ -2052,12 +2293,15 @@ def cmd_approve(conn, schema, ns):
                  f"  {invocation()} apply <file>")
     conn_name = meta.get("connection") or ""
     prune_expired_grants(ns.project_root)
-    rec = mint_grant(ns.project_root, token, conn_name)
+    row_set = meta.get("row_set")
+    rec = mint_grant(ns.project_root, token, conn_name,
+                     revalidate=fingerprint_text(row_set))
     obj, otype = meta.get("object", "?"), meta.get("type", "?")
     group = meta.get("group", "")
     if ns.json:
         print(json.dumps({"ok": True, "token": token, "conn": conn_name,
                           "object": obj, "type": otype, "group": group,
+                          "rows": (row_set or {}).get("count"),
                           "entry": entry, "minted_at": rec["minted_at"],
                           "expires_at": rec["expires_at"],
                           "ttl_minutes": GRANT_TTL_MINUTES}))
@@ -2071,6 +2315,12 @@ def cmd_approve(conn, schema, ns):
         print(f"  Approving a {group} statement on {meta.get('schema', '?')}:")
         for ln in stmt.splitlines():
             print(f"    {ln}")
+        if row_set:
+            # the rows themselves, exactly as the preview showed them: what is
+            # approved has to be what was seen
+            print()
+            for ln in render_row_set(row_set, en, indent="    "):
+                print(ln)
         print(paint("\n  There is no snapshot for this group — after commit "
                     "it cannot be undone from the journal.", "yellow", en))
     else:
@@ -2090,6 +2340,18 @@ def run_restore(conn, schema, ns):
     """Restore is itself a write: feed the saved statement back through the
     same six steps. There is no second write path and no silent restore."""
     e = read_journal_entry(ns.project_root, ns.id)
+    group = e["meta"].get("group", "plsql_source")
+    if group != "plsql_source":
+        # render_restore() writes a DROP for every group that has no snapshot,
+        # which classifies as structural and dies with a message about the
+        # wrong thing. Say what is actually true, once, for all of them.
+        tail = ("Flashback Query within undo retention is the only route left, "
+                "and it is a DBA's job."
+                if group == "data_dml" else
+                "Reversing it means writing the opposite statement by hand.")
+        sys.exit(f"Refused: entry {ns.id} is a {group} statement, and the "
+                 "journal holds no undo for it — only the statement that "
+                 f"ran.\n{tail}")
     print(f"Restoring from {ns.id} — this is itself a write and goes through "
           "the full six steps.", file=sys.stderr)
     return run_apply(conn, schema, ns, e["restore"], origin={"restored_from": ns.id})

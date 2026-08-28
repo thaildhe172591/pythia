@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.9.0 — 2026-08-28
+
+- **A `data_dml` write is now approved on the rows it touches.** The preview of
+  an `UPDATE` or `DELETE` prints how many rows the statement affects and up to
+  ten of them; `pythia approve` shows the same rows again; and
+  `apply --confirm` refuses if that set moved in between. The mechanism reuses
+  the machinery that already existed rather than adding a gate: the row-set
+  fingerprint (count plus a ROWID hash) goes into the confirm token's payload,
+  where the object's source goes for `plsql_source`. A moved set therefore
+  produces a different token, and the refusal names both numbers — "12 rows
+  when you approved it, 15 now".
+- **Bug, and the reason the release exists at all: `data_dml` never
+  committed.** There was no `commit()` anywhere in the tool. DDL groups commit
+  themselves, which hid it, and the process ended by force-closing the pool —
+  so an `INSERT`/`UPDATE`/`DELETE` was rolled back *after* the report printed
+  "Applied". It commits now, and only after `cur.rowcount` is compared with
+  the approved count: a divergence rolls back and exits 1, which also closes
+  the millisecond window between the check and the write.
+- **Refused rather than guessed at.** `MERGE` is refused (its rows come from a
+  join, so no honest preview of them exists), as is any `UPDATE`/`DELETE` whose
+  row set cannot be derived without guessing — a subquery, a second `WHERE`, an
+  alternative-quoted literal. `INSERT` applies with no revalidation and the
+  preview says why: nothing exists beforehand to show. A probe that errors is a
+  refusal too; failing to measure is never a reason to proceed.
+- **`data_dml` stays `deny` by default.** Turning it on remains a deliberate
+  act. What changed is the refusal text: it now says what revalidation buys and
+  what it cannot — nothing here undoes a committed `DELETE`.
+- `journal restore` on an entry from a group with no snapshot (`data_dml`,
+  `structural`, `grants`) now refuses with what is actually true. It used to
+  generate `DROP DATA_DML STATEMENT`, which failed as a *structural* policy
+  denial — a confusing answer to a reasonable question.
+- The apply report no longer offers a restore command for those groups, and
+  says plainly that the journal kept the statement, not a way back.
+- The grant's reserved `revalidate` field now carries the fingerprint the human
+  was shown. It is audit data, not a second gate — the token is the
+  enforcement.
+
 ## 0.8.0 — 2026-08-27
 
 - **Breaking, and the point of the release: a write now needs a human's

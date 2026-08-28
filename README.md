@@ -197,7 +197,7 @@ Per-group write policy, `.pythia/policy.json` (defaults shown):
 | Group | Default | Is rollback real? |
 |---|---|---|
 | `plsql_source` | `confirm` | **Yes — completely.** Source is recoverable from `ALL_SOURCE`. |
-| `data_dml` | `deny` | **No.** After commit only Flashback Query remains, within undo retention. |
+| `data_dml` | `deny` | **No.** After commit only Flashback Query remains, within undo retention. Revalidation checks the row set *before* the write; it is not an undo. |
 | `structural` | `deny` | **Almost never.** `DROP COLUMN` is permanent; a dropped table may be in the Recycle Bin. |
 | `grants` | `deny` | Yes, but by hand. |
 | `session` | `allow` | Not needed. |
