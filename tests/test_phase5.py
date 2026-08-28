@@ -168,6 +168,15 @@ def test_no_manifest_hardcodes_a_stale_skill_count():
         f"missing {sorted(EXPECTED - declared)}, extra {sorted(declared - EXPECTED)}")
 
 
+def test_apply_skill_teaches_the_approval_gate():
+    """The CLI enforces the grant; the skill must explain it, or the agent
+    reads the refusal as a malfunction and starts working around it."""
+    text = (SKILLS / "pythia-apply" / "SKILL.md").read_text(encoding="utf-8")
+    assert "pythia approve" in text
+    for needle in ("cannot run it", "relay"):
+        assert needle in text.lower(), f"apply skill missing {needle!r}"
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
