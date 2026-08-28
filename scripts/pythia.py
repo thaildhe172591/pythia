@@ -380,6 +380,39 @@ HEADLESS_YES_MSG = (
     "approval in chat.\n(Real pipelines set PYTHIA_CI=1.)")
 
 
+APPROVE_HEADLESS_MSG = (
+    "approve is the developer's command — it needs a real console.\n"
+    "Agents relay the preview and wait; a person runs approve in their own "
+    "terminal.\n(Real pipelines apply with --yes and PYTHIA_CI=1 instead.)")
+
+
+def grant_refusal(status, token, grant, conn_name, file_hint):
+    """Why this write is refused, and the exact way to fix it. Each status
+    gets its own sentence: 'no' without the reason teaches nothing."""
+    approve_line = f"  {invocation()} approve {token}"
+    preview_line = f"  {invocation()} apply {file_hint}"
+    if status == "missing":
+        return ("The confirmation token matches, but no developer approval is "
+                "on file.\nAsk the developer to run, in their own terminal "
+                f"(agents cannot run it):\n{approve_line}\n"
+                "Then re-run this command.")
+    if status == "expired":
+        return (f"That approval expired ({GRANT_TTL_MINUTES} minutes after it "
+                "was given).\nAsk the developer to approve again:\n"
+                f"{approve_line}")
+    if status == "spent":
+        return ("That approval was already used by a previous apply — one "
+                "approval, one write.\nPreview again, then ask the developer "
+                f"to approve the new token:\n{preview_line}")
+    if status == "wrong_conn":
+        return (f"That approval was given on connection "
+                f"{grant.get('conn', '?')!r}, but this session targets "
+                f"{conn_name!r}.\nApproving on one database does not approve "
+                "another. On the right connection:\n"
+                f"{preview_line} --conn {conn_name}")
+    return "Refused: the developer approval on file is not valid."
+
+
 def human_at_the_keyboard():
     """True only when a person is typing at a real console.
 
@@ -1784,18 +1817,28 @@ def run_apply(conn, schema, ns, file_text, origin=None):
     token = apply_token(otype, name, file_text, db_source)
     if ns.yes and not human_at_the_keyboard():
         sys.exit(HEADLESS_YES_MSG)
-    confirmed = bool(ns.yes) or ns.confirm == token
     if ns.confirm and ns.confirm != token:
         sys.exit("The confirmation token does not match: the file or the "
                  "database object changed since that preview. Preview again:\n"
                  f"  {invocation()} apply {ns.file}")
+    # The token proves the content did not move; the grant proves a human
+    # approved it. --yes is itself that human act, at a real console.
+    grant = None
+    if ns.confirm == token:
+        grant = read_grant(ns.project_root, token)
+        status = grant_status(grant, ns.conn_name)
+        if status != "ok":
+            sys.exit(grant_refusal(status, token, grant or {},
+                                   ns.conn_name, ns.file))
+    confirmed = bool(ns.yes) or ns.confirm == token
 
     _, inv_rows = run_query(conn, load_query("invalid-objects.sql"), {"s": schema})
     invalid_before = [(r[0], r[1]) for r in inv_rows]
     meta = {"schema": schema, "connection": ns.conn_name, "group": group,
             "token": token, "applied": False,
             "confirmed_via": ("yes" if ns.yes else
-                              "token" if confirmed else "preview"),
+                              "grant" if confirmed else "preview"),
+            "grant_minted_at": (grant or {}).get("minted_at"),
             "tty": human_at_the_keyboard(),
             "invalid_before": invalid_before, **(origin or {})}
     entry = write_journal_entry(ns.project_root, otype, name, db_source,
@@ -1850,7 +1893,10 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         f"{journal_root(ns.project_root) / entry / 'restore.sql'}",
                         "dim", en))
         if not confirmed:
-            print(f"\n  To apply:\n    "
+            print("\n  To apply — two steps, two people:")
+            print("    developer, in your own terminal:   "
+                  + paint(f"{invocation()} approve {token}", "cyan", en))
+            print("    then the agent:                    "
                   + paint(f"{invocation()} apply {ns.file} --confirm {token}",
                           "cyan", en))
     if not confirmed:
@@ -1867,6 +1913,8 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         "'IDENTIFIERS:ALL, STATEMENTS:ALL'")
     with conn.cursor() as cur:
         cur.execute(stmt)
+    if grant is not None:
+        spend_grant(ns.project_root, token)   # one approval, one write
 
     # 5. VERIFY
     err_rows = []
