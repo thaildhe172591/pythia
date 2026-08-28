@@ -70,6 +70,43 @@ def test_prepare_statement_terminators():
         "truncate table a; truncate table b;", "structural"), "one statement")
 
 
+def test_mask_literals_keeps_length_and_blanks_text():
+    m = pythia.mask_literals
+    src = "update t set n = 'x where y' where id = 1"
+    assert len(m(src)) == len(src)
+    assert "where y" not in m(src)
+    assert m("delete from t -- where later" + chr(10)
+             + "where id = 1").count("where") == 1
+    assert m("delete from t /* where */ where id = 1").count("where") == 1
+    assert "it" not in m("update t set n = 'it''s' where id = 1")
+
+
+def test_dml_probe_reads_target_and_predicate():
+    assert pythia.dml_probe("delete from t_order where status = 'DRAFT'") == (
+        "delete", "t_order", "status = 'DRAFT'")
+    assert pythia.dml_probe("delete app.t_order t where t.id = 7") == (
+        "delete", "app.t_order t", "t.id = 7")
+    assert pythia.dml_probe("update t_order t set status = 'X' "
+                            "where t.id = 7") == (
+        "update", "t_order t", "t.id = 7")
+    assert pythia.dml_probe("delete from t_order") == ("delete", "t_order", None)
+    assert pythia.dml_probe("insert into t values (1)") is None
+
+
+def test_dml_probe_refuses_what_it_cannot_measure():
+    expect_exit(lambda: pythia.dml_probe(
+        "merge into t using d on (1=1) when matched then update set x=1"),
+        "merge", "join")
+    expect_exit(lambda: pythia.dml_probe(
+        "delete from t where id in (select id from u)"), "subquery")
+    expect_exit(lambda: pythia.dml_probe(
+        "update t set a = 1 where id in (1) and x = 2 where y = 3"),
+        "more than one where")
+    expect_exit(lambda: pythia.dml_probe(
+        "update t set n = q'{x}' where id = 1"), "quoted")
+    expect_exit(lambda: pythia.dml_probe("update t where id = 1"), "set clause")
+
+
 def test_apply_token_is_content_bound():
     t1 = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "create...", "old src")
     assert len(t1) == 6 and all(c in "0123456789abcdef" for c in t1)

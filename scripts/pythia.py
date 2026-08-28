@@ -798,6 +798,95 @@ def prepare_statement(sql, group):
     return text
 
 
+REVALIDATE_REFUSAL = """\
+Refused: pythia cannot work out which rows this statement would touch, because
+%s.
+A data_dml write is approved on the rows it affects, so a row set that cannot
+be measured is refused rather than guessed at.
+Rewrite it as one UPDATE or DELETE over one table with one WHERE."""
+
+
+def mask_literals(sql):
+    """A same-length copy with quoted text and comments blanked to spaces.
+    Length is the contract: an index found in the mask points at the same
+    character in the original, which is what lets dml_probe trust a keyword
+    scan without carrying a real parser."""
+    out, i, n = [], 0, len(sql)
+    while i < n:
+        if sql[i] == "'":
+            out.append(" ")
+            i += 1
+            while i < n:                    # a doubled '' simply closes and
+                out.append(" ")             # reopens — blanked either way
+                i += 1
+                if sql[i - 1] == "'":
+                    break
+        elif sql.startswith("--", i):
+            while i < n and sql[i] != "\n":
+                out.append(" ")
+                i += 1
+        elif sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            out.append(" " * (end - i))
+            i = end
+        else:
+            out.append(sql[i])
+            i += 1
+    return "".join(out)
+
+
+def dml_probe(stmt):
+    """(verb, target, predicate|None): the SELECT-able description of the rows
+    an UPDATE or DELETE will touch. None for INSERT — nothing exists
+    beforehand, so there is nothing to revalidate. Everything else is refused,
+    for classify()'s reason: a parser that guesses generously is a parser that
+    lets deny be bypassed.
+
+    target is a span of text, not a parsed identifier, so a schema qualifier
+    and an alias survive and a predicate written against the alias resolves."""
+    s = skip_leading_noise(stmt)
+    m = re.match(r"(insert|update|delete|merge)\b", s, re.I)
+    verb = m.group(1).lower() if m else ""
+    if verb == "insert":
+        return None
+    if verb == "merge":
+        sys.exit("Refused: a MERGE cannot be revalidated — the rows it touches "
+                 "are decided by a join against its source query, so pythia "
+                 "cannot show you the set you would be approving.\n"
+                 "Express it as an UPDATE and/or a DELETE, or run it by hand "
+                 "with a DBA watching.")
+    if re.search(r"q'", s, re.I):
+        sys.exit(REVALIDATE_REFUSAL % "it uses an alternative-quoted (q'...') "
+                                      "literal, which this parser does not read")
+    masked = mask_literals(s)
+    if re.search(r"\bselect\b", masked, re.I):
+        sys.exit(REVALIDATE_REFUSAL % "it contains a subquery, so its row set "
+                                      "is not one predicate over one table")
+    wheres = [w.start() for w in re.finditer(r"\bwhere\b", masked, re.I)]
+    if len(wheres) > 1:
+        sys.exit(REVALIDATE_REFUSAL % "it has more than one WHERE, so which "
+                                      "one selects the rows would be a guess")
+    head = re.match(r"delete\s+(?:from\s+)?" if verb == "delete"
+                    else r"update\s+", masked, re.I)
+    start = head.end()
+    if verb == "update":
+        sets = re.search(r"\bset\b", masked[start:], re.I)
+        if not sets:
+            sys.exit(REVALIDATE_REFUSAL % "the UPDATE has no SET clause")
+        end = start + sets.start()
+    else:
+        end = wheres[0] if wheres else len(masked)
+    if wheres and wheres[0] < end:
+        sys.exit(REVALIDATE_REFUSAL % "its WHERE comes before the table it "
+                                      "reads, which this parser does not expect")
+    target = s[start:end].strip()
+    if not target:
+        sys.exit(REVALIDATE_REFUSAL % "no table name follows the verb")
+    pred = s[wheres[0] + 5:].strip() if wheres else None
+    return verb, target, pred
+
+
 POLICY_DEFAULTS = {"plsql_source": "confirm", "data_dml": "deny",
                    "structural": "deny", "grants": "deny", "session": "allow"}
 
