@@ -440,6 +440,33 @@ def human_at_the_keyboard():
     return True
 
 
+def console_session(ns=None):
+    """A real console, with no environment escape.
+
+    human_at_the_keyboard() honours PYTHIA_CI so real pipelines can apply
+    with --yes. approve gets no such door: a pipeline that wants to write
+    already has one, and a second escape would be the way around this gate.
+    `ns.console` is the test seam and nothing sets it in production."""
+    forced = getattr(ns, "console", None)
+    if forced is not None:
+        return bool(forced)
+    try:
+        if not sys.stdin.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            handle = ctypes.windll.kernel32.GetStdHandle(-10)  # STD_INPUT
+            mode = ctypes.c_ulong()
+            return bool(ctypes.windll.kernel32.GetConsoleMode(
+                handle, ctypes.byref(mode)))
+        except Exception:   # noqa: BLE001 — any failure means "not a console"
+            return False
+    return True
+
+
 def forbid_write_flag(argv):
     if "--write" in argv:
         sys.exit(f"There is no --write flag. The write path is `{invocation()} "
@@ -1992,6 +2019,73 @@ def cmd_apply(conn, schema, ns):
         sys.exit(code)
 
 
+def find_preview_by_token(root, token):
+    """The newest journal entry whose preview carried this token. A human
+    approves an object and a diff, never a bare hash — so no entry means no
+    approval."""
+    for eid in list_journal_entries(root):         # newest first
+        try:
+            meta = read_journal_entry(root, eid)["meta"]
+        except SystemExit:
+            continue
+        if str(meta.get("token", "")) == token:
+            return eid, meta
+    return None, None
+
+
+def cmd_approve(conn, schema, ns):
+    """The developer's half of the gate: one human act, at a real console,
+    that lets the agent's next `apply --confirm` through. Touches no
+    database — a terminal with no connection configured can still approve."""
+    token = str(ns.token).strip().lower()
+    if not console_session(ns):
+        sys.exit(APPROVE_HEADLESS_MSG)
+    entry, meta = find_preview_by_token(ns.project_root, token)
+    if not meta:
+        sys.exit(f"No pending preview carries token {token!r}.\n"
+                 "Approve what you have seen: run the preview first, then "
+                 "approve the token it prints:\n"
+                 f"  {invocation()} apply <file>")
+    if meta.get("applied"):
+        sys.exit(f"Token {token!r} belongs to a preview that was already "
+                 "applied.\nPreview again to get a fresh token:\n"
+                 f"  {invocation()} apply <file>")
+    conn_name = meta.get("connection") or ""
+    prune_expired_grants(ns.project_root)
+    rec = mint_grant(ns.project_root, token, conn_name)
+    obj, otype = meta.get("object", "?"), meta.get("type", "?")
+    group = meta.get("group", "")
+    if ns.json:
+        print(json.dumps({"ok": True, "token": token, "conn": conn_name,
+                          "object": obj, "type": otype, "group": group,
+                          "entry": entry, "minted_at": rec["minted_at"],
+                          "expires_at": rec["expires_at"],
+                          "ttl_minutes": GRANT_TTL_MINUTES}))
+        return
+    en = getattr(ns, "color", False)
+    print()
+    if group and group != "plsql_source":
+        # no object identity, no snapshot: show the statement itself and say
+        # plainly that there is no undo waiting behind it
+        stmt = read_journal_entry(ns.project_root, entry)["after"].strip()
+        print(f"  Approving a {group} statement on {meta.get('schema', '?')}:")
+        for ln in stmt.splitlines():
+            print(f"    {ln}")
+        print(paint("\n  There is no snapshot for this group — after commit "
+                    "it cannot be undone from the journal.", "yellow", en))
+    else:
+        print(f"  Approving: {paint(f'{obj} ({otype})', 'bold', en)} in "
+              f"{meta.get('schema', '?')}")
+        if meta.get("summary"):
+            print(f"  Impact: {meta['summary'].lstrip('- ')}")
+    print(f"  Previewed {entry[:19].replace('T', ' ')} on connection "
+          f"{conn_name or '?'}.")
+    print(paint(f"\n  Grant minted — single use, expires in "
+                f"{GRANT_TTL_MINUTES} minutes.", "green", en))
+    print("  The agent may now run:  "
+          + paint(f"{invocation()} apply <file> --confirm {token}", "cyan", en))
+
+
 def run_restore(conn, schema, ns):
     """Restore is itself a write: feed the saved statement back through the
     same six steps. There is no second write path and no silent restore."""
@@ -2157,7 +2251,8 @@ ASK    relay apply previews verbatim and wait for a real yes. >=10 dependents
        exit 3 (written-but-broken) are relayed, never routed around. Do not
        read exit codes through a pipe.
 DO     writes go through `pythia apply` only - snapshot, token, verify. The
-       full contract: `pythia guide`.
+       developer runs `pythia approve <token>`; you never can. Full
+       contract: `pythia guide`.
 """
 
 
@@ -2205,11 +2300,16 @@ Stop at exactly these moments; a guess past any of them is a defect.
                           the rollback line. journal (show/diff) is your evidence.
 
 === 3. DO — act inside a pipeline that cannot lie ===============
-One door for writes: snapshot -> impact -> preview -> token -> apply ->
-verify -> report.
+One door for writes: snapshot -> impact -> preview -> token -> approve ->
+apply -> verify -> report.
 
+  approve                 THE DEVELOPER'S COMMAND, at their own terminal:
+                          mints the one-time grant that --confirm requires.
+                          An agent cannot run it - that is the point. Relay
+                          the line the preview printed and wait.
   apply                   the six-step write; --confirm binds to the preview
-  journal restore         undo, through the same six steps
+                          AND to the developer's approval
+  journal restore         undo, through the same six steps and the same gate
   unistr                  exact non-ASCII literals for what you are writing
   install · agent-user · guide    setting the harness itself up
 
@@ -2674,12 +2774,13 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
             "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
+            "approve": cmd_approve,
             "conventions": cmd_conventions, "guide": cmd_guide, "connections": cmd_connections, "install": cmd_install,
             "unistr": cmd_unistr, "agent-user": cmd_agent_user,
             "history": cmd_history}
 
 NO_DB_COMMANDS = {"policy", "journal", "install", "unistr", "guide", "connections",
-                  "history"}
+                  "history", "approve"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -2776,6 +2877,10 @@ def build_parser():
                    help="apply without stopping; the full preview still prints and journals")
     s.add_argument("--depth", type=int, default=3,
                    help="impact depth for the preview (default 3)")
+    s = sub.add_parser("approve", parents=[common()],
+                       help="the developer approves a preview: mints the "
+                            "one-time grant apply --confirm requires")
+    s.add_argument("token", help="the token printed by the preview")
     sub.add_parser("connections", parents=[common()],
                    help="list configured connections — names, users, "
                         "targets; never passwords")

@@ -961,6 +961,177 @@ def test_apply_json_reports_the_grant_refusal_shape():
         assert wrote_ddl(conn) == []
 
 
+def approve_ns(root, token, **kw):
+    import argparse
+    ns = argparse.Namespace(token=token, json=False, project_root=root,
+                            command="approve", conn=None, conn_name=None,
+                            limit=200, max_lines=2000, offset=0, raw=False,
+                            color=False)
+    for k, v in kw.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def test_approve_is_refused_without_a_real_console():
+    """approve is the human's act. A headless agent must not be able to mint
+    its own approval — and PYTHIA_CI does not open this door, because CI
+    already has --yes."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td, _NoTTY():
+        pythia.write_journal_entry(td, "PACKAGE BODY", "PKG_ORDER", OLD_SRC,
+                                   NEW_FILE, {"token": "7f3a91",
+                                              "connection": "DEV",
+                                              "applied": False})
+        with contextlib.redirect_stdout(io.StringIO()):
+            expect_exit(lambda: pythia.cmd_approve(None, None,
+                                                   approve_ns(td, "7f3a91")),
+                        "developer's command", "real console")
+        assert not pythia.grants_root(td).exists()      # nothing was minted
+    # PYTHIA_CI is set for the suite; it must not be a way in either
+    with tempfile.TemporaryDirectory() as td:
+        old_stdin, sys.stdin = sys.stdin, io.StringIO()
+        try:
+            pythia.write_journal_entry(td, "PACKAGE BODY", "PKG_ORDER", OLD_SRC,
+                                       NEW_FILE, {"token": "7f3a91",
+                                                  "connection": "DEV",
+                                                  "applied": False})
+            with contextlib.redirect_stdout(io.StringIO()):
+                expect_exit(lambda: pythia.cmd_approve(
+                    None, None, approve_ns(td, "7f3a91")), "real console")
+        finally:
+            sys.stdin = old_stdin
+        assert not pythia.grants_root(td).exists()
+
+
+def test_approve_refuses_a_token_no_preview_carries():
+    """Blind-approving a bare hash is forbidden: a human approves a thing,
+    not a string."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        with contextlib.redirect_stdout(io.StringIO()):
+            expect_exit(lambda: pythia.cmd_approve(
+                None, None, approve_ns(td, "abc123", console=True)),
+                "no pending preview", "apply")
+        assert not pythia.grants_root(td).exists()
+
+
+def test_approve_shows_the_object_and_mints_the_grant():
+    """What the human sees comes from the journal entry the preview wrote —
+    object, schema, impact, connection — not from a recomputation."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(
+            td, "PACKAGE BODY", "PKG_ORDER", OLD_SRC, NEW_FILE,
+            {"token": "7f3a91", "connection": "DEV", "schema": "APP",
+             "group": "plsql_source", "applied": False,
+             "summary": "12 dependent objects, 11 currently VALID"})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, "7f3a91", console=True))
+        out = buf.getvalue()
+        assert "PKG_ORDER" in out and "PACKAGE BODY" in out
+        assert "APP" in out and "DEV" in out
+        assert "12 dependent objects" in out
+        assert "single use" in out.lower()
+        assert "--confirm 7f3a91" in out          # the line the agent runs
+        g = pythia.read_grant(td, "7f3a91")
+        assert g and g["conn"] == "DEV" and g["used_at"] is None
+
+
+def test_approve_binds_to_the_previews_connection_not_a_flag():
+    """A mistyped --conn must not bind an approval to a database the preview
+    never ran on: the connection is copied from the journal entry."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(td, "PROCEDURE", "P_X", "old", "new",
+                                   {"token": "bb2222", "connection": "DEV",
+                                    "schema": "APP", "applied": False})
+        with contextlib.redirect_stdout(io.StringIO()):
+            pythia.cmd_approve(None, None,
+                               approve_ns(td, "bb2222", console=True,
+                                          conn="STAGING", conn_name="STAGING"))
+        assert pythia.read_grant(td, "bb2222")["conn"] == "DEV"
+
+
+def test_approve_of_an_unsnapshotable_group_says_so():
+    """Non-plsql_source confirm-mode groups have no object identity and no
+    snapshot. Approve shows the statement and the honest warning instead of
+    pretending there is an undo."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(
+            td, "DATA_DML", "STATEMENT", "", "delete from t_order where id = 7",
+            {"token": "cc3333", "connection": "DEV", "schema": "APP",
+             "group": "data_dml", "applied": False})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, "cc3333", console=True))
+        out = buf.getvalue().lower()
+        assert "delete from t_order" in out
+        assert "no snapshot" in out
+
+
+def test_approve_json_shape():
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(td, "PROCEDURE", "P_X", "old", "new",
+                                   {"token": "dd4444", "connection": "DEV",
+                                    "schema": "APP", "applied": False})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, "dd4444",
+                                                      console=True, json=True))
+        d = json.loads(buf.getvalue())
+        assert d["ok"] is True and d["token"] == "dd4444"
+        assert d["conn"] == "DEV" and d["object"] == "P_X"
+        assert d["expires_at"] and d["ttl_minutes"] == pythia.GRANT_TTL_MINUTES
+
+
+def test_approve_prunes_expired_grants_on_the_way_past():
+    import contextlib
+    import datetime
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.mint_grant(td, "old111", "DEV",
+                          now=datetime.datetime.now() - datetime.timedelta(hours=2))
+        pythia.write_journal_entry(td, "PROCEDURE", "P_X", "old", "new",
+                                   {"token": "ee5555", "connection": "DEV",
+                                    "schema": "APP", "applied": False})
+        with contextlib.redirect_stdout(io.StringIO()):
+            pythia.cmd_approve(None, None, approve_ns(td, "ee5555", console=True))
+        assert pythia.read_grant(td, "old111") is None
+        assert pythia.read_grant(td, "ee5555") is not None
+
+
+def test_approve_refuses_a_preview_that_was_already_applied():
+    """A spent preview's token can never match a future apply, so minting a
+    grant for it would only hand back a refusal one step later."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(td, "PROCEDURE", "P_X", "old", "new",
+                                   {"token": "ff6666", "connection": "DEV",
+                                    "schema": "APP", "applied": True})
+        with contextlib.redirect_stdout(io.StringIO()):
+            expect_exit(lambda: pythia.cmd_approve(
+                None, None, approve_ns(td, "ff6666", console=True)),
+                "already applied")
+        assert pythia.read_grant(td, "ff6666") is None
+
+
+def test_approve_needs_no_database():
+    """approve is a filesystem act — it must work in a developer's terminal
+    that has no connection configured at all."""
+    assert "approve" in pythia.NO_DB_COMMANDS
+    assert "approve" in pythia.COMMANDS
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
