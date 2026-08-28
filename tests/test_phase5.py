@@ -177,6 +177,18 @@ def test_apply_skill_teaches_the_approval_gate():
         assert needle in text.lower(), f"apply skill missing {needle!r}"
 
 
+def test_readme_and_security_carry_the_approval_gate():
+    """The gate is the release's claim. If the README still describes a
+    pipeline with no approval in it, the docs contradict the CLI."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "approve" in readme
+    assert "token → approve → apply" in readme
+    sec = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    assert "Approval grant" in sec
+    vi = (ROOT / "README.vi.md").read_text(encoding="utf-8")
+    assert "approve" in vi
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

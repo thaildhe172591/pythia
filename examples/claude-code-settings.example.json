@@ -27,7 +27,7 @@
       "Bash(pythia journal export *)"
     ]
   },
-  "//autoMode": "ADVISORY, not enforcement: these lines are fed to the auto-mode classifier as guidance, so they shift the odds rather than decide. Do not read them as a guarantee that a write will pause. The guarantees live elsewhere - in pythia's confirm token, in the policy file, and above all in the agent's Oracle grants. soft_deny means 'pause unless the developer's own words clear it', which is exactly right here: you saying 'apply it' should clear the pause; the agent deciding alone should not.",
+  "//autoMode": "ADVISORY, not enforcement: these lines are fed to the auto-mode classifier as guidance, so they shift the odds rather than decide. Do not read them as a guarantee that a write will pause. The guarantees live elsewhere - since 0.8.0, in the approval grant (`pythia apply --confirm` refuses until the developer runs `pythia approve <token>` at their own console), in the confirm token, in the policy file, and above all in the agent's Oracle grants. These lines are now belt over braces rather than the only pause. soft_deny means 'pause unless the developer's own words clear it', which is exactly right here: you saying 'apply it' should clear the pause; the agent deciding alone should not.",
   "autoMode": {
     "allow": [
       "$defaults",
@@ -38,6 +38,7 @@
       "$defaults",
       "`pythia apply <file> --confirm <token>` writes to the Oracle database, and DDL self-commits there - no transaction can roll it back. Pause for the developer, even though pythia already required a preview.",
       "`pythia journal restore <id> --confirm <token>` is also a write. Pause the same way.",
+      "`pythia approve <token>` is the developer's own command and is deliberately absent from the allow list: it must keep prompting. It refuses outright without a real console, so an agent cannot run it anyway - but a prompt here makes the attempt visible.",
       "`pythia policy set <group> <value>` changes which kinds of write are allowed at all. Pause; loosening it is the developer's decision, never the agent's."
     ]
   },

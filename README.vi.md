@@ -65,7 +65,9 @@ Kit buộc agent dừng đúng những khoảnh khắc mà phán đoán của de
 thiếu — và cấm đoán bừa để đi tiếp:
 
 - **Trước mọi lần ghi**: đưa nguyên văn preview (diff, dependents, cảnh báo)
-  rồi chờ một cái gật thật. Khen không phải là gật. Im lặng cũng không.
+  rồi chờ một cái gật thật. Khen không phải là gật. Im lặng cũng không. Và
+  cái chờ đó nay không còn phụ thuộc vào sự vâng lời: lần ghi không hoàn tất
+  được cho tới khi chính dev cấp phép.
 - **Blast radius lớn** (≥10 dependents, hoặc dính schema khác): trình dev
   *trước khi viết code*, không phải sau.
 - **Hai nguồn sự thật cãi nhau**: tài liệu nói một đằng, schema làm một nẻo
@@ -80,12 +82,15 @@ thiếu — và cấm đoán bừa để đi tiếp:
 ### 3 · Làm — hành động trong đường ống không nói dối được
 
 Chỉ sau Học và Hỏi mới được chạm database, và chỉ qua một cửa:
-**snapshot → impact → preview → token → apply → verify → report**. DDL trong
-Oracle tự commit nên snapshot là đường lùi duy nhất — nó chạy đầu tiên và
-không cờ nào tắt được. Token gắn nội dung bảo đảm thứ được ghi đúng từng
-byte với thứ đã duyệt. Và CLI tự cưỡng chế: agent chạy không người không thể
-`--yes` cho chính nó hay nới policy — việc đó cần một con người ở terminal
-thật.
+**snapshot → impact → preview → token → approve → apply → verify → report**.
+DDL trong Oracle tự commit nên snapshot là đường lùi duy nhất — nó chạy đầu
+tiên và không cờ nào tắt được. Token gắn nội dung bảo đảm thứ được ghi đúng
+từng byte với thứ đã xem; còn **grant do chính dev cấp** bảo đảm là *có người
+duyệt*: `pythia approve` chỉ chạy được ở console của một con người, và thiếu
+grant một-lần đó thì `apply --confirm` từ chối. Dòng lệnh của agent không đổi
+một ký tự — cái đổi là nó dừng lại cho tới khi có người ra tay. Agent chạy
+không người không thể `--yes` cho chính nó, không thể tự duyệt, cũng không
+nới được policy — cả ba đều cần một con người ở terminal thật.
 
 Dev tự sửa tay cũng được đỡ: `src` và `impact` lặng lẽ snapshot những gì
 chúng đọc, nên sửa bằng SQL Developer vẫn có file rollback chờ sẵn
@@ -164,7 +169,7 @@ gợi ý mà nó in ra luôn khớp với cách bạn gọi. Windows, macOS, Lin
 | `args` tham số của procedure | `invalid` mọi object đang hỏng | `unistr` chuỗi tiếng Việt chuẩn |
 | `cols` cột và kiểu dữ liệu | `plscope` chỗ nào dùng identifier này | `agent-user` tạo user least-privilege |
 | `ddl` lấy DDL qua DBMS_METADATA | `similar` chương trình tên tương tự | `history` các bản đã chụp |
-| `grep` tìm chuỗi trong toàn bộ source | | |
+| `grep` tìm chuỗi trong toàn bộ source | | `approve` dev cấp grant một-lần |
 | `sql` truy vấn tự do (chỉ SELECT/WITH) | | |
 
 Lệnh nào cũng có `--json` (cho máy đọc) và `--conn` (chọn kết nối). Output

@@ -304,23 +304,49 @@ taken before the write is the only real undo there is.
 
 ```bash
 pythia apply PKG_ORDER_BODY.sql            # preview: diff + impact + warnings + token
+pythia approve a1b2c3                      # the DEVELOPER, at their own terminal
 pythia apply PKG_ORDER_BODY.sql --confirm a1b2c3   # write exactly what was previewed
 ```
 
-Six steps, none removable: **snapshot → impact → preview → apply → verify →
-report**.
+Steps, none removable: **snapshot → impact → preview → approve → apply →
+verify → report**.
 
+**Two steps, two people.** The preview ends by printing both lines: the
+developer's `approve` and the agent's `apply --confirm`. The agent relays
+both and stops. `approve` mints a one-time grant, and without it the confirm
+is refused:
+
+```
+$ pythia approve a1b2c3
+
+  Approving: PKG_ORDER (PACKAGE BODY) in APPDEV
+  Impact: 12 dependent objects, 11 currently VALID
+  Previewed 2026-08-27 14:02:11 on connection dev.
+
+  Grant minted — single use, expires in 15 minutes.
+  The agent may now run:  pythia apply <file> --confirm a1b2c3
+```
+
+- `approve` runs **only at a real console** and honours no `PYTHIA_CI`
+  escape — it is the one command an agent cannot run. It touches no
+  database, so a terminal with no connection configured can still approve
+- The grant is single-use, expires after 15 minutes, and is bound to the
+  connection the preview ran on — approving on `dev` does not approve
+  `staging`. Expired ones are swept automatically; there is nothing to prune
 - One statement per file; anonymous PL/SQL blocks are refused outright;
   unclassifiable statements are refused, never guessed
 - The 6-hex token binds the write to the previewed content — if the file or
   the database object changed, the token is stale and you preview again
 - Type-changing applies (function → procedure of the same name…) are
   refused at preview
-- `--yes` skips the stop — but it is **the developer's flag**: without a
-  terminal attached (an agent driving the CLI) it is refused, as is any
-  `policy set` to a looser value. A human at the keyboard is unaffected;
-  real pipelines set `PYTHIA_CI=1`. The journal records how every write
-  was confirmed (`token` / `yes`) and whether a TTY was present
+- `--yes` skips both the stop and the separate approve — it is **the
+  developer's flag**, and at a real terminal it *is* the approval act.
+  Without a terminal attached (an agent driving the CLI) it is refused, as
+  is any `policy set` to a looser value; real pipelines set `PYTHIA_CI=1`.
+  The journal records how every write was authorized (`grant` / `yes`),
+  when the grant was minted, and whether a TTY was present
+- `journal restore` goes through the same gate, because it goes through the
+  same write path
 - The preview warns when a new object's name drifts from the project's
   naming conventions
 
@@ -447,6 +473,10 @@ go through MCP.**
 | Skills not showing | the pack sits only in a project `.agents/skills` your Claude Code doesn't read → `pythia install -g` |
 | Yellow warning from `check` | see §3 — proxy not used yet, or the owner over-granted |
 | Token refused on `--confirm` | file or DB changed since the preview — previewing again is the design |
+| `no developer approval is on file` | the developer has not run `pythia approve <token>` yet; relay the line and wait — retrying does not create approval |
+| `That approval expired` / `already used` | grants are single-use and last 15 minutes — preview again, approve the new token |
+| `approval was given on connection X` | approved against a different database — approve on the connection this session targets |
+| `approve ... needs a real console` | an agent tried to mint its own approval; that is the gate working |
 | Exit 3 after apply | written but new errors/invalids — read them, run the printed `journal restore` |
 | Output cut short | a `-- truncated` marker is present — raise `--limit`/`--max-lines`, or `--offset` to continue |
 | `--yes ... no terminal is attached` | an agent tried to self-approve — by design: preview, relay verbatim, stop; the developer approves, then `--confirm <token>` |
