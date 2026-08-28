@@ -759,6 +759,72 @@ def test_auto_snapshot_reports_drift_and_keeps_the_old_rollback():
         assert len(pythia.list_journal_entries(td)) == 2
 
 
+def test_grant_lifecycle_mint_read_validate():
+    """A grant is minted for one token on one connection, is good once, and
+    every way it can be wrong has its own status — the refusal messages in
+    apply are built on these names."""
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        now = datetime.datetime(2026, 8, 27, 14, 3, 11)
+        rec = pythia.mint_grant(td, "7f3a91", "escs_dev", now=now)
+        assert rec["token"] == "7f3a91" and rec["conn"] == "escs_dev"
+        assert rec["used_at"] is None
+        assert rec["revalidate"] is None          # reserved for the DML spec
+        assert (pythia.grants_root(td) / "7f3a91.json").is_file()
+
+        g = pythia.read_grant(td, "7f3a91")
+        assert g["minted_at"] == now.isoformat(timespec="seconds")
+        assert pythia.grant_status(g, "escs_dev", now=now) == "ok"
+        # inside the window
+        soon = now + datetime.timedelta(minutes=14)
+        assert pythia.grant_status(g, "escs_dev", now=soon) == "ok"
+        # past it
+        late = now + datetime.timedelta(minutes=16)
+        assert pythia.grant_status(g, "escs_dev", now=late) == "expired"
+        # a different connection with the same token is not this approval
+        assert pythia.grant_status(g, "escs_test", now=now) == "wrong_conn"
+        # absent
+        assert pythia.read_grant(td, "nosuch") is None
+        assert pythia.grant_status(None, "escs_dev", now=now) == "missing"
+
+        pythia.spend_grant(td, "7f3a91", now=now)
+        g2 = pythia.read_grant(td, "7f3a91")
+        assert g2["used_at"] == now.isoformat(timespec="seconds")
+        assert pythia.grant_status(g2, "escs_dev", now=now) == "spent"
+
+
+def test_grant_conn_comparison_is_case_insensitive():
+    """connections.json names are typed by humans; DEV and dev are one
+    connection, and an approval must not hinge on how it was spelled."""
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        now = datetime.datetime(2026, 8, 27, 14, 0, 0)
+        pythia.mint_grant(td, "aaa111", "DEV", now=now)
+        g = pythia.read_grant(td, "aaa111")
+        assert pythia.grant_status(g, "dev", now=now) == "ok"
+
+
+def test_prune_expired_grants_removes_only_the_dead():
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        now = datetime.datetime(2026, 8, 27, 14, 0, 0)
+        pythia.mint_grant(td, "old111", "DEV", now=now - datetime.timedelta(hours=2))
+        pythia.mint_grant(td, "new222", "DEV", now=now)
+        assert pythia.prune_expired_grants(td, now=now) == 1
+        assert pythia.read_grant(td, "old111") is None
+        assert pythia.read_grant(td, "new222") is not None
+
+
+def test_read_grant_survives_a_corrupt_file():
+    """A half-written or hand-edited file is not an approval, and must not
+    crash the write path — it reads as missing, which refuses."""
+    with tempfile.TemporaryDirectory() as td:
+        pythia.grants_root(td).mkdir(parents=True)
+        (pythia.grants_root(td) / "bad999.json").write_text("{not json",
+                                                            encoding="utf-8")
+        assert pythia.read_grant(td, "bad999") is None
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

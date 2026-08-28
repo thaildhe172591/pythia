@@ -891,6 +891,113 @@ def journal_root(root):
     return pathlib.Path(root) / CONFIG_DIR / "journal"
 
 
+# --- approval grants ---------------------------------------------------------
+#
+# The confirmation token proves the CONTENT did not move. A grant proves a
+# HUMAN approved it. They are separate facts, so they are separate objects:
+# the token is derived from the file and the database, the grant is minted by
+# a person at a console (`pythia approve`) and spent by the apply that follows.
+
+GRANT_TTL_MINUTES = 15
+
+
+def grants_root(root):
+    return pathlib.Path(root) / CONFIG_DIR / "grants"
+
+
+def grant_path(root, token):
+    return grants_root(root) / f"{token}.json"
+
+
+def mint_grant(root, token, conn_name, now=None):
+    """Record one developer approval. Single use, short-lived, bound to the
+    connection the preview ran on."""
+    import datetime
+    now = now or datetime.datetime.now()
+    rec = {"token": token,
+           "conn": conn_name or "",
+           "minted_at": now.isoformat(timespec="seconds"),
+           "expires_at": (now + datetime.timedelta(
+               minutes=GRANT_TTL_MINUTES)).isoformat(timespec="seconds"),
+           "used_at": None,
+           # reserved: the data_dml spec re-checks the affected row set here
+           "revalidate": None}
+    d = grants_root(root)
+    d.mkdir(parents=True, exist_ok=True)
+    grant_path(root, token).write_text(json.dumps(rec, indent=2) + "\n",
+                                       encoding="utf-8")
+    return rec
+
+
+def read_grant(root, token):
+    """The grant on file, or None. A corrupt or half-written file is not an
+    approval — it reads as absent, and absent refuses."""
+    p = grant_path(root, token)
+    if not p.is_file():
+        return None
+    try:
+        rec = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def grant_status(grant, conn_name, now=None):
+    """Why this grant does or does not authorize a write right now.
+
+    Returns one of: ok, missing, expired, spent, wrong_conn. Each has its own
+    refusal in apply, because "no" without the reason teaches nothing."""
+    import datetime
+    if not grant:
+        return "missing"
+    if grant.get("used_at"):
+        return "spent"
+    now = now or datetime.datetime.now()
+    try:
+        expires = datetime.datetime.fromisoformat(str(grant.get("expires_at")))
+    except ValueError:
+        return "expired"                    # unreadable stamp is not a licence
+    if now > expires:
+        return "expired"
+    # connection names are typed by humans into connections.json; DEV and dev
+    # are the same connection, and an approval must not hinge on the spelling
+    if str(grant.get("conn", "")).upper() != str(conn_name or "").upper():
+        return "wrong_conn"
+    return "ok"
+
+
+def spend_grant(root, token, now=None):
+    """One apply per approval. Stamped in the same run that wrote."""
+    import datetime
+    rec = read_grant(root, token)
+    if not rec:
+        return
+    rec["used_at"] = (now or datetime.datetime.now()).isoformat(
+        timespec="seconds")
+    grant_path(root, token).write_text(json.dumps(rec, indent=2) + "\n",
+                                       encoding="utf-8")
+
+
+def prune_expired_grants(root, now=None):
+    """Expired grants are litter, not state: approve sweeps them on the way
+    past. No prune command, no cron."""
+    import datetime
+    now = now or datetime.datetime.now()
+    d = grants_root(root)
+    if not d.is_dir():
+        return 0
+    gone = 0
+    for p in sorted(d.glob("*.json")):
+        rec = read_grant(root, p.stem)
+        if rec is None or grant_status(rec, rec.get("conn"), now=now) == "expired":
+            try:
+                p.unlink()
+                gone += 1
+            except OSError:
+                pass
+    return gone
+
+
 def render_restore(obj_type, name, before_text):
     """The statement that puts things back. For an object that did not exist,
     undo means DROP — a genuinely different promise than restoring source, so
