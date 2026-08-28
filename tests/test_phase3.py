@@ -359,6 +359,25 @@ def test_a_moved_row_set_refuses_the_confirm():
         assert conn.commits == 0 and wrote_dml(conn) == []
 
 
+def test_restore_refuses_an_entry_that_has_no_undo():
+    with tempfile.TemporaryDirectory() as td:
+        entry = pythia.write_journal_entry(
+            td, "DATA_DML", "STATEMENT", "",
+            "delete from t_order where id = 7",
+            {"connection": "DEV", "group": "data_dml", "applied": True})
+        ns = dml_ns(td, id=entry)
+        expect_exit(lambda: pythia.run_restore(FakeConn(base_script()),
+                                               "APP", ns),
+                    "no undo", "flashback")
+
+
+def test_deny_message_explains_what_revalidation_buys():
+    with tempfile.TemporaryDirectory() as td:
+        expect_exit(lambda: pythia.run_apply(FakeConn(dml_script()), "APP",
+                                             dml_ns(td), DML_FILE),
+                    "deny", "revalidation", "policy set data_dml confirm")
+
+
 def test_approve_records_the_row_set_it_showed():
     with tempfile.TemporaryDirectory() as td:
         allow_dml(td)

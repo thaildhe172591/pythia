@@ -1958,7 +1958,13 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         extra = ("no snapshot can undo it after commit"
                  if group in ("data_dml", "structural", "grants")
                  else "policy forbids it")
-        sys.exit(f"Refused: {group} is set to deny — {extra}.\n"
+        note = ("\nRevalidation narrows that risk without removing it: the "
+                "preview shows the rows and the count, apply refuses if that "
+                "set moved, and the write is rolled back if the statement "
+                "touches a different number of rows. What nothing here can do "
+                "is undo a committed DELETE."
+                if group == "data_dml" else "")
+        sys.exit(f"Refused: {group} is set to deny — {extra}.{note}\n"
                  f"To allow it once you have weighed that: "
                  f"{invocation()} policy set {group} confirm")
     stmt = prepare_statement(file_text, group)
@@ -2324,6 +2330,18 @@ def run_restore(conn, schema, ns):
     """Restore is itself a write: feed the saved statement back through the
     same six steps. There is no second write path and no silent restore."""
     e = read_journal_entry(ns.project_root, ns.id)
+    group = e["meta"].get("group", "plsql_source")
+    if group != "plsql_source":
+        # render_restore() writes a DROP for every group that has no snapshot,
+        # which classifies as structural and dies with a message about the
+        # wrong thing. Say what is actually true, once, for all of them.
+        tail = ("Flashback Query within undo retention is the only route left, "
+                "and it is a DBA's job."
+                if group == "data_dml" else
+                "Reversing it means writing the opposite statement by hand.")
+        sys.exit(f"Refused: entry {ns.id} is a {group} statement, and the "
+                 "journal holds no undo for it — only the statement that "
+                 f"ran.\n{tail}")
     print(f"Restoring from {ns.id} — this is itself a write and goes through "
           "the full six steps.", file=sys.stderr)
     return run_apply(conn, schema, ns, e["restore"], origin={"restored_from": ns.id})
