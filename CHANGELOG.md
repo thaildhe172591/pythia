@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.8.0 — 2026-08-27
+
+- **Breaking, and the point of the release: a write now needs a human's
+  approval, not just a matching token.** `pythia apply <file> --confirm
+  <token>` additionally requires a grant that only `pythia approve <token>`
+  can mint — and approve runs only at a real console, with no `PYTHIA_CI`
+  escape. The token proved the *content* had not moved; it never proved
+  anyone had *approved*. Skills are text: they tell an agent to stop and ask,
+  and nothing stopped one that did not. Now something does.
+- **The preview prints two follow-up lines instead of one** — the developer's
+  `pythia approve <token>` and the agent's `apply --confirm`. Relay both.
+- Grants are **single-use**, expire after **15 minutes**, and are bound to the
+  connection the preview ran on: approving on `dev` does not approve
+  `staging`. Expired ones are swept on the next approve; there is no prune
+  command to remember.
+- `approve` shows what is being approved — object, type, schema, impact,
+  the connection and time of the preview — read from the preview's journal
+  entry, never recomputed. A bare hash cannot be approved blind, and for the
+  groups with no snapshot it shows the statement itself and says plainly that
+  nothing can undo it after commit. It touches no database, so a developer's
+  terminal with no connection configured can still approve.
+- `journal restore` goes through the same gate, because it goes through the
+  same write path. One door for writes is now a provable claim.
+- The journal records `confirmed_via: "grant"` and when the grant was minted,
+  so approve-to-apply latency is audit data.
+- **Agents' command line is unchanged**: `apply --confirm <token>`, as before.
+  What changed is that it refuses until a person has acted.
+- `--yes` at a real terminal is untouched — a human previewing and applying in
+  one motion *is* the approval act. Headless `--yes` stays refused.
+- Honest limit, stated in SECURITY.md rather than papered over: the gate
+  assumes a developer with a terminal on the machine holding the repo. A
+  purely remote developer has no clean path yet, and deliberate forgery of the
+  grant file remains possible — the same tier as editing `policy.json`. What
+  the grant raises is the bar, not a wall.
+
 ## 0.7.1 — 2026-08-27
 
 - **The three-role layout is now documented as the named pattern** (GUIDE

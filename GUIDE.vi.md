@@ -294,22 +294,46 @@ trước khi ghi là cách hoàn tác thật duy nhất.
 
 ```bash
 pythia apply PKG_ORDER_BODY.sql            # preview: diff + impact + cảnh báo + token
+pythia approve a1b2c3                      # DEVELOPER, ở terminal của chính mình
 pythia apply PKG_ORDER_BODY.sql --confirm a1b2c3   # ghi đúng nội dung đã preview
 ```
 
-Sáu bước, không tắt được: **snapshot → impact → preview → apply → verify →
-report**.
+Các bước, không tắt được: **snapshot → impact → preview → approve → apply →
+verify → report**.
 
+**Hai bước, hai người.** Preview kết thúc bằng cả hai dòng: dòng `approve`
+của dev và dòng `apply --confirm` của agent. Agent chuyển cả hai rồi dừng.
+`approve` cấp một grant dùng-một-lần; thiếu nó thì confirm bị từ chối:
+
+```
+$ pythia approve a1b2c3
+
+  Approving: PKG_ORDER (PACKAGE BODY) in APPDEV
+  Impact: 12 dependent objects, 11 currently VALID
+  Previewed 2026-08-27 14:02:11 on connection dev.
+
+  Grant minted — single use, expires in 15 minutes.
+  The agent may now run:  pythia apply <file> --confirm a1b2c3
+```
+
+- `approve` **chỉ chạy được ở console thật**, không có lối thoát
+  `PYTHIA_CI` — đây là lệnh duy nhất agent không chạy được. Nó không chạm
+  database, nên terminal chưa cấu hình kết nối vẫn duyệt được
+- Grant dùng một lần, hết hạn sau 15 phút, và trói vào đúng connection mà
+  preview đã chạy — duyệt trên `dev` không duyệt cho `staging`. Grant hết
+  hạn tự bị dọn, không có lệnh prune nào để nhớ
 - File chứa **đúng một** statement; block PL/SQL ẩn danh bị từ chối thẳng;
   statement không phân loại được → từ chối, không đoán
 - Token 6-hex trói lần ghi vào nội dung đã preview — file hay DB đổi là token
   hết hiệu lực, phải preview lại
 - Đổi kiểu object (function → procedure cùng tên...) bị chặn ngay preview
-- `--yes` bỏ bước dừng — nhưng nó là **cờ của developer**: không có
-  terminal (agent điều khiển CLI) thì bị từ chối, `policy set` nới lỏng
-  cũng vậy. Người gõ tay không bị ảnh hưởng; pipeline thật đặt
-  `PYTHIA_CI=1`. Journal ghi lại mỗi lần ghi được xác nhận bằng gì
-  (`token` / `yes`) và có TTY hay không
+- `--yes` bỏ cả bước dừng lẫn bước approve riêng — nó là **cờ của
+  developer**, và ở terminal thật thì bản thân nó *chính là* hành vi duyệt.
+  Không có terminal (agent điều khiển CLI) thì bị từ chối, `policy set` nới
+  lỏng cũng vậy; pipeline thật đặt `PYTHIA_CI=1`. Journal ghi lại mỗi lần
+  ghi được cấp phép bằng gì (`grant` / `yes`), grant cấp lúc nào, và có TTY
+  hay không
+- `journal restore` đi qua đúng cổng đó, vì nó đi qua đúng đường ghi đó
 - Preview cảnh báo khi tên object lệch naming conventions của project
 
 **Exit code là kết luận, máy đọc được:**
@@ -431,6 +455,10 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | Skill không hiện | pack chỉ nằm ở `.agents/skills` project mà Claude Code bản đó không đọc → `pythia install -g` |
 | `check` cảnh báo vàng | đọc §3 — proxy chưa dùng, hoặc owner thừa quyền |
 | Token bị từ chối khi `--confirm` | file/DB đổi sau preview — preview lại là đúng thiết kế |
+| `no developer approval is on file` | dev chưa chạy `pythia approve <token>`; chuyển dòng lệnh rồi chờ — thử lại không tạo ra sự phê duyệt |
+| `That approval expired` / `already used` | grant dùng một lần, sống 15 phút — preview lại và duyệt token mới |
+| `approval was given on connection X` | đã duyệt trên database khác — duyệt trên đúng connection phiên này nhắm tới |
+| `approve ... needs a real console` | agent định tự cấp phép cho mình; đó là cổng đang làm đúng việc |
 | Exit 3 sau apply | đã ghi nhưng có lỗi compile/invalid mới — xem lỗi, chạy lệnh `journal restore` đã in |
 | Output bị cắt | có marker `-- truncated` — tăng `--limit`/`--max-lines` hoặc `--offset` đọc tiếp |
 | `--yes ... no terminal is attached` | agent định tự phê duyệt — đúng thiết kế: preview, relay nguyên văn, dừng; dev đồng ý rồi mới `--confirm <token>` |

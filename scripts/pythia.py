@@ -380,6 +380,39 @@ HEADLESS_YES_MSG = (
     "approval in chat.\n(Real pipelines set PYTHIA_CI=1.)")
 
 
+APPROVE_HEADLESS_MSG = (
+    "approve is the developer's command — it needs a real console.\n"
+    "Agents relay the preview and wait; a person runs approve in their own "
+    "terminal.\n(Real pipelines apply with --yes and PYTHIA_CI=1 instead.)")
+
+
+def grant_refusal(status, token, grant, conn_name, file_hint):
+    """Why this write is refused, and the exact way to fix it. Each status
+    gets its own sentence: 'no' without the reason teaches nothing."""
+    approve_line = f"  {invocation()} approve {token}"
+    preview_line = f"  {invocation()} apply {file_hint}"
+    if status == "missing":
+        return ("The confirmation token matches, but no developer approval is "
+                "on file.\nAsk the developer to run, in their own terminal "
+                f"(agents cannot run it):\n{approve_line}\n"
+                "Then re-run this command.")
+    if status == "expired":
+        return (f"That approval expired ({GRANT_TTL_MINUTES} minutes after it "
+                "was given).\nAsk the developer to approve again:\n"
+                f"{approve_line}")
+    if status == "spent":
+        return ("That approval was already used by a previous apply — one "
+                "approval, one write.\nPreview again, then ask the developer "
+                f"to approve the new token:\n{preview_line}")
+    if status == "wrong_conn":
+        return (f"That approval was given on connection "
+                f"{grant.get('conn', '?')!r}, but this session targets "
+                f"{conn_name!r}.\nApproving on one database does not approve "
+                "another. On the right connection:\n"
+                f"{preview_line} --conn {conn_name}")
+    return "Refused: the developer approval on file is not valid."
+
+
 def human_at_the_keyboard():
     """True only when a person is typing at a real console.
 
@@ -390,6 +423,33 @@ def human_at_the_keyboard():
     for real pipelines."""
     if os.environ.get("PYTHIA_CI"):
         return True
+    try:
+        if not sys.stdin.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            handle = ctypes.windll.kernel32.GetStdHandle(-10)  # STD_INPUT
+            mode = ctypes.c_ulong()
+            return bool(ctypes.windll.kernel32.GetConsoleMode(
+                handle, ctypes.byref(mode)))
+        except Exception:   # noqa: BLE001 — any failure means "not a console"
+            return False
+    return True
+
+
+def console_session(ns=None):
+    """A real console, with no environment escape.
+
+    human_at_the_keyboard() honours PYTHIA_CI so real pipelines can apply
+    with --yes. approve gets no such door: a pipeline that wants to write
+    already has one, and a second escape would be the way around this gate.
+    `ns.console` is the test seam and nothing sets it in production."""
+    forced = getattr(ns, "console", None)
+    if forced is not None:
+        return bool(forced)
     try:
         if not sys.stdin.isatty():
             return False
@@ -889,6 +949,113 @@ def undo_group_action(ns):
 
 def journal_root(root):
     return pathlib.Path(root) / CONFIG_DIR / "journal"
+
+
+# --- approval grants ---------------------------------------------------------
+#
+# The confirmation token proves the CONTENT did not move. A grant proves a
+# HUMAN approved it. They are separate facts, so they are separate objects:
+# the token is derived from the file and the database, the grant is minted by
+# a person at a console (`pythia approve`) and spent by the apply that follows.
+
+GRANT_TTL_MINUTES = 15
+
+
+def grants_root(root):
+    return pathlib.Path(root) / CONFIG_DIR / "grants"
+
+
+def grant_path(root, token):
+    return grants_root(root) / f"{token}.json"
+
+
+def mint_grant(root, token, conn_name, now=None):
+    """Record one developer approval. Single use, short-lived, bound to the
+    connection the preview ran on."""
+    import datetime
+    now = now or datetime.datetime.now()
+    rec = {"token": token,
+           "conn": conn_name or "",
+           "minted_at": now.isoformat(timespec="seconds"),
+           "expires_at": (now + datetime.timedelta(
+               minutes=GRANT_TTL_MINUTES)).isoformat(timespec="seconds"),
+           "used_at": None,
+           # reserved: the data_dml spec re-checks the affected row set here
+           "revalidate": None}
+    d = grants_root(root)
+    d.mkdir(parents=True, exist_ok=True)
+    grant_path(root, token).write_text(json.dumps(rec, indent=2) + "\n",
+                                       encoding="utf-8")
+    return rec
+
+
+def read_grant(root, token):
+    """The grant on file, or None. A corrupt or half-written file is not an
+    approval — it reads as absent, and absent refuses."""
+    p = grant_path(root, token)
+    if not p.is_file():
+        return None
+    try:
+        rec = json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def grant_status(grant, conn_name, now=None):
+    """Why this grant does or does not authorize a write right now.
+
+    Returns one of: ok, missing, expired, spent, wrong_conn. Each has its own
+    refusal in apply, because "no" without the reason teaches nothing."""
+    import datetime
+    if not grant:
+        return "missing"
+    if grant.get("used_at"):
+        return "spent"
+    now = now or datetime.datetime.now()
+    try:
+        expires = datetime.datetime.fromisoformat(str(grant.get("expires_at")))
+    except ValueError:
+        return "expired"                    # unreadable stamp is not a licence
+    if now > expires:
+        return "expired"
+    # connection names are typed by humans into connections.json; DEV and dev
+    # are the same connection, and an approval must not hinge on the spelling
+    if str(grant.get("conn", "")).upper() != str(conn_name or "").upper():
+        return "wrong_conn"
+    return "ok"
+
+
+def spend_grant(root, token, now=None):
+    """One apply per approval. Stamped in the same run that wrote."""
+    import datetime
+    rec = read_grant(root, token)
+    if not rec:
+        return
+    rec["used_at"] = (now or datetime.datetime.now()).isoformat(
+        timespec="seconds")
+    grant_path(root, token).write_text(json.dumps(rec, indent=2) + "\n",
+                                       encoding="utf-8")
+
+
+def prune_expired_grants(root, now=None):
+    """Expired grants are litter, not state: approve sweeps them on the way
+    past. No prune command, no cron."""
+    import datetime
+    now = now or datetime.datetime.now()
+    d = grants_root(root)
+    if not d.is_dir():
+        return 0
+    gone = 0
+    for p in sorted(d.glob("*.json")):
+        rec = read_grant(root, p.stem)
+        if rec is None or grant_status(rec, rec.get("conn"), now=now) == "expired":
+            try:
+                p.unlink()
+                gone += 1
+            except OSError:
+                pass
+    return gone
 
 
 def render_restore(obj_type, name, before_text):
@@ -1677,18 +1844,28 @@ def run_apply(conn, schema, ns, file_text, origin=None):
     token = apply_token(otype, name, file_text, db_source)
     if ns.yes and not human_at_the_keyboard():
         sys.exit(HEADLESS_YES_MSG)
-    confirmed = bool(ns.yes) or ns.confirm == token
     if ns.confirm and ns.confirm != token:
         sys.exit("The confirmation token does not match: the file or the "
                  "database object changed since that preview. Preview again:\n"
                  f"  {invocation()} apply {ns.file}")
+    # The token proves the content did not move; the grant proves a human
+    # approved it. --yes is itself that human act, at a real console.
+    grant = None
+    if ns.confirm == token:
+        grant = read_grant(ns.project_root, token)
+        status = grant_status(grant, ns.conn_name)
+        if status != "ok":
+            sys.exit(grant_refusal(status, token, grant or {},
+                                   ns.conn_name, ns.file))
+    confirmed = bool(ns.yes) or ns.confirm == token
 
     _, inv_rows = run_query(conn, load_query("invalid-objects.sql"), {"s": schema})
     invalid_before = [(r[0], r[1]) for r in inv_rows]
     meta = {"schema": schema, "connection": ns.conn_name, "group": group,
             "token": token, "applied": False,
             "confirmed_via": ("yes" if ns.yes else
-                              "token" if confirmed else "preview"),
+                              "grant" if confirmed else "preview"),
+            "grant_minted_at": (grant or {}).get("minted_at"),
             "tty": human_at_the_keyboard(),
             "invalid_before": invalid_before, **(origin or {})}
     entry = write_journal_entry(ns.project_root, otype, name, db_source,
@@ -1743,7 +1920,10 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         f"{journal_root(ns.project_root) / entry / 'restore.sql'}",
                         "dim", en))
         if not confirmed:
-            print(f"\n  To apply:\n    "
+            print("\n  To apply — two steps, two people:")
+            print("    developer, in your own terminal:   "
+                  + paint(f"{invocation()} approve {token}", "cyan", en))
+            print("    then the agent:                    "
                   + paint(f"{invocation()} apply {ns.file} --confirm {token}",
                           "cyan", en))
     if not confirmed:
@@ -1760,6 +1940,8 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         "'IDENTIFIERS:ALL, STATEMENTS:ALL'")
     with conn.cursor() as cur:
         cur.execute(stmt)
+    if grant is not None:
+        spend_grant(ns.project_root, token)   # one approval, one write
 
     # 5. VERIFY
     err_rows = []
@@ -1835,6 +2017,73 @@ def cmd_apply(conn, schema, ns):
     code = run_apply(conn, schema, ns, path.read_text(encoding="utf-8"))
     if code:
         sys.exit(code)
+
+
+def find_preview_by_token(root, token):
+    """The newest journal entry whose preview carried this token. A human
+    approves an object and a diff, never a bare hash — so no entry means no
+    approval."""
+    for eid in list_journal_entries(root):         # newest first
+        try:
+            meta = read_journal_entry(root, eid)["meta"]
+        except SystemExit:
+            continue
+        if str(meta.get("token", "")) == token:
+            return eid, meta
+    return None, None
+
+
+def cmd_approve(conn, schema, ns):
+    """The developer's half of the gate: one human act, at a real console,
+    that lets the agent's next `apply --confirm` through. Touches no
+    database — a terminal with no connection configured can still approve."""
+    token = str(ns.token).strip().lower()
+    if not console_session(ns):
+        sys.exit(APPROVE_HEADLESS_MSG)
+    entry, meta = find_preview_by_token(ns.project_root, token)
+    if not meta:
+        sys.exit(f"No pending preview carries token {token!r}.\n"
+                 "Approve what you have seen: run the preview first, then "
+                 "approve the token it prints:\n"
+                 f"  {invocation()} apply <file>")
+    if meta.get("applied"):
+        sys.exit(f"Token {token!r} belongs to a preview that was already "
+                 "applied.\nPreview again to get a fresh token:\n"
+                 f"  {invocation()} apply <file>")
+    conn_name = meta.get("connection") or ""
+    prune_expired_grants(ns.project_root)
+    rec = mint_grant(ns.project_root, token, conn_name)
+    obj, otype = meta.get("object", "?"), meta.get("type", "?")
+    group = meta.get("group", "")
+    if ns.json:
+        print(json.dumps({"ok": True, "token": token, "conn": conn_name,
+                          "object": obj, "type": otype, "group": group,
+                          "entry": entry, "minted_at": rec["minted_at"],
+                          "expires_at": rec["expires_at"],
+                          "ttl_minutes": GRANT_TTL_MINUTES}))
+        return
+    en = getattr(ns, "color", False)
+    print()
+    if group and group != "plsql_source":
+        # no object identity, no snapshot: show the statement itself and say
+        # plainly that there is no undo waiting behind it
+        stmt = read_journal_entry(ns.project_root, entry)["after"].strip()
+        print(f"  Approving a {group} statement on {meta.get('schema', '?')}:")
+        for ln in stmt.splitlines():
+            print(f"    {ln}")
+        print(paint("\n  There is no snapshot for this group — after commit "
+                    "it cannot be undone from the journal.", "yellow", en))
+    else:
+        print(f"  Approving: {paint(f'{obj} ({otype})', 'bold', en)} in "
+              f"{meta.get('schema', '?')}")
+        if meta.get("summary"):
+            print(f"  Impact: {meta['summary'].lstrip('- ')}")
+    print(f"  Previewed {entry[:19].replace('T', ' ')} on connection "
+          f"{conn_name or '?'}.")
+    print(paint(f"\n  Grant minted — single use, expires in "
+                f"{GRANT_TTL_MINUTES} minutes.", "green", en))
+    print("  The agent may now run:  "
+          + paint(f"{invocation()} apply <file> --confirm {token}", "cyan", en))
 
 
 def run_restore(conn, schema, ns):
@@ -2002,7 +2251,8 @@ ASK    relay apply previews verbatim and wait for a real yes. >=10 dependents
        exit 3 (written-but-broken) are relayed, never routed around. Do not
        read exit codes through a pipe.
 DO     writes go through `pythia apply` only - snapshot, token, verify. The
-       full contract: `pythia guide`.
+       developer runs `pythia approve <token>`; you never can. Full
+       contract: `pythia guide`.
 """
 
 
@@ -2050,11 +2300,16 @@ Stop at exactly these moments; a guess past any of them is a defect.
                           the rollback line. journal (show/diff) is your evidence.
 
 === 3. DO — act inside a pipeline that cannot lie ===============
-One door for writes: snapshot -> impact -> preview -> token -> apply ->
-verify -> report.
+One door for writes: snapshot -> impact -> preview -> token -> approve ->
+apply -> verify -> report.
 
+  approve                 THE DEVELOPER'S COMMAND, at their own terminal:
+                          mints the one-time grant that --confirm requires.
+                          An agent cannot run it - that is the point. Relay
+                          the line the preview printed and wait.
   apply                   the six-step write; --confirm binds to the preview
-  journal restore         undo, through the same six steps
+                          AND to the developer's approval
+  journal restore         undo, through the same six steps and the same gate
   unistr                  exact non-ASCII literals for what you are writing
   install · agent-user · guide    setting the harness itself up
 
@@ -2519,12 +2774,13 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "invalid": cmd_invalid, "errors": cmd_errors, "deps": cmd_deps,
             "impact": cmd_impact, "similar": cmd_similar, "plscope": cmd_plscope,
             "policy": cmd_policy, "journal": cmd_journal, "apply": cmd_apply,
+            "approve": cmd_approve,
             "conventions": cmd_conventions, "guide": cmd_guide, "connections": cmd_connections, "install": cmd_install,
             "unistr": cmd_unistr, "agent-user": cmd_agent_user,
             "history": cmd_history}
 
 NO_DB_COMMANDS = {"policy", "journal", "install", "unistr", "guide", "connections",
-                  "history"}
+                  "history", "approve"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -2621,6 +2877,10 @@ def build_parser():
                    help="apply without stopping; the full preview still prints and journals")
     s.add_argument("--depth", type=int, default=3,
                    help="impact depth for the preview (default 3)")
+    s = sub.add_parser("approve", parents=[common()],
+                       help="the developer approves a preview: mints the "
+                            "one-time grant apply --confirm requires")
+    s.add_argument("token", help="the token printed by the preview")
     sub.add_parser("connections", parents=[common()],
                    help="list configured connections — names, users, "
                         "targets; never passwords")

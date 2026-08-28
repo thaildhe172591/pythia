@@ -228,6 +228,7 @@ def test_apply_preview_writes_nothing_and_gives_token():
 def test_apply_correct_token_writes_and_verifies_clean():
     with tempfile.TemporaryDirectory() as td:
         tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")     # the developer approved it
         conn = FakeConn(base_script())
         code = pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
         assert code == 0
@@ -268,6 +269,7 @@ def test_apply_broken_compile_exits_3_with_restore_hint():
                      ("P_USES_ORDER", "PROCEDURE")]
     with tempfile.TemporaryDirectory() as td:
         tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")     # the developer approved it
         conn = FakeConn(base_script(errors=errors, invalid_after=invalid_after))
         code = pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
         assert code == 3                                  # applied but broken
@@ -299,6 +301,7 @@ def test_apply_snapshot_survives_failed_execute():
 
     with tempfile.TemporaryDirectory() as td:
         tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")     # the developer approved it
         conn = Exploding(base_script())
         try:
             pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
@@ -757,6 +760,376 @@ def test_auto_snapshot_reports_drift_and_keeps_the_old_rollback():
         old_rollback = pythia.read_journal_entry(td, first)["restore"]
         assert "NULL;" in old_rollback
         assert len(pythia.list_journal_entries(td)) == 2
+
+
+def test_grant_lifecycle_mint_read_validate():
+    """A grant is minted for one token on one connection, is good once, and
+    every way it can be wrong has its own status — the refusal messages in
+    apply are built on these names."""
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        now = datetime.datetime(2026, 8, 27, 14, 3, 11)
+        rec = pythia.mint_grant(td, "7f3a91", "escs_dev", now=now)
+        assert rec["token"] == "7f3a91" and rec["conn"] == "escs_dev"
+        assert rec["used_at"] is None
+        assert rec["revalidate"] is None          # reserved for the DML spec
+        assert (pythia.grants_root(td) / "7f3a91.json").is_file()
+
+        g = pythia.read_grant(td, "7f3a91")
+        assert g["minted_at"] == now.isoformat(timespec="seconds")
+        assert pythia.grant_status(g, "escs_dev", now=now) == "ok"
+        # inside the window
+        soon = now + datetime.timedelta(minutes=14)
+        assert pythia.grant_status(g, "escs_dev", now=soon) == "ok"
+        # past it
+        late = now + datetime.timedelta(minutes=16)
+        assert pythia.grant_status(g, "escs_dev", now=late) == "expired"
+        # a different connection with the same token is not this approval
+        assert pythia.grant_status(g, "escs_test", now=now) == "wrong_conn"
+        # absent
+        assert pythia.read_grant(td, "nosuch") is None
+        assert pythia.grant_status(None, "escs_dev", now=now) == "missing"
+
+        pythia.spend_grant(td, "7f3a91", now=now)
+        g2 = pythia.read_grant(td, "7f3a91")
+        assert g2["used_at"] == now.isoformat(timespec="seconds")
+        assert pythia.grant_status(g2, "escs_dev", now=now) == "spent"
+
+
+def test_grant_conn_comparison_is_case_insensitive():
+    """connections.json names are typed by humans; DEV and dev are one
+    connection, and an approval must not hinge on how it was spelled."""
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        now = datetime.datetime(2026, 8, 27, 14, 0, 0)
+        pythia.mint_grant(td, "aaa111", "DEV", now=now)
+        g = pythia.read_grant(td, "aaa111")
+        assert pythia.grant_status(g, "dev", now=now) == "ok"
+
+
+def test_prune_expired_grants_removes_only_the_dead():
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        now = datetime.datetime(2026, 8, 27, 14, 0, 0)
+        pythia.mint_grant(td, "old111", "DEV", now=now - datetime.timedelta(hours=2))
+        pythia.mint_grant(td, "new222", "DEV", now=now)
+        assert pythia.prune_expired_grants(td, now=now) == 1
+        assert pythia.read_grant(td, "old111") is None
+        assert pythia.read_grant(td, "new222") is not None
+
+
+def test_read_grant_survives_a_corrupt_file():
+    """A half-written or hand-edited file is not an approval, and must not
+    crash the write path — it reads as missing, which refuses."""
+    with tempfile.TemporaryDirectory() as td:
+        pythia.grants_root(td).mkdir(parents=True)
+        (pythia.grants_root(td) / "bad999.json").write_text("{not json",
+                                                            encoding="utf-8")
+        assert pythia.read_grant(td, "bad999") is None
+
+
+def test_apply_with_token_but_no_grant_refuses_and_writes_nothing():
+    """The token proves the content did not move. It does not prove a human
+    approved. Without a grant the write does not happen — and the refusal
+    hands over the exact approve line."""
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        conn = FakeConn(base_script())
+        msg = expect_exit(
+            lambda: pythia.run_apply(conn, "APP",
+                                     apply_ns(td, file="f.sql", confirm=tok),
+                                     NEW_FILE),
+            "no developer approval", f"approve {tok}")
+        assert "agents cannot run it" in msg.lower()
+        assert wrote_ddl(conn) == []               # nothing reached the database
+
+
+def test_apply_consumes_the_grant_and_records_it():
+    """Happy path end to end: approve minted it, apply spends it, and the
+    journal says how this write was authorized."""
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")
+        conn = FakeConn(base_script())
+        code = pythia.run_apply(conn, "APP",
+                                apply_ns(td, file="f.sql", confirm=tok), NEW_FILE)
+        assert code == 0 and len(wrote_ddl(conn)) == 1
+        assert pythia.read_grant(td, tok)["used_at"] is not None   # spent
+        meta = pythia.read_journal_entry(td, pythia.list_journal_entries(td)[0])["meta"]
+        assert meta["confirmed_via"] == "grant"
+        assert meta["grant_minted_at"]        # approve-to-apply latency is audit data
+
+
+def test_apply_refuses_a_spent_grant_the_second_time():
+    """Single use, proved end to end: the same approval cannot authorize two
+    writes."""
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")
+        conn = FakeConn(base_script())
+        pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql", confirm=tok),
+                         NEW_FILE)
+        assert len(wrote_ddl(conn)) == 1
+        conn2 = FakeConn(base_script())
+        expect_exit(lambda: pythia.run_apply(
+            conn2, "APP", apply_ns(td, file="f.sql", confirm=tok), NEW_FILE),
+            "already used")
+        assert wrote_ddl(conn2) == []
+
+
+def test_apply_refuses_expired_and_wrong_connection_grants():
+    import datetime
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        # expired: minted two hours ago
+        pythia.mint_grant(td, tok, "DEV",
+                          now=datetime.datetime.now() - datetime.timedelta(hours=2))
+        conn = FakeConn(base_script())
+        expect_exit(lambda: pythia.run_apply(
+            conn, "APP", apply_ns(td, file="f.sql", confirm=tok), NEW_FILE),
+            "expired", f"approve {tok}")
+        assert wrote_ddl(conn) == []
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "STAGING")          # approved elsewhere
+        conn = FakeConn(base_script())
+        expect_exit(lambda: pythia.run_apply(
+            conn, "APP", apply_ns(td, file="f.sql", confirm=tok), NEW_FILE),
+            "staging", "dev")
+        assert wrote_ddl(conn) == []
+
+
+def test_apply_yes_at_a_console_still_needs_no_grant():
+    """--yes is a human at a real terminal previewing and applying in one
+    motion — that IS the approval act. Unchanged by this release."""
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        code = pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql", yes=True),
+                                NEW_FILE)
+        assert code == 0 and len(wrote_ddl(conn)) == 1
+        assert not pythia.grants_root(td).exists()     # no grant was needed
+
+
+def test_preview_prints_both_follow_up_lines():
+    """Two steps, two people: the developer's approve line and the agent's
+    confirm line, both pasteable."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        conn = FakeConn(base_script())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql"), NEW_FILE)
+        out = buf.getvalue()
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        assert f"approve {tok}" in out
+        assert f"apply f.sql --confirm {tok}" in out
+        assert "your own terminal" in out
+
+
+def test_journal_restore_needs_a_grant_too():
+    """One door for writes — restore goes through run_apply, so the gate
+    covers it. Asserted, not assumed."""
+    with tempfile.TemporaryDirectory() as td:
+        eid = pythia.write_journal_entry(td, "PACKAGE BODY", "PKG_ORDER",
+                                         OLD_SRC, NEW_FILE, {"connection": "DEV"})
+        db_now = "PACKAGE BODY pkg_order AS\n  new line;\nEND;\n"
+        conn = FakeConn(base_script(db_source=db_now))
+        ns = apply_ns(td)
+        ns.command, ns.action, ns.id, ns.file = "journal", "restore", eid, f"journal:{eid}"
+        ns.confirm = pythia.apply_token(
+            "PACKAGE BODY", "PKG_ORDER",
+            pythia.read_journal_entry(td, eid)["restore"], db_now)
+        expect_exit(lambda: pythia.run_restore(conn, "APP", ns),
+                    "no developer approval")
+        assert wrote_ddl(conn) == []
+
+
+def test_apply_json_reports_the_grant_refusal_shape():
+    """--json callers must be able to tell 'needs approval' from 'stale
+    token' without scraping prose."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        conn = FakeConn(base_script())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            expect_exit(lambda: pythia.run_apply(
+                conn, "APP", apply_ns(td, file="f.sql", confirm=tok, json=True),
+                NEW_FILE), "no developer approval")
+        assert wrote_ddl(conn) == []
+
+
+def approve_ns(root, token, **kw):
+    import argparse
+    ns = argparse.Namespace(token=token, json=False, project_root=root,
+                            command="approve", conn=None, conn_name=None,
+                            limit=200, max_lines=2000, offset=0, raw=False,
+                            color=False)
+    for k, v in kw.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def test_approve_is_refused_without_a_real_console():
+    """approve is the human's act. A headless agent must not be able to mint
+    its own approval — and PYTHIA_CI does not open this door, because CI
+    already has --yes."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td, _NoTTY():
+        pythia.write_journal_entry(td, "PACKAGE BODY", "PKG_ORDER", OLD_SRC,
+                                   NEW_FILE, {"token": "7f3a91",
+                                              "connection": "DEV",
+                                              "applied": False})
+        with contextlib.redirect_stdout(io.StringIO()):
+            expect_exit(lambda: pythia.cmd_approve(None, None,
+                                                   approve_ns(td, "7f3a91")),
+                        "developer's command", "real console")
+        assert not pythia.grants_root(td).exists()      # nothing was minted
+    # PYTHIA_CI is set for the suite; it must not be a way in either
+    with tempfile.TemporaryDirectory() as td:
+        old_stdin, sys.stdin = sys.stdin, io.StringIO()
+        try:
+            pythia.write_journal_entry(td, "PACKAGE BODY", "PKG_ORDER", OLD_SRC,
+                                       NEW_FILE, {"token": "7f3a91",
+                                                  "connection": "DEV",
+                                                  "applied": False})
+            with contextlib.redirect_stdout(io.StringIO()):
+                expect_exit(lambda: pythia.cmd_approve(
+                    None, None, approve_ns(td, "7f3a91")), "real console")
+        finally:
+            sys.stdin = old_stdin
+        assert not pythia.grants_root(td).exists()
+
+
+def test_approve_refuses_a_token_no_preview_carries():
+    """Blind-approving a bare hash is forbidden: a human approves a thing,
+    not a string."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        with contextlib.redirect_stdout(io.StringIO()):
+            expect_exit(lambda: pythia.cmd_approve(
+                None, None, approve_ns(td, "abc123", console=True)),
+                "no pending preview", "apply")
+        assert not pythia.grants_root(td).exists()
+
+
+def test_approve_shows_the_object_and_mints_the_grant():
+    """What the human sees comes from the journal entry the preview wrote —
+    object, schema, impact, connection — not from a recomputation."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(
+            td, "PACKAGE BODY", "PKG_ORDER", OLD_SRC, NEW_FILE,
+            {"token": "7f3a91", "connection": "DEV", "schema": "APP",
+             "group": "plsql_source", "applied": False,
+             "summary": "12 dependent objects, 11 currently VALID"})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, "7f3a91", console=True))
+        out = buf.getvalue()
+        assert "PKG_ORDER" in out and "PACKAGE BODY" in out
+        assert "APP" in out and "DEV" in out
+        assert "12 dependent objects" in out
+        assert "single use" in out.lower()
+        assert "--confirm 7f3a91" in out          # the line the agent runs
+        g = pythia.read_grant(td, "7f3a91")
+        assert g and g["conn"] == "DEV" and g["used_at"] is None
+
+
+def test_approve_binds_to_the_previews_connection_not_a_flag():
+    """A mistyped --conn must not bind an approval to a database the preview
+    never ran on: the connection is copied from the journal entry."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(td, "PROCEDURE", "P_X", "old", "new",
+                                   {"token": "bb2222", "connection": "DEV",
+                                    "schema": "APP", "applied": False})
+        with contextlib.redirect_stdout(io.StringIO()):
+            pythia.cmd_approve(None, None,
+                               approve_ns(td, "bb2222", console=True,
+                                          conn="STAGING", conn_name="STAGING"))
+        assert pythia.read_grant(td, "bb2222")["conn"] == "DEV"
+
+
+def test_approve_of_an_unsnapshotable_group_says_so():
+    """Non-plsql_source confirm-mode groups have no object identity and no
+    snapshot. Approve shows the statement and the honest warning instead of
+    pretending there is an undo."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(
+            td, "DATA_DML", "STATEMENT", "", "delete from t_order where id = 7",
+            {"token": "cc3333", "connection": "DEV", "schema": "APP",
+             "group": "data_dml", "applied": False})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, "cc3333", console=True))
+        out = buf.getvalue().lower()
+        assert "delete from t_order" in out
+        assert "no snapshot" in out
+
+
+def test_approve_json_shape():
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(td, "PROCEDURE", "P_X", "old", "new",
+                                   {"token": "dd4444", "connection": "DEV",
+                                    "schema": "APP", "applied": False})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, "dd4444",
+                                                      console=True, json=True))
+        d = json.loads(buf.getvalue())
+        assert d["ok"] is True and d["token"] == "dd4444"
+        assert d["conn"] == "DEV" and d["object"] == "P_X"
+        assert d["expires_at"] and d["ttl_minutes"] == pythia.GRANT_TTL_MINUTES
+
+
+def test_approve_prunes_expired_grants_on_the_way_past():
+    import contextlib
+    import datetime
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.mint_grant(td, "old111", "DEV",
+                          now=datetime.datetime.now() - datetime.timedelta(hours=2))
+        pythia.write_journal_entry(td, "PROCEDURE", "P_X", "old", "new",
+                                   {"token": "ee5555", "connection": "DEV",
+                                    "schema": "APP", "applied": False})
+        with contextlib.redirect_stdout(io.StringIO()):
+            pythia.cmd_approve(None, None, approve_ns(td, "ee5555", console=True))
+        assert pythia.read_grant(td, "old111") is None
+        assert pythia.read_grant(td, "ee5555") is not None
+
+
+def test_approve_refuses_a_preview_that_was_already_applied():
+    """A spent preview's token can never match a future apply, so minting a
+    grant for it would only hand back a refusal one step later."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(td, "PROCEDURE", "P_X", "old", "new",
+                                   {"token": "ff6666", "connection": "DEV",
+                                    "schema": "APP", "applied": True})
+        with contextlib.redirect_stdout(io.StringIO()):
+            expect_exit(lambda: pythia.cmd_approve(
+                None, None, approve_ns(td, "ff6666", console=True)),
+                "already applied")
+        assert pythia.read_grant(td, "ff6666") is None
+
+
+def test_approve_needs_no_database():
+    """approve is a filesystem act — it must work in a developer's terminal
+    that has no connection configured at all."""
+    assert "approve" in pythia.NO_DB_COMMANDS
+    assert "approve" in pythia.COMMANDS
 
 
 def main():

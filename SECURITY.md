@@ -36,6 +36,7 @@ at the role tier; your site's security model belongs to your DBA.
 | Oracle grants | anything outside the granted schema | nothing in this tool |
 | Policy (`.pythia/policy.json`) | whole statement classes; DML, DDL and grants are `deny` by default | editing the file, deliberately |
 | Confirmation token | applying content that differs from what was previewed | not applying at all |
+| Approval grant | an agent completing a write no human approved | fabricating the grant file or faking a console, deliberately — the `policy.json` tier |
 | TTY requirement | a headless agent self-approving `--yes` or loosening policy | `PYTHIA_CI=1`, deliberately, in a real pipeline |
 | Snapshot + journal | losing the previous version of PL/SQL source | nothing — it runs before every write and no flag disables it |
 
@@ -43,6 +44,15 @@ Honest limits: a snapshot restores **source**. It does not restore rows, a
 dropped column, or a revoked grant. The rollback table in the README and in
 `pythia-apply` says which group is genuinely reversible, and the tool refuses
 the groups that are not rather than implying otherwise.
+
+The approval grant has its own honest limit: it assumes a developer with a
+terminal on the machine holding the repo. A purely remote developer — the
+agent on a server, the human only in chat — has no clean path today. That is
+a known gap, stated rather than papered over; closing it needs an approval
+channel that travels over the agent's own protocol, which is designed but not
+yet shipped. And what the grant raises is the *bar*, not a wall: it turns a
+write an agent could complete on its own authority into one that takes
+deliberate forgery, which is the same tier as editing `policy.json`.
 
 ## Credentials
 

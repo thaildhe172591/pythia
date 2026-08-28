@@ -67,7 +67,8 @@ is the missing input, and forbids it to guess past them:
 
 - **Before any write**: the full preview — diff, dependents, warnings — is
   relayed verbatim, and the agent waits for a real yes. A compliment is not a
-  yes. Silence is not a yes.
+  yes. Silence is not a yes. And the wait is no longer a matter of obedience:
+  the write cannot complete until the developer mints the approval themselves.
 - **When the blast radius is large**: ten or more dependents, or anything
   cross-schema, goes to the developer *before code is written*, not after.
 - **When sources of truth disagree**: a standards document says one thing,
@@ -82,12 +83,15 @@ is the missing input, and forbids it to guess past them:
 ### 3 · Do — act inside a pipeline that cannot lie
 
 Only after Learn and Ask does anything touch the database, and then only
-through one door: **snapshot → impact → preview → token → apply → verify →
-report**. DDL self-commits in Oracle, so the snapshot is the only real undo —
-it runs first and no flag disables it. A content-bound token guarantees what
-lands is byte-for-byte what was approved. And the CLI enforces the gates
-itself: a headless agent cannot `--yes` its own writes or loosen policy —
-that takes a human at a real terminal.
+through one door: **snapshot → impact → preview → token → approve → apply →
+verify → report**. DDL self-commits in Oracle, so the snapshot is the only real
+undo — it runs first and no flag disables it. A content-bound token guarantees
+what lands is byte-for-byte what was previewed, and a **developer-minted grant**
+guarantees a person approved it at all: `pythia approve` runs only at a human's
+own console, and without its one-time grant `apply --confirm` refuses. The
+agent's command line is unchanged; what changed is that it now stops until
+someone acts. A headless agent cannot `--yes` its own writes, cannot approve
+them, and cannot loosen policy — each of those takes a human at a real terminal.
 
 The same discipline holds when the *developer* does the work: `src` and
 `impact` silently snapshot what they read, so even a change made by hand in
@@ -148,7 +152,7 @@ and WSL are all CI-tested.
 | `args` signatures | `invalid` everything broken | `unistr` exact non-ASCII literals |
 | `ddl` via DBMS_METADATA | `plscope` exact identifier usages | `agent-user` least-privilege setup |
 | `cols` columns + types | `similar` programs named like this | `history` every captured version |
-| `grep` search all source | | |
+| `grep` search all source | | `approve` the developer's one-time grant |
 | `sql` free query (SELECT/WITH only) | | |
 
 Every command takes `--json` (machine output), `--conn` (pick a connection), and
