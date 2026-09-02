@@ -115,6 +115,37 @@ def probe_sql_write_refused():
     return r.returncode != 0 and "read-only" in (r.stdout + r.stderr).lower()
 
 
+def probe_chat_approval_refuses_a_paraphrase():
+    """0.10.0: the hook mints only from the developer's own Approve on a
+    question carrying pythia's card verbatim — a paraphrase mints nothing."""
+    import io
+    import contextlib
+    with tempfile.TemporaryDirectory() as d:
+        pythia.write_journal_entry(d, "PROCEDURE", "P", "old", "new",
+                                   {"token": "ab12cd", "connection": "DEV",
+                                    "schema": "APP", "group": "plsql_source",
+                                    "applied": False})
+        _, _, body = pythia.approval_card(d, "ab12cd")
+        def ask(question, answer):
+            q = {"question": question, "header": "pythia", "options": []}
+            payload = {"tool_name": "AskUserQuestion", "session_id": "s",
+                       "tool_input": {"questions": [q]},
+                       "tool_response": {"questions": [q],
+                                         "answers": {question: answer}}}
+            old = sys.stdin
+            sys.stdin = io.StringIO(json.dumps(payload))
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    pythia.hook_approve(argparse.Namespace(project_root=d))
+            finally:
+                sys.stdin = old
+            return pythia.read_grant(d, "ab12cd")
+        card = "pythia approve ab12cd\n" + "\n".join(body)
+        return (ask("pythia approve ab12cd — a tiny safe change", "Approve") is None
+                and ask(card, "Reject") is None
+                and (ask(card, "Approve") or {}).get("approver") == "chat")
+
+
 # each probe is one documented guarantee from README/SECURITY, checked directly —
 # a suite refactor can never silently drop one of these from coverage
 PROBES = {
@@ -142,6 +173,7 @@ PROBES = {
     "headless_yes_refused": probe_headless_yes,
     "headless_policy_loosen_refused": probe_headless_policy_loosen,
     "sql_write_refused_end_to_end": probe_sql_write_refused,
+    "chat_approval_needs_the_card_and_a_real_approve": probe_chat_approval_refuses_a_paraphrase,
 }
 
 

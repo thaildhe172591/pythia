@@ -1128,9 +1128,10 @@ def test_preview_prints_both_follow_up_lines():
             pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql"), NEW_FILE)
         out = buf.getvalue()
         tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
-        assert f"approve {tok}" in out
+        assert f"approve --card {tok}" in out      # the chat door
+        assert f"approve {tok}" in out             # the console door
         assert f"apply f.sql --confirm {tok}" in out
-        assert "your own terminal" in out
+        assert "in chat" in out and "terminal" in out
 
 
 def test_journal_restore_needs_a_grant_too():
@@ -1336,6 +1337,123 @@ def test_approve_needs_no_database():
     that has no connection configured at all."""
     assert "approve" in pythia.NO_DB_COMMANDS
     assert "approve" in pythia.COMMANDS
+
+
+# --- the chat door: approve --card / approve --hook ---------------------------
+
+def _hook_payload(question, answer, tool="AskUserQuestion", session="sess-1"):
+    q = {"question": question, "header": "pythia", "multiSelect": False,
+         "options": [{"label": "Approve", "description": "mint"},
+                     {"label": "Reject", "description": "stop"}]}
+    return {"hook_event_name": "PostToolUse", "session_id": session,
+            "tool_name": tool, "tool_input": {"questions": [q]},
+            "tool_response": {"questions": [q], "answers": {question: answer}}}
+
+
+def _run_hook(td, payload):
+    """A headless agent session with the hook payload on stdin — exactly how
+    Claude Code invokes it. Returns stdout."""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with _NoTTY():
+        sys.stdin = io.StringIO(json.dumps(payload) if not isinstance(payload, str)
+                                else payload)
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, [], hook=True))
+    return buf.getvalue()
+
+
+def _pending_preview(td, token="7f3a91"):
+    pythia.write_journal_entry(
+        td, "PACKAGE BODY", "PKG_ORDER", OLD_SRC, NEW_FILE,
+        {"token": token, "connection": "DEV", "schema": "APP",
+         "group": "plsql_source", "applied": False,
+         "summary": "12 dependent objects, 11 currently VALID"})
+    _, _, body = pythia.approval_card(td, token)
+    return f"pythia approve {token}\n" + "\n".join(body)
+
+
+def test_hook_mints_the_grant_the_developer_approved_in_chat():
+    """The developer answered Approve to a question carrying pythia's own
+    card: that is the console act, through the other door. The grant says
+    which door, and which session."""
+    with tempfile.TemporaryDirectory() as td:
+        card = _pending_preview(td)
+        out = _run_hook(td, _hook_payload("  Please approve:\n" + card, "Approve"))
+        g = pythia.read_grant(td, "7f3a91")
+        assert g and g["approver"] == "chat" and g["session"] == "sess-1"
+        assert g["conn"] == "DEV" and g["used_at"] is None
+        ctx = json.loads(out)["hookSpecificOutput"]
+        assert ctx["hookEventName"] == "PostToolUse"
+        assert "--confirm 7f3a91" in ctx["additionalContext"]
+
+
+def test_hook_refuses_a_question_that_is_not_pythias_card():
+    """An agent's paraphrase is not a preview. If the question did not carry
+    the card verbatim, the human approved the agent's words — no grant, and
+    the agent is told to ask again with the card."""
+    with tempfile.TemporaryDirectory() as td:
+        _pending_preview(td)
+        out = _run_hook(td, _hook_payload(
+            "pythia approve 7f3a91\nJust a tiny, totally safe change.", "Approve"))
+        assert pythia.read_grant(td, "7f3a91") is None
+        assert "approve --card 7f3a91" in json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_hook_mints_nothing_on_reject_other_tools_or_garbage():
+    with tempfile.TemporaryDirectory() as td:
+        card = _pending_preview(td)
+        out = _run_hook(td, _hook_payload(card, "Reject"))
+        assert pythia.read_grant(td, "7f3a91") is None
+        assert "did not approve" in out.lower()
+        assert _run_hook(td, _hook_payload(card, "Approve", tool="Bash")) == ""
+        assert _run_hook(td, "not json at all") == ""
+        assert _run_hook(td, _hook_payload("no token here", "Approve")) == ""
+        assert not pythia.grants_root(td).exists()
+        # a token no preview carries cannot be approved blind, in chat either
+        out = _run_hook(td, _hook_payload("pythia approve abc123", "Approve"))
+        assert "no pending preview" in out.lower()
+        assert pythia.read_grant(td, "abc123") is None
+
+
+def test_approve_card_needs_no_console_and_mints_nothing():
+    """--card is the agent's half: it prints what to ask with. Headless is
+    fine, and nothing is minted by printing."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td, _NoTTY():
+        _pending_preview(td)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, ["7f3a91"], card=True))
+        out = buf.getvalue()
+        assert "approve 7f3a91" in out and "PKG_ORDER" in out
+        assert "12 dependent objects" in out and "DEV" in out
+        assert "\x1b[" not in out                       # plain text: it goes into a question
+        assert not pythia.grants_root(td).exists()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_approve(None, None, approve_ns(td, ["7f3a91"], card=True,
+                                                      json=True))
+        d = json.loads(buf.getvalue())
+        assert d["minted"] is False and d["question"]["header"] == "pythia"
+        assert [o["label"] for o in d["question"]["options"]] == ["Approve", "Reject"]
+        assert d["card"] in d["question"]["question"]
+
+
+def test_approve_several_tokens_in_one_console_act():
+    """Four previews, one approve line — not four."""
+    import contextlib
+    import io
+    with tempfile.TemporaryDirectory() as td:
+        _pending_preview(td, "aa1111")
+        _pending_preview(td, "bb2222")
+        with contextlib.redirect_stdout(io.StringIO()):
+            pythia.cmd_approve(None, None,
+                               approve_ns(td, ["aa1111", "bb2222"], console=True))
+        assert pythia.read_grant(td, "aa1111")["approver"] == "console"
+        assert pythia.read_grant(td, "bb2222")["approver"] == "console"
 
 
 def main():

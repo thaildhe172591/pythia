@@ -294,16 +294,28 @@ trước khi ghi là cách hoàn tác thật duy nhất.
 
 ```bash
 pythia apply PKG_ORDER_BODY.sql            # preview: diff + impact + cảnh báo + token
-pythia approve a1b2c3                      # DEVELOPER, ở terminal của chính mình
+pythia approve --card a1b2c3               # agent: lấy thẻ để hỏi (không cấp gì cả)
+#   -> AskUserQuestion, lựa chọn Approve / Reject; DEVELOPER trả lời ngay trong chat
+pythia approve a1b2c3                      # hoặc: DEVELOPER, ở terminal của chính mình
 pythia apply PKG_ORDER_BODY.sql --confirm a1b2c3   # ghi đúng nội dung đã preview
 ```
 
 Các bước, không tắt được: **snapshot → impact → preview → approve → apply →
 verify → report**.
 
-**Hai bước, hai người.** Preview kết thúc bằng cả hai dòng: dòng `approve`
-của dev và dòng `apply --confirm` của agent. Agent chuyển cả hai rồi dừng.
-`approve` cấp một grant dùng-một-lần; thiếu nó thì confirm bị từ chối:
+**Hai bước, hai người.** Preview kết thúc bằng dòng `apply --confirm` của
+agent và hai cửa của dev. Cửa nào cũng cấp cùng một grant dùng-một-lần;
+thiếu nó thì confirm bị từ chối:
+
+- **Trong chat** (từ 0.10.0): agent chạy `pythia approve --card <token>` rồi
+  hỏi bằng `AskUserQuestion` với nội dung đúng nguyên văn thẻ đó, lựa chọn
+  `Approve` / `Reject`. Claude Code ghi câu trả lời vào payload của hook
+  `PostToolUse`; `pythia approve --hook` đọc payload và chỉ cấp grant khi câu
+  trả lời là `Approve` *và* câu hỏi mang đúng thẻ của pythia — agent diễn
+  giải lại thì không cấp gì, nên dev luôn duyệt lời của pythia chứ không
+  phải lời của agent. Hook có sẵn trong plugin và trong settings mẫu (§11);
+  không có hook thì trả lời trong chat không cấp gì.
+- **Ở console**: `pythia approve <token>` (nhiều token một lần cũng được):
 
 ```
 $ pythia approve a1b2c3
@@ -455,7 +467,8 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | Skill không hiện | pack chỉ nằm ở `.agents/skills` project mà Claude Code bản đó không đọc → `pythia install -g` |
 | `check` cảnh báo vàng | đọc §3 — proxy chưa dùng, hoặc owner thừa quyền |
 | Token bị từ chối khi `--confirm` | file/DB đổi sau preview — preview lại là đúng thiết kế |
-| `no developer approval is on file` | dev chưa chạy `pythia approve <token>`; chuyển dòng lệnh rồi chờ — thử lại không tạo ra sự phê duyệt |
+| `no developer approval is on file` | chưa ai trả lời `Approve` cho thẻ (hoặc chưa cài hook), và `pythia approve <token>` cũng chưa chạy; hỏi bằng thẻ, hoặc chuyển dòng lệnh — thử lại không tạo ra sự phê duyệt |
+| `did not carry pythia's approval card verbatim` | agent diễn giải lại thẻ trong câu hỏi; hook từ chối cấp — hỏi lại với đúng nội dung `approve --card` |
 | `That approval expired` / `already used` | grant dùng một lần, sống 15 phút — preview lại và duyệt token mới |
 | `approval was given on connection X` | đã duyệt trên database khác — duyệt trên đúng connection phiên này nhắm tới |
 | `approve ... needs a real console` | agent định tự cấp phép cho mình; đó là cổng đang làm đúng việc |

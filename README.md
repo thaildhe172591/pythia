@@ -87,11 +87,14 @@ through one door: **snapshot → impact → preview → token → approve → ap
 verify → report**. DDL self-commits in Oracle, so the snapshot is the only real
 undo — it runs first and no flag disables it. A content-bound token guarantees
 what lands is byte-for-byte what was previewed, and a **developer-minted grant**
-guarantees a person approved it at all: `pythia approve` runs only at a human's
-own console, and without its one-time grant `apply --confirm` refuses. The
-agent's command line is unchanged; what changed is that it now stops until
-someone acts. A headless agent cannot `--yes` its own writes, cannot approve
-them, and cannot loosen policy — each of those takes a human at a real terminal.
+guarantees a person approved it at all — through one of two doors, both the
+developer's. In chat: the agent asks with `AskUserQuestion`, the question text
+being pythia's own approval card (`pythia approve --card <token>`), and the
+answer **Approve** — written into the hook payload by Claude Code, never by
+the agent — mints the one-time grant. At a console: `pythia approve <token>`.
+Without that grant `apply --confirm` refuses. A headless agent cannot `--yes`
+its own writes, cannot mint approval, and cannot loosen policy — each of those
+takes a human, answering or typing.
 
 The same discipline holds when the *developer* does the work: `src` and
 `impact` silently snapshot what they read, so even a change made by hand in

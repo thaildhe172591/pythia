@@ -26,15 +26,13 @@ Three moves are FORBIDDEN for agents, and the CLI enforces all three (no
 terminal attached → refusal):
 
 - `--yes` — it is the developer's flag, never yours.
-- `pythia approve <token>` — the developer's command, run at their own
-  terminal. It mints the one-time grant `--confirm` requires, and an agent
-  cannot run it. Relay the line; never run it yourself.
+- Minting the approval. `pythia approve <token>` is the developer's console
+  command; an agent cannot run it. Your door is to ASK (step 3): the pythia
+  hook mints the grant only from the developer's own answer to your question.
 - `pythia policy set <group>` to anything LOOSER — loosening policy is the
   developer's decision; hand them the exact command to run themselves.
 
-One move is yours but never in the same turn as the preview: `--confirm`. The
-preview ends your turn; the token is used only after approval arrives as a NEW
-message.
+One move is yours: `--confirm` — only after `Approve`, or a console approve.
 
 ## When the change will NOT go through apply
 
@@ -55,16 +53,17 @@ confirms a number you already knew.
 2. **Relay the preview — verbatim.** The diff, the `impact:` line, every `!`
    warning, exactly as printed. The developer approves what they see, not
    your paraphrase.
-3. **Wait for an explicit yes, and for the approval to be minted.** The
-   preview prints two follow-up lines — `pythia approve <token>` for the
-   developer, `apply --confirm` for you. Relay both. A yes is an instruction
-   to proceed with THIS preview: "yes, apply it", "go ahead". Not a yes: a
-   compliment, a question, silence, or approval given for an earlier preview.
-   If the developer changes the file instead, start over at step 1.
+3. **Ask for approval — one question per token.** `pythia approve --card
+   <token>` prints the card; ask an `AskUserQuestion` whose text is that card
+   verbatim (header `pythia`; options exactly `Approve` / `Reject`, no
+   "(Recommended)"; up to four tokens per call). `Approve` mints the grant via
+   the hook. Anything else — `Reject`, free text, silence, an earlier preview's
+   yes — is not approval: stop and ask what should change. File changed → step 1.
+   No hook installed? Relay `pythia approve <token>` for their own terminal.
 4. **Apply** by running the exact `then the agent:` line pythia printed. Two
    refusals are normal here, and neither is a malfunction:
-   - *"no developer approval is on file"* — they have not run `approve` yet.
-     Say so and wait; retrying does not create approval.
+   - *"no developer approval is on file"* — the answer was not `Approve`, or
+     the hook is not installed. Say so and wait; retrying does not create it.
    - *"the confirmation token does not match"* — the file or the database
      changed since the preview. Go back to step 1, never "retry". If the fresh
      preview's before-side differs from what you last saw, say so: someone may
@@ -85,8 +84,8 @@ confirms a number you already knew.
 ## Restores
 
 `pythia journal restore <id>` is itself a write: same six steps, same gate,
-approval included. Preview the reverse diff, relay both follow-up lines, wait
-for their approve, then confirm. Restoring an object that did not exist before
+approval included. Preview the reverse diff, ask with the card the same way,
+then confirm. Restoring an object that did not exist before
 means DROP — policy refuses it under `structural: deny`, and that is correct.
 
 ## Batch mode
@@ -135,7 +134,8 @@ affected count and up to ten rows, and `--confirm` refuses if that set moved.
 | "apply refused it; run-sql will take it" | The refusal is the product working. Relay it. |
 | "I'll restore quietly to clean up my mistake" | Restores are writes. Same gate, same visibility. |
 | "`$?` said 0 after I piped to tail" | That was tail's 0. Read pythia's own words, or its unpiped code. |
-| "I'll run approve myself to unblock this" | The developer's console act. It refuses you, and routing around it is what this gate exists to stop. |
+| "I'll run approve myself to unblock this" | The developer's act. Console approve refuses you; the hook mints only from *their* answer. Routing around it is what this gate exists to stop. |
+| "I'll summarise the card so the question reads nicer" | The hook refuses a paraphrase — the developer must approve pythia's words, not yours. Paste the card verbatim. |
 
 ## When NOT to use this skill
 

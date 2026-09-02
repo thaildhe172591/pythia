@@ -24,7 +24,13 @@
       "Bash(pythia journal list *)",
       "Bash(pythia journal show *)",
       "Bash(pythia journal diff *)",
-      "Bash(pythia journal export *)"
+      "Bash(pythia journal export *)",
+      "Bash(pythia approve --card *)"
+    ],
+    "//deny": "approve --hook is the chat approval door and is meant to be run by the PostToolUse hook below, on a payload Claude Code wrote. An agent piping a hand-made payload into it from Bash would be forging an approval; deny that shape outright so the attempt is refused, not just visible.",
+    "deny": [
+      "Bash(pythia approve --hook*)",
+      "Bash(python -m pythia approve --hook*)"
     ]
   },
   "//autoMode": "ADVISORY, not enforcement: these lines are fed to the auto-mode classifier as guidance, so they shift the odds rather than decide. Do not read them as a guarantee that a write will pause. The guarantees live elsewhere - since 0.8.0, in the approval grant (`pythia apply --confirm` refuses until the developer runs `pythia approve <token>` at their own console), in the confirm token, in the policy file, and above all in the agent's Oracle grants. These lines are now belt over braces rather than the only pause. soft_deny means 'pause unless the developer's own words clear it', which is exactly right here: you saying 'apply it' should clear the pause; the agent deciding alone should not.",
@@ -38,11 +44,11 @@
       "$defaults",
       "`pythia apply <file> --confirm <token>` writes to the Oracle database, and DDL self-commits there - no transaction can roll it back. Pause for the developer, even though pythia already required a preview.",
       "`pythia journal restore <id> --confirm <token>` is also a write. Pause the same way.",
-      "`pythia approve <token>` is the developer's own command and is deliberately absent from the allow list: it must keep prompting. It refuses outright without a real console, so an agent cannot run it anyway - but a prompt here makes the attempt visible.",
+      "`pythia approve <token>` is the developer's own command and is deliberately absent from the allow list: it must keep prompting. It refuses outright without a real console, so an agent cannot run it anyway - but a prompt here makes the attempt visible. (`approve --card` is allowed: it prints what the agent asks with and mints nothing.)",
       "`pythia policy set <group> <value>` changes which kinds of write are allowed at all. Pause; loosening it is the developer's decision, never the agent's."
     ]
   },
-  "//hooks": "DETERMINISTIC skill routing. Skill descriptions are advisory - the agent decides whether to open one, which is why some sessions ask the right questions and some silently build. This hook injects the one-page harness at every session start, so routing stops depending on the agent's mood: build requests go through pythia-spec, writes through apply, no slash commands ever needed. Costs ~15 lines of context once per session.",
+  "//hooks": "Two DETERMINISTIC hooks. SessionStart injects the one-page harness so skill routing stops depending on the agent's mood (build requests go through pythia-spec, writes through apply, no slash commands needed; ~15 lines of context once per session). PostToolUse on AskUserQuestion is the chat approval door, since 0.10.0: when you answer Approve to the agent's question carrying `pythia approve --card <token>`, the hook mints the same one-time grant the console command mints - the answer in the payload was written by Claude Code, not the agent, and the hook refuses unless the question carried pythia's own card verbatim. Without this hook, approving in chat mints nothing and the console command remains the only door.",
   "hooks": {
     "SessionStart": [
       {
@@ -50,6 +56,18 @@
           {
             "type": "command",
             "command": "python -m pythia guide --brief"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m pythia approve --hook",
+            "timeout": 15
           }
         ]
       }

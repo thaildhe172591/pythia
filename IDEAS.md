@@ -29,8 +29,11 @@ write them down here, do not implement them on impulse.
 
   - **MCP elicitation as approver #2.** The client renders the approval
     dialog and mints the same grant file; a click instead of a paste, and
-    `apply` never learns the difference. Closes the remote-developer gap
-    SECURITY.md now admits.
+    `apply` never learns the difference. *Shipped for Claude Code in 0.10.0*
+    as `AskUserQuestion` + a `PostToolUse` hook (`approve --card` /
+    `approve --hook`). Still open for other clients: an MCP elicitation
+    would mint the same grant the same way, once a write-free MCP surface
+    exists to carry it.
   - **Runbook on deny.** A refusal that hands over the exact statement, its
     rollback note, and a copy-paste runbook, instead of stopping at "no".
     `DROP TABLE` → the statement without `PURGE`, plus

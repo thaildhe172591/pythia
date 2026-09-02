@@ -382,8 +382,11 @@ HEADLESS_YES_MSG = (
 
 APPROVE_HEADLESS_MSG = (
     "approve is the developer's command — it needs a real console.\n"
-    "Agents relay the preview and wait; a person runs approve in their own "
-    "terminal.\n(Real pipelines apply with --yes and PYTHIA_CI=1 instead.)")
+    "Agents ask instead: AskUserQuestion with the text of `approve --card "
+    "<token>` and the options Approve / Reject — the pythia hook mints the "
+    "grant when the developer answers Approve. Or a person runs approve in "
+    "their own terminal.\n(Real pipelines apply with --yes and PYTHIA_CI=1 "
+    "instead.)")
 
 
 def grant_refusal(status, token, grant, conn_name, file_hint):
@@ -393,7 +396,10 @@ def grant_refusal(status, token, grant, conn_name, file_hint):
     preview_line = f"  {invocation()} apply {file_hint}"
     if status == "missing":
         return ("The confirmation token matches, but no developer approval is "
-                "on file.\nAsk the developer to run, in their own terminal "
+                "on file.\nAsk in chat — AskUserQuestion carrying the text of\n"
+                f"  {invocation()} approve --card {token}\nwith the options "
+                "Approve / Reject (the pythia hook mints the grant on Approve) "
+                "— or ask the developer to run, in their own terminal "
                 f"(agents cannot run it):\n{approve_line}\n"
                 "Then re-run this command.")
     if status == "expired":
@@ -1129,11 +1135,14 @@ def grant_path(root, token):
     return grants_root(root) / f"{token}.json"
 
 
-def mint_grant(root, token, conn_name, now=None, revalidate=None):
+def mint_grant(root, token, conn_name, now=None, revalidate=None,
+               approver="console", session=None):
     """Record one developer approval. Single use, short-lived, bound to the
     connection the preview ran on. `revalidate` is the row-set fingerprint the
     human was shown — audit data, not a second gate: the enforcement is the
-    token, which already hashes that same fingerprint."""
+    token, which already hashes that same fingerprint. `approver` says which
+    door the human came through — console or chat — and `session` is the
+    chat session's id; both are audit data too."""
     import datetime
     now = now or datetime.datetime.now()
     rec = {"token": token,
@@ -1142,7 +1151,9 @@ def mint_grant(root, token, conn_name, now=None, revalidate=None):
            "expires_at": (now + datetime.timedelta(
                minutes=GRANT_TTL_MINUTES)).isoformat(timespec="seconds"),
            "used_at": None,
-           "revalidate": revalidate or None}
+           "revalidate": revalidate or None,
+           "approver": approver,
+           "session": session or None}
     d = grants_root(root)
     d.mkdir(parents=True, exist_ok=True)
     grant_path(root, token).write_text(json.dumps(rec, indent=2) + "\n",
@@ -2111,10 +2122,12 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         f"{journal_root(ns.project_root) / entry / 'restore.sql'}",
                         "dim", en))
         if not confirmed:
-            print("\n  To apply — two steps, two people:")
-            print("    developer, in your own terminal:   "
+            print("\n  To apply — the developer approves, then the agent confirms:")
+            print("    in chat:            the agent asks (AskUserQuestion) with the text of "
+                  + paint(f"{invocation()} approve --card {token}", "cyan", en))
+            print("    or in a terminal:   "
                   + paint(f"{invocation()} approve {token}", "cyan", en))
-            print("    then the agent:                    "
+            print("    then the agent:     "
                   + paint(f"{invocation()} apply {ns.file} --confirm {token}",
                           "cyan", en))
     if not confirmed:
@@ -2274,14 +2287,13 @@ def token_mismatch_message(ns, row_set):
             f"  {invocation()} apply {ns.file}")
 
 
-def cmd_approve(conn, schema, ns):
-    """The developer's half of the gate: one human act, at a real console,
-    that lets the agent's next `apply --confirm` through. Touches no
-    database — a terminal with no connection configured can still approve."""
-    token = str(ns.token).strip().lower()
-    if not console_session(ns):
-        sys.exit(APPROVE_HEADLESS_MSG)
-    entry, meta = find_preview_by_token(ns.project_root, token)
+def approval_card(root, token):
+    """What a human approves, in pythia's own words, read from the preview's
+    journal entry and never recomputed. Returns (entry, meta, lines). The same
+    text is printed at the console, asked with in chat, and checked by the
+    hook — so what is approved is what was shown, whichever door it came
+    through. Refuses a token no pending preview carries."""
+    entry, meta = find_preview_by_token(root, token)
     if not meta:
         sys.exit(f"No pending preview carries token {token!r}.\n"
                  "Approve what you have seen: run the preview first, then "
@@ -2291,49 +2303,154 @@ def cmd_approve(conn, schema, ns):
         sys.exit(f"Token {token!r} belongs to a preview that was already "
                  "applied.\nPreview again to get a fresh token:\n"
                  f"  {invocation()} apply <file>")
-    conn_name = meta.get("connection") or ""
-    prune_expired_grants(ns.project_root)
-    row_set = meta.get("row_set")
-    rec = mint_grant(ns.project_root, token, conn_name,
-                     revalidate=fingerprint_text(row_set))
-    obj, otype = meta.get("object", "?"), meta.get("type", "?")
     group = meta.get("group", "")
-    if ns.json:
-        print(json.dumps({"ok": True, "token": token, "conn": conn_name,
-                          "object": obj, "type": otype, "group": group,
-                          "rows": (row_set or {}).get("count"),
-                          "entry": entry, "minted_at": rec["minted_at"],
-                          "expires_at": rec["expires_at"],
-                          "ttl_minutes": GRANT_TTL_MINUTES}))
-        return
-    en = getattr(ns, "color", False)
-    print()
+    row_set = meta.get("row_set")
+    lines = []
     if group and group != "plsql_source":
         # no object identity, no snapshot: show the statement itself and say
         # plainly that there is no undo waiting behind it
-        stmt = read_journal_entry(ns.project_root, entry)["after"].strip()
-        print(f"  Approving a {group} statement on {meta.get('schema', '?')}:")
-        for ln in stmt.splitlines():
-            print(f"    {ln}")
+        stmt = read_journal_entry(root, entry)["after"].strip()
+        lines.append(f"Approving a {group} statement on {meta.get('schema', '?')}:")
+        lines += [f"  {ln}" for ln in stmt.splitlines()]
         if row_set:
             # the rows themselves, exactly as the preview showed them: what is
             # approved has to be what was seen
-            print()
-            for ln in render_row_set(row_set, en, indent="    "):
-                print(ln)
-        print(paint("\n  There is no snapshot for this group — after commit "
-                    "it cannot be undone from the journal.", "yellow", en))
+            lines.append("")
+            lines += render_row_set(row_set, False, indent="  ")
+        lines.append("There is no snapshot for this group — after commit it "
+                     "cannot be undone from the journal.")
     else:
-        print(f"  Approving: {paint(f'{obj} ({otype})', 'bold', en)} in "
-              f"{meta.get('schema', '?')}")
+        lines.append(f"Approving: {meta.get('object', '?')} "
+                     f"({meta.get('type', '?')}) in {meta.get('schema', '?')}")
         if meta.get("summary"):
-            print(f"  Impact: {meta['summary'].lstrip('- ')}")
-    print(f"  Previewed {entry[:19].replace('T', ' ')} on connection "
-          f"{conn_name or '?'}.")
-    print(paint(f"\n  Grant minted — single use, expires in "
-                f"{GRANT_TTL_MINUTES} minutes.", "green", en))
-    print("  The agent may now run:  "
-          + paint(f"{invocation()} apply <file> --confirm {token}", "cyan", en))
+            lines.append(f"Impact: {meta['summary'].lstrip('- ')}")
+    lines.append(f"Previewed {entry[:19].replace('T', ' ')} on connection "
+                 f"{meta.get('connection') or '?'}.")
+    return entry, meta, lines
+
+
+def squash(text):
+    """Whitespace-insensitive form, for 'did the question carry the card'."""
+    return " ".join(str(text).split()).lower()
+
+
+TOKEN_IN_QUESTION = re.compile(r"approve\s+(?:--card\s+)?([0-9a-f]{6,})\b", re.I)
+
+
+def hook_approve(ns):
+    """The chat door. Claude Code runs this as a PostToolUse hook on
+    AskUserQuestion, with the payload on stdin; the developer's answer in it
+    was filled in by the client, not the agent. A grant is minted only when
+    the answer is exactly Approve AND the question carried pythia's own card
+    for that token — otherwise the human approved the agent's words, not the
+    preview, and that is no approval. Everything else is silence: a hook that
+    talks on every question is noise."""
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        return
+    if not isinstance(payload, dict) or payload.get("tool_name") != "AskUserQuestion":
+        return
+    resp = payload.get("tool_response")
+    answers = (resp.get("answers") if isinstance(resp, dict) else None) \
+        or (payload.get("tool_input") or {}).get("answers") or {}
+    notes = []
+    for question, answer in answers.items():
+        m = TOKEN_IN_QUESTION.search(str(question))
+        if not m:
+            continue
+        token = m.group(1).lower()
+        if squash(answer) != "approve":
+            notes.append(f"{token}: the developer did NOT approve (answered "
+                         f"{str(answer)!r}). No grant minted — do not apply; "
+                         "ask what should change.")
+            continue
+        try:
+            _, meta, body = approval_card(ns.project_root, token)
+        except SystemExit as e:
+            notes.append(f"{token}: {e}")
+            continue
+        if squash("\n".join(body)) not in squash(question):
+            notes.append(f"{token}: the question did not carry pythia's approval "
+                         "card verbatim, so the developer approved your words, "
+                         "not the preview. No grant minted. Run "
+                         f"`{invocation()} approve --card {token}` and ask "
+                         "again with exactly that text.")
+            continue
+        prune_expired_grants(ns.project_root)
+        mint_grant(ns.project_root, token, meta.get("connection") or "",
+                   revalidate=fingerprint_text(meta.get("row_set")),
+                   approver="chat", session=payload.get("session_id"))
+        notes.append(f"{token}: approved in chat — grant minted, single use, "
+                     f"expires in {GRANT_TTL_MINUTES} minutes. Run: "
+                     f"{invocation()} apply <file> --confirm {token}")
+    if notes:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": "pythia: " + "\n".join(notes)}}))
+
+
+def cmd_approve(conn, schema, ns):
+    """The developer's half of the gate: one human act that lets the agent's
+    next `apply --confirm` through — at a real console, or in chat via the
+    hook (--hook). --card prints what the agent asks with and mints nothing.
+    Touches no database — a terminal with no connection configured can still
+    approve."""
+    if getattr(ns, "hook", False):
+        return hook_approve(ns)
+    tokens = [ns.token] if isinstance(ns.token, str) else list(ns.token or [])
+    tokens = [str(t).strip().lower() for t in tokens]
+    card_only = getattr(ns, "card", False)
+    if not tokens:
+        sys.exit(f"Usage: {invocation()} approve <token> [<token> ...]\n"
+                 f"       {invocation()} approve --card <token>")
+    if not card_only and not console_session(ns):
+        sys.exit(APPROVE_HEADLESS_MSG)
+    en = getattr(ns, "color", False)
+    out = []
+    for token in tokens:
+        entry, meta, body = approval_card(ns.project_root, token)
+        conn_name = meta.get("connection") or ""
+        row_set = meta.get("row_set")
+        rec = None
+        if not card_only:
+            prune_expired_grants(ns.project_root)
+            rec = mint_grant(ns.project_root, token, conn_name,
+                             revalidate=fingerprint_text(row_set))
+        if ns.json:
+            card = f"{invocation()} approve {token}\n" + "\n".join(body)
+            out.append({"ok": True, "token": token, "conn": conn_name,
+                        "object": meta.get("object", "?"),
+                        "type": meta.get("type", "?"),
+                        "group": meta.get("group", ""),
+                        "rows": (row_set or {}).get("count"),
+                        "entry": entry, "card": card,
+                        "question": {"question": card, "header": "pythia",
+                                     "multiSelect": False,
+                                     "options": [
+                                         {"label": "Approve",
+                                          "description": "mint the one-time grant; the agent then runs apply --confirm"},
+                                         {"label": "Reject",
+                                          "description": "nothing is written; say what should change"}]},
+                        "minted": rec is not None,
+                        "minted_at": (rec or {}).get("minted_at"),
+                        "expires_at": (rec or {}).get("expires_at"),
+                        "ttl_minutes": GRANT_TTL_MINUTES})
+            continue
+        print()
+        if card_only:
+            # plain text on purpose: this goes into a question, not a terminal
+            print(f"{invocation()} approve {token}")
+            print("\n".join(body))
+            continue
+        for ln in body:
+            print(f"  {paint(ln, 'yellow', en) if ln.startswith('There is no snapshot') else ln}")
+        print(paint(f"\n  Grant minted — single use, expires in "
+                    f"{GRANT_TTL_MINUTES} minutes.", "green", en))
+        print("  The agent may now run:  "
+              + paint(f"{invocation()} apply <file> --confirm {token}", "cyan", en))
+    if ns.json:
+        print(json.dumps(out[0] if len(out) == 1 else out))
 
 
 def run_restore(conn, schema, ns):
@@ -2513,7 +2630,9 @@ ASK    relay apply previews verbatim and wait for a real yes. >=10 dependents
        exit 3 (written-but-broken) are relayed, never routed around. Do not
        read exit codes through a pipe.
 DO     writes go through `pythia apply` only - snapshot, token, verify. The
-       developer runs `pythia approve <token>`; you never can. Full
+       developer approves: you ask in chat (AskUserQuestion, text from
+       `pythia approve --card <token>`, options Approve/Reject) or they run
+       `pythia approve <token>` themselves; you never mint it. Full
        contract: `pythia guide`.
 """
 
@@ -2565,10 +2684,13 @@ Stop at exactly these moments; a guess past any of them is a defect.
 One door for writes: snapshot -> impact -> preview -> token -> approve ->
 apply -> verify -> report.
 
-  approve                 THE DEVELOPER'S COMMAND, at their own terminal:
-                          mints the one-time grant that --confirm requires.
-                          An agent cannot run it - that is the point. Relay
-                          the line the preview printed and wait.
+  approve                 THE DEVELOPER'S ACT: mints the one-time grant that
+                          --confirm requires. Two doors, both theirs: answer
+                          Approve to your AskUserQuestion (question text =
+                          `approve --card <token>`, verbatim - the hook mints
+                          only then), or `approve <token>` at their own
+                          terminal. An agent never mints it - that is the
+                          point.
   apply                   the six-step write; --confirm binds to the preview
                           AND to the developer's approval
   journal restore         undo, through the same six steps and the same gate
@@ -3142,7 +3264,14 @@ def build_parser():
     s = sub.add_parser("approve", parents=[common()],
                        help="the developer approves a preview: mints the "
                             "one-time grant apply --confirm requires")
-    s.add_argument("token", help="the token printed by the preview")
+    s.add_argument("token", nargs="*", help="token(s) printed by the preview")
+    s.add_argument("--card", action="store_true",
+                   help="print the approval card the agent asks with in chat "
+                        "(AskUserQuestion); mints nothing, needs no console")
+    s.add_argument("--hook", action="store_true",
+                   help="Claude Code PostToolUse hook on AskUserQuestion: "
+                        "reads the payload on stdin and mints the grant the "
+                        "developer answered Approve to")
     sub.add_parser("connections", parents=[common()],
                    help="list configured connections — names, users, "
                         "targets; never passwords")
