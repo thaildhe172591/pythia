@@ -84,6 +84,7 @@ QUERY_BINDS = {
     "source.sql": {"s", "n"},
     "object-source.sql": {"s", "n", "t"},
     "session-privileges.sql": set(),
+    "current-schema.sql": set(),
     "name-occupants.sql": {"s", "n"},
     "object-names.sql": {"s"},
 }
@@ -1448,6 +1449,14 @@ def cmd_check(conn, schema, ns):
                (select count(*) from all_triggers  where owner = :s) triggers
         from dual""", {"s": schema})
     emit_table(ns, cols, rows, False)
+    current = session_schema(conn)
+    if current and current != str(schema).upper():
+        print("\n" + paint(
+            f"! Session schema is {current}, but this connection is configured "
+            f"for {schema}: unqualified writes would land in {current} while "
+            f"pythia reads {schema}. apply refuses until connections.json says "
+            f"\"schema\": \"{current}\".", "yellow", color_enabled(sys.stderr)),
+            file=sys.stderr)
     warn = privilege_warning(conn, schema, ns.conn_user)
     if warn:
         print("\n" + paint(warn, "yellow", color_enabled(sys.stderr)),
@@ -1953,6 +1962,31 @@ def privilege_warning(conn, schema, conn_user):
             "explains what is at stake.")
 
 
+def session_schema(conn):
+    """Where an unqualified name lands for this session, or None if the
+    database did not say (it always does on Oracle; test doubles may not)."""
+    _, rows = run_query(conn, load_query("current-schema.sql"), {})
+    return str(rows[0][0]).upper() if rows and rows[0] and rows[0][0] else None
+
+
+def refuse_schema_mismatch(conn, schema, ns):
+    """An unqualified CREATE lands in the session's current schema, while
+    every snapshot, impact and verify query here asks the configured one. If
+    those differ — a proxy into another user, a stale `schema` in
+    connections.json — the write would land in one place and be verified in
+    another, and "Applied, compiled clean" would be about the wrong object.
+    Found live: PYTHIA_AGENT[PYTHIA_DEV] with schema still set to PYTHIA."""
+    current = session_schema(conn)
+    if current and current != str(schema).upper():
+        sys.exit(f"Refused: this session's schema is {current!r}, but connection "
+                 f"{getattr(ns, 'conn_name', None) or '?'!r} is configured for "
+                 f"{schema!r}.\nAn unqualified statement would land in {current!r} "
+                 f"while pythia snapshots and verifies {schema!r}.\nSet "
+                 f"\"schema\": \"{current}\" for this connection in "
+                 f".pythia/connections.json (or connect as {schema!r}), then "
+                 "preview again.")
+
+
 def run_apply(conn, schema, ns, file_text, origin=None):
     """The six steps: SNAPSHOT, IMPACT, PREVIEW, APPLY, VERIFY, REPORT.
     Returns the exit code. Refusals raise SystemExit (exit 1)."""
@@ -2012,6 +2046,8 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         # confirm-mode DML/DDL/grants: no object identity, no snapshot — the
         # journal records the statement itself so at least *what ran* is kept.
         otype, name = group.upper(), "STATEMENT"
+
+    refuse_schema_mismatch(conn, schema, ns)   # the write must land where it is verified
 
     # 1. SNAPSHOT — before anything else, unconditionally.
     db_source = ""

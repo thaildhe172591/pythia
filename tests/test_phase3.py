@@ -240,6 +240,7 @@ def base_script(errors=(), invalid_after=None, db_source=OLD_SRC):
         "from all_errors": ([("NAME", "TYPE", "SEQUENCE", "LINE", "POSITION",
                               "ATTRIBUTE", "TEXT")], list(errors)),
         "from session_privs": ([("PRIVILEGE",)], []),
+        "current_schema": ([("CURRENT_SCHEMA",)], [("APP",)]),
         # main-namespace occupants of the target name (type-conflict check)
         "object_name = upper(:n)": ([("OBJECT_TYPE",)], [("PACKAGE BODY",)]),
     }
@@ -1472,6 +1473,21 @@ def test_apply_reads_a_bom_file_as_the_statement_it_is():
             pythia.cmd_apply(FakeConn(base_script()), "APP",
                              apply_ns(td, file=str(f)))
         assert "approve --card" in buf.getvalue()      # it previewed
+
+
+def test_apply_refuses_when_the_session_schema_is_not_the_configured_one():
+    """A proxy into another user, or a stale `schema` in connections.json:
+    an unqualified CREATE would land in one schema while pythia snapshots
+    and verifies another. Refuse before the snapshot, with the fix."""
+    with tempfile.TemporaryDirectory() as td:
+        script = base_script()
+        script["current_schema"] = ([("CURRENT_SCHEMA",)], [("PYTHIA_DEV",)])
+        conn = FakeConn(script)
+        expect_exit(lambda: pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql"),
+                                             NEW_FILE),
+                    "PYTHIA_DEV", "configured for 'APP'", "connections.json")
+        assert wrote_ddl(conn) == []
+        assert not pythia.journal_root(td).exists()     # refused before step 1
 
 
 def main():
