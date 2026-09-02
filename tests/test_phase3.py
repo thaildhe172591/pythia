@@ -1456,6 +1456,24 @@ def test_approve_several_tokens_in_one_console_act():
         assert pythia.read_grant(td, "bb2222")["approver"] == "console"
 
 
+def test_apply_reads_a_bom_file_as_the_statement_it_is():
+    """Windows editors prepend a UTF-8 BOM. Read as a stray byte it turned a
+    plain CREATE OR REPLACE into 'cannot classify' — a refusal with the wrong
+    reason, found live in 0.10.0's dogfood run."""
+    import contextlib
+    import io
+    import pathlib
+    with tempfile.TemporaryDirectory() as td:
+        f = pathlib.Path(td) / "f.sql"
+        import codecs
+        f.write_bytes(codecs.BOM_UTF8 + NEW_FILE.encode("utf-8"))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_apply(FakeConn(base_script()), "APP",
+                             apply_ns(td, file=str(f)))
+        assert "approve --card" in buf.getvalue()      # it previewed
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

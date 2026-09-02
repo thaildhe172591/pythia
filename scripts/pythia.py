@@ -2242,7 +2242,10 @@ def cmd_apply(conn, schema, ns):
     path = pathlib.Path(ns.file)
     if not path.is_file():
         sys.exit(f"No such file: {path}")
-    code = run_apply(conn, schema, ns, path.read_text(encoding="utf-8"))
+    # utf-8-sig: Windows editors prepend a BOM, which read as a stray byte
+    # turned every such file into "cannot classify". A BOM-less file reads
+    # identically.
+    code = run_apply(conn, schema, ns, path.read_text(encoding="utf-8-sig"))
     if code:
         sys.exit(code)
 
