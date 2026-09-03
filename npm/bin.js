@@ -2,7 +2,8 @@
 // npx pythia-plsql — the whole kit in one command:
 //   1. pip install pythia-plsql   (CLI + queries + bundled skills)
 //   2. pythia install             (skills via `npx skills add` with its
-//                                  interactive agent picker, + .pythia/ scaffold)
+//                                  interactive agent picker, + .pythia/ scaffold,
+//                                  + the Claude Code hooks in .claude/settings.json)
 // This wrapper stays dependency-free: it only finds Python and delegates.
 "use strict";
 const { spawnSync } = require("node:child_process");

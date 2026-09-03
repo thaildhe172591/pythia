@@ -1,5 +1,5 @@
 {
-  "//": "Optional Claude Code settings for a project using pythia. Copy to .claude/settings.json (merge if one exists). NOT installed by pythia: this is another product's security config, and yours to own. See GUIDE.md section 11.",
+  "//": "Optional Claude Code settings for a project using pythia. `pythia install` writes the `hooks` block and the `deny` rule below into .claude/settings.json (merged into an existing file, never replacing it; --no-hooks skips). The allow list and autoMode are NOT installed: those are your permission preferences in another product's security config, and yours to own - copy them in if you want them. See GUIDE.md section 11.",
   "//permissions": "DETERMINISTIC rule matching. These are pythia's read-only commands: sql refuses anything that is not SELECT/WITH, and none of the rest can write. Allowing them removes prompts that carry no decision. Everything absent from this list still prompts as usual - including every form of apply.",
   "permissions": {
     "allow": [

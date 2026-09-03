@@ -3143,6 +3143,78 @@ def clean_legacy_skills(base_dir):
             _remove_link_first(pathlib.Path(base_dir) / rel / old_name)
 
 
+# What `install` wires into Claude Code's settings.json: the two hooks and
+# the deny rule, verbatim from examples/claude-code-settings.example.json (a
+# test keeps them equal). The allow list and autoMode stay in the example —
+# those are the developer's permission preferences, not pythia's to set.
+CLAUDE_HOOKS = {
+    "SessionStart": [{"hooks": [
+        {"type": "command", "command": "python -m pythia guide --brief"}]}],
+    "PostToolUse": [{"matcher": "AskUserQuestion", "hooks": [
+        {"type": "command", "command": "python -m pythia approve --hook",
+         "timeout": 15}]}],
+}
+CLAUDE_DENY = ["Bash(pythia approve --hook*)",
+               "Bash(python -m pythia approve --hook*)"]
+# a hook already present in any spelling (python3, the plugin's script path)
+# is recognised by what it runs, not by how it invokes it
+HOOK_MARKS = {"SessionStart": "guide --brief", "PostToolUse": "approve --hook"}
+
+
+def install_claude_hooks(base_dir, events=None):
+    """Merge the two hooks and the deny rule into <base>/.claude/settings.json
+    — the project's, or the home directory's for -g. The file is Claude
+    Code's, so every other key survives and a pythia hook already there in
+    any spelling counts as present. Returns (path, added): the pieces
+    written, [] when all were there, None when the file could not be parsed
+    and was therefore left alone. `events` narrows which hooks: -g writes
+    only PostToolUse, since ~/.claude/settings.json applies to every project
+    and the session guide would be noise outside Oracle work."""
+    path = pathlib.Path(base_dir) / ".claude" / "settings.json"
+    try:
+        s = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        hooks = s.setdefault("hooks", {})
+        deny = s.setdefault("permissions", {}).setdefault("deny", [])
+        added = []
+        for event in events or CLAUDE_HOOKS:
+            entries = CLAUDE_HOOKS[event]
+            present = hooks.setdefault(event, [])
+            cmds = " ".join(h.get("command", "")
+                            for e in present for h in e.get("hooks", []))
+            if HOOK_MARKS[event] not in cmds:
+                present.extend(json.loads(json.dumps(entries)))   # a copy
+                added.append(f"hooks.{event}")
+        missing = [d for d in CLAUDE_DENY if d not in deny]
+        if missing:
+            deny.extend(missing)
+            added.append("permissions.deny")
+    except (ValueError, TypeError, AttributeError):
+        return path, None
+    if added:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+    return path, added
+
+
+def report_claude_hooks(base_dir, ns, events=None):
+    """install's last step, in both scopes: wire the hooks and say what
+    happened. --no-hooks leaves Claude Code's file alone."""
+    if getattr(ns, "no_hooks", False):
+        return
+    path, added = install_claude_hooks(base_dir, events)
+    if added is None:
+        print(f"\n! {path} is not valid JSON, so it was left untouched. Fix "
+              f"it and re-run {invocation()} install, or paste the hooks "
+              "block from GUIDE.md section 11.")
+    elif added:
+        print()
+        print(f"Wired Claude Code hooks into {path}: {', '.join(added)}.")
+        print("Restart the Claude Code session for them to load.")
+    else:
+        print(f"\nClaude Code hooks already in {path}.")
+
+
 def cmd_install(conn, schema, ns):
     import shutil
     en = getattr(ns, "color", False)
@@ -3158,6 +3230,9 @@ def cmd_install(conn, schema, ns):
             sys.exit(code)
         else:
             clean_legacy_skills(pathlib.Path.home())
+        # machine-wide: the approve hook is silent without a pythia token;
+        # the session guide would be noise in every other project
+        report_claude_hooks(pathlib.Path.home(), ns, events=("PostToolUse",))
         print("\nGlobal skills serve every project — per-project installs "
               "will now skip the skills step automatically.")
         return
@@ -3180,6 +3255,7 @@ def cmd_install(conn, schema, ns):
             sys.exit(code)
         else:
             clean_legacy_skills(ns.project_root)
+    report_claude_hooks(ns.project_root, ns)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
     scripts_dir = installed_scripts_dir()
@@ -3348,13 +3424,16 @@ def build_parser():
     s.add_argument("--loi", action="store_true",
                    help="wrap as 'loi:'||unistr(...)||':loi'")
     s = sub.add_parser("install", parents=[common()],
-                       help="install the skill pack and scaffold .pythia/ config")
+                       help="install the skill pack, scaffold .pythia/ config, wire the Claude Code hooks")
     s.add_argument("-g", "--global", dest="glob", action="store_true",
                    help="install the skill pack machine-wide (serves every "
                         "project; per-project installs then skip skills)")
     s.add_argument("--add-to-path", action="store_true", dest="add_to_path",
                    help="put the pythia command on your PATH without asking "
                         "(Windows; user PATH only)")
+    s.add_argument("--no-hooks", action="store_true", dest="no_hooks",
+                   help="leave Claude Code's .claude/settings.json alone "
+                        "(no approve-in-chat hook, no session-start guide)")
     s.add_argument("--source", default=DEFAULT_SKILLS_SOURCE,
                    help="skills repo for `npx skills add` "
                         f"(default {DEFAULT_SKILLS_SOURCE})")

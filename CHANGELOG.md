@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.11.0 — 2026-09-03
+
+- **`pythia install` wires the Claude Code hooks.** 0.10.0 shipped the chat
+  approval door, but a pip or npm install left it closed: the `PostToolUse`
+  hook lived only in the plugin and in an example file, and the first field
+  test of 0.10.0 ended with a developer pasting JSON by hand. `install` now
+  merges both hooks —
+  SessionStart guide, PostToolUse approve — and the `deny` rule on
+  `Bash(pythia approve --hook*)` into `.claude/settings.json`. Merged, not
+  replaced: every other key survives, a hook already present in another
+  spelling (`python3`, the plugin's path) is recognised, a second run adds
+  nothing, and a file that is not valid JSON is left byte-identical with a
+  note. `--no-hooks` skips the step.
+- `install -g` writes only the approve hook and the deny rule into
+  `~/.claude/settings.json`: that file applies to every project on the
+  machine, and the session guide would be noise outside Oracle work.
+- The allow list and `autoMode` guidance stay in the example file: those are
+  the developer's permission preferences, not pythia's to set.
+- After `pip install --upgrade pythia-plsql`, run `python -m pythia install`
+  once more — pip runs nothing after an install. `npx pythia-plsql` already
+  does both.
+
 ## 0.10.0 — 2026-09-02
 
 - **The developer approves in chat.** Approving used to mean leaving the

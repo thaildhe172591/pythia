@@ -116,7 +116,7 @@ Hoặc làm từng bước — nên dùng cách này vì rõ ràng hơn:
 ```bash
 pip install pythia-plsql        # 1. CLI (thin driver, không cần Oracle Instant Client)
 python -m pythia install -g     # 2. skills — MỘT LẦN cho cả máy
-cd du-an && python -m pythia install   # 3. mỗi dự án: tạo .pythia/
+cd du-an && python -m pythia install   # 3. mỗi dự án: tạo .pythia/ + hook Claude Code
 pythia check                    # 4. điền connections.json rồi kiểm tra
 ```
 
@@ -212,7 +212,10 @@ một lần chạy. Đây chỉ là tiện ích; bạn tự làm tay theo
 cũng được. `pythia check` sẽ cảnh báo khi tài khoản đang dùng có quyền cao
 hơn mức công việc cần.
 
-Dùng Claude Code? [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
+Dùng Claude Code? `pythia install` tự ghi hai hook — cửa duyệt trong chat và
+guide đầu phiên — cùng luật deny vào `.claude/settings.json`, gộp vào file
+đang có. Phần còn lại của
+[`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
 giúp nó thôi hỏi các lệnh chỉ-đọc và đề nghị dừng lại ở các lệnh ghi — tuỳ
 chọn, và do bạn tự cài
 ([vì sao pythia không tự cài](GUIDE.vi.md#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)).

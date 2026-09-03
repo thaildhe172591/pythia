@@ -237,6 +237,119 @@ def test_cmd_install_runs_end_to_end():
         assert env is not None
 
 
+def test_claude_hook_block_matches_the_example_file():
+    """What install wires into .claude/settings.json is exactly the hooks
+    block and the deny rule of the example file — the reviewable source of
+    truth, as with the connections template. The allow list and autoMode
+    stay in the example: those are the developer's permission preferences."""
+    ex = json.loads((ROOT / "examples" / "claude-code-settings.example.json")
+                    .read_text(encoding="utf-8"))
+    assert pythia.CLAUDE_HOOKS == ex["hooks"]
+    assert pythia.CLAUDE_DENY == ex["permissions"]["deny"]
+
+
+def test_install_claude_hooks_creates_settings_and_is_idempotent():
+    with tempfile.TemporaryDirectory() as td:
+        path, added = pythia.install_claude_hooks(td)
+        assert path == pathlib.Path(td) / ".claude" / "settings.json"
+        assert added == ["hooks.SessionStart", "hooks.PostToolUse",
+                         "permissions.deny"]
+        s = json.loads(path.read_text(encoding="utf-8"))
+        assert s["hooks"] == pythia.CLAUDE_HOOKS
+        assert s["permissions"]["deny"] == pythia.CLAUDE_DENY
+        before = path.read_text(encoding="utf-8")
+        assert pythia.install_claude_hooks(td) == (path, [])
+        assert path.read_text(encoding="utf-8") == before
+
+
+def test_install_claude_hooks_merges_into_existing_settings():
+    """The file is Claude Code's, not pythia's: every key the developer put
+    there survives, their own hooks stay, and a pythia hook already present
+    in another spelling (python3, the plugin's path) is recognised, not
+    doubled. Only the missing pieces are added."""
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".claude" / "settings.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({
+            "model": "opus",
+            "permissions": {"allow": ["Bash(git status)"],
+                            "deny": ["Bash(rm -rf *)"]},
+            "hooks": {
+                "SessionStart": [{"hooks": [
+                    {"type": "command", "command": "echo hi"}]}],
+                "PostToolUse": [{"matcher": "AskUserQuestion", "hooks": [
+                    {"type": "command",
+                     "command": "python3 -m pythia approve --hook"}]}]}}),
+            encoding="utf-8")
+        _, added = pythia.install_claude_hooks(td)
+        assert added == ["hooks.SessionStart", "permissions.deny"]
+        s = json.loads(path.read_text(encoding="utf-8"))
+        assert s["model"] == "opus"
+        assert s["permissions"]["allow"] == ["Bash(git status)"]
+        assert s["permissions"]["deny"][0] == "Bash(rm -rf *)"
+        assert set(pythia.CLAUDE_DENY) <= set(s["permissions"]["deny"])
+        cmds = [h["command"] for ev in s["hooks"].values()
+                for e in ev for h in e["hooks"]]
+        assert "echo hi" in cmds
+        assert sum("approve --hook" in c for c in cmds) == 1   # not doubled
+        assert sum("guide --brief" in c for c in cmds) == 1
+
+
+def test_install_claude_hooks_refuses_a_file_it_cannot_parse():
+    """Broken JSON is still the developer's file. Touching it would destroy
+    what they wrote; say so and leave it byte-identical."""
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".claude" / "settings.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("{not json", encoding="utf-8")
+        assert pythia.install_claude_hooks(td) == (path, None)
+        assert path.read_text(encoding="utf-8") == "{not json"
+
+
+def test_cmd_install_wires_the_claude_hooks_unless_told_not_to():
+    """The chat approval door needs the hook; a pip user who never opened
+    GUIDE section 11 had none — seen in the 0.10.0 field test. install wires
+    it by default and says so; --no-hooks leaves Claude Code's file alone."""
+    import argparse
+    import contextlib
+    import io
+    old = os.environ.get("PATH")
+    os.environ["PATH"] = ""                    # no npx: bundled path, offline
+    try:
+        for no_hooks in (False, True):
+            with tempfile.TemporaryDirectory() as td:
+                ns = argparse.Namespace(project_root=td, glob=False,
+                                        source=None, color=False, json=False,
+                                        no_hooks=no_hooks)
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    pythia.cmd_install(None, None, ns)
+                settings = pathlib.Path(td) / ".claude" / "settings.json"
+                if no_hooks:
+                    assert not settings.exists()
+                    continue
+                s = json.loads(settings.read_text(encoding="utf-8"))
+                assert "approve --hook" in json.dumps(s["hooks"]["PostToolUse"])
+                assert set(pythia.CLAUDE_DENY) <= set(s["permissions"]["deny"])
+                assert "settings.json" in buf.getvalue()
+    finally:
+        if old is not None:
+            os.environ["PATH"] = old
+
+
+def test_global_install_wires_the_approve_hook_only():
+    """~/.claude/settings.json applies to every project on the machine. The
+    approve hook is silent unless a question carries a pythia token, so it
+    belongs there; the session-start guide would put 15 lines about pythia
+    into every session of every project, so that one stays per project."""
+    with tempfile.TemporaryDirectory() as td:
+        path, added = pythia.install_claude_hooks(td, events=("PostToolUse",))
+        assert added == ["hooks.PostToolUse", "permissions.deny"]
+        s = json.loads(path.read_text(encoding="utf-8"))
+        assert "SessionStart" not in s["hooks"]
+        assert s["hooks"]["PostToolUse"] == pythia.CLAUDE_HOOKS["PostToolUse"]
+
+
 # Native paths: on POSIX ':' is the PATH separator and would cut a
 # Windows path in half, so these are built from os.sep.
 SCRIPTS = os.path.join(os.sep + 'opt', 'a', 'Scripts')
