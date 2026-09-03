@@ -479,10 +479,20 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 
 ## 11. Tuỳ chọn: cấu hình quyền cho Claude Code
 
-Bản settings mẫu giờ kèm hook `SessionStart` chạy `python -m pythia guide
---brief`: ~15 dòng bơm vào đầu mỗi phiên — chính nó làm việc định tuyến skill
-trở nên tất định: yêu cầu build đến được `pythia-spec` bất kể hôm đó agent
-có "nhớ" kiểm tra skills hay không. Không thích thì xoá khối `hooks`.
+`pythia install` tự ghi hai hook vào `.claude/settings.json`, gộp vào file
+có sẵn và không đụng key nào khác; chạy lại không thêm gì, `--no-hooks` để
+bỏ qua. `install -g` chỉ ghi hook approve và luật deny vào
+`~/.claude/settings.json` — file đó áp cho mọi dự án trên máy, guide đầu
+phiên ở đó sẽ thành nhiễu với dự án không dính Oracle. `SessionStart` chạy
+`python -m pythia guide --brief`: ~15 dòng bơm vào đầu mỗi phiên — chính nó
+làm việc định tuyến skill trở nên tất định: yêu cầu build đến được
+`pythia-spec` bất kể hôm đó agent có "nhớ" kiểm tra skills hay không.
+`PostToolUse` trên `AskUserQuestion` chạy `python -m pythia approve --hook`:
+cửa duyệt trong chat ở §7. Kèm theo là luật `deny` cho `Bash(pythia approve
+--hook*)` — hook phải chạy trên payload do Claude Code ghi, agent tự bơm
+payload từ Bash là giả mạo phê duyệt. Sau `pip install --upgrade`, chạy lại
+`python -m pythia install`; `npx pythia-plsql` làm cả hai. Plugin cài qua
+`hooks/hooks.json`.
 
 Claude Code tự quyết có chạy một lệnh hay không, và ở auto mode thì một
 classifier chấm từng lệnh theo ngữ cảnh. Kéo theo hai chuyện.
@@ -498,8 +508,9 @@ thẳng. pythia vẫn bắt preview và token, skills vẫn bắt bạn duyệt 
 chat — nhưng bản thân harness không góp thêm gì.
 
 [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
-xử lý cả hai. Copy vào `.claude/settings.json` (gộp nếu đã có sẵn), khởi
-động lại phiên, rồi `/permissions` để kiểm tra.
+xử lý cả hai. Phần còn lại — allow list và autoMode — copy vào
+`.claude/settings.json` (gộp nếu đã có sẵn), khởi động lại phiên, rồi
+`/permissions` để kiểm tra.
 
 **pythia cố ý KHÔNG tự cài file này.** Đó là cấu hình bảo mật của sản phẩm
 khác, nó chỉ áp cho một agent trong số 77 agent mà skill pack hỗ trợ, và —

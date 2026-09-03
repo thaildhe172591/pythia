@@ -107,14 +107,14 @@ is in, it is doing none of them.
 ## Install
 
 ```bash
-npx pythia-plsql           # everything: pip install + skills picker + config scaffold
+npx pythia-plsql           # everything: pip install + skills picker + config scaffold + hooks
 ```
 
 Or the same thing piecewise:
 
 ```bash
 pip install pythia-plsql   # the CLI (thin driver — no Oracle Instant Client needed)
-python -m pythia install   # skills into your agent + .pythia/ scaffold
+python -m pythia install   # skills into your agent + .pythia/ scaffold + Claude Code hooks
 pythia check               # fill in connections.json first, then verify
 ```
 
@@ -190,7 +190,10 @@ hand with
 works just as well.
 `pythia check` warns when the session runs with more power than the task needs.
 
-Using Claude Code? [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
+Using Claude Code? `pythia install` wires the two hooks — the approve-in-chat
+door and the session-start guide — and the deny rule into
+`.claude/settings.json`, merged into whatever is already there. The rest of
+[`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
 stops it prompting for the read-only commands and asks it to pause on
 writes — optional, and yours to install
 ([why pythia does not](GUIDE.md#11-optional-claude-code-permission-settings)).

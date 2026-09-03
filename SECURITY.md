@@ -55,8 +55,8 @@ unless the question carried pythia's own card verbatim — so what is approved
 is the preview, not a paraphrase. Its limit: the hook is a process the agent's
 shell could also start. An agent that pipes a hand-made payload into `pythia
 approve --hook` has forged an approval — the same tier as faking a console or
-writing the grant file by hand, and the example settings deny that command
-shape from Bash outright. Other clients (an MCP elicitation, a different
+writing the grant file by hand, and `pythia install` writes a deny rule for
+that command shape into the Claude Code settings outright. Other clients (an MCP elicitation, a different
 harness) still need an approver of their own. What the grant raises is the
 *bar*, not a wall: it turns a write an agent could complete on its own
 authority into one that takes deliberate forgery, which is the same tier as

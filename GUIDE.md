@@ -503,10 +503,17 @@ is what makes skill routing deterministic — build requests reach
 `pythia-spec` whether or not the agent felt like checking its skills that
 day. `PostToolUse` on `AskUserQuestion` runs `python -m pythia approve
 --hook`: the chat approval door from §7. The plugin (`hooks/hooks.json`)
-installs both; with pip alone, copy the `hooks` block into
-`.claude/settings.json`. The example also *denies* `Bash(pythia approve
---hook*)` — the hook is meant to run on a payload Claude Code wrote, and an
-agent piping a hand-made one from Bash would be forging an approval.
+installs both, and so does `pythia install`: it merges the `hooks` block and
+the `deny` rule into `.claude/settings.json`, leaves every other key alone,
+adds nothing on a second run, and `--no-hooks` skips the step. `install -g`
+writes only the approve hook and the deny rule into `~/.claude/settings.json`
+— that file applies to every project on the machine, and the session guide
+would be noise outside Oracle work. After `pip install --upgrade`,
+run `python -m pythia install` once more — pip runs nothing after an install;
+`npx pythia-plsql` does both. The example also *denies* `Bash(pythia approve
+--hook*)`, and install writes that rule too — the hook is meant to run on a
+payload Claude Code wrote, and an agent piping a hand-made one from Bash
+would be forging an approval.
 
 ### The original section
 
@@ -525,8 +532,9 @@ preview and a token, and the skills still require your approval in chat —
 but the harness itself adds nothing.
 
 [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
-addresses both. Copy it to `.claude/settings.json` (merge if you already
-have one), then restart the session and check `/permissions`.
+addresses both. Copy the rest of it — the allow list and the autoMode
+guidance — into `.claude/settings.json` (merge if you already have one), then
+restart the session and check `/permissions`.
 
 **pythia does not install this, on purpose.** It is another product's
 security configuration, it applies to one agent out of the 77 the skill
