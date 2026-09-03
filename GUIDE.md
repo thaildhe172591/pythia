@@ -304,17 +304,29 @@ taken before the write is the only real undo there is.
 
 ```bash
 pythia apply PKG_ORDER_BODY.sql            # preview: diff + impact + warnings + token
-pythia approve a1b2c3                      # the DEVELOPER, at their own terminal
+pythia approve --card a1b2c3               # the agent: what to ask with (mints nothing)
+#   -> AskUserQuestion, options Approve / Reject; the DEVELOPER answers in chat
+pythia approve a1b2c3                      # or: the DEVELOPER, at their own terminal
 pythia apply PKG_ORDER_BODY.sql --confirm a1b2c3   # write exactly what was previewed
 ```
 
 Steps, none removable: **snapshot → impact → preview → approve → apply →
 verify → report**.
 
-**Two steps, two people.** The preview ends by printing both lines: the
-developer's `approve` and the agent's `apply --confirm`. The agent relays
-both and stops. `approve` mints a one-time grant, and without it the confirm
-is refused:
+**Two steps, two people.** The preview ends by printing the agent's `apply
+--confirm` line and the developer's two doors. The grant is minted either
+way, and without it the confirm is refused:
+
+- **In chat** (since 0.10.0): the agent runs `pythia approve --card <token>`
+  and asks an `AskUserQuestion` whose text is that card, verbatim, with the
+  options `Approve` / `Reject`. Claude Code writes the answer into the
+  `PostToolUse` hook payload; `pythia approve --hook` reads it and mints the
+  grant only if the answer is `Approve` *and* the question carried pythia's
+  card — a paraphrase mints nothing, so the developer always approves
+  pythia's words, not the agent's. The hook ships in the plugin and in the
+  example settings (§11); without it, answering in chat mints nothing.
+- **At a console**: `pythia approve <token>` (several tokens at once are
+  fine):
 
 ```
 $ pythia approve a1b2c3
@@ -473,7 +485,8 @@ go through MCP.**
 | Skills not showing | the pack sits only in a project `.agents/skills` your Claude Code doesn't read → `pythia install -g` |
 | Yellow warning from `check` | see §3 — proxy not used yet, or the owner over-granted |
 | Token refused on `--confirm` | file or DB changed since the preview — previewing again is the design |
-| `no developer approval is on file` | the developer has not run `pythia approve <token>` yet; relay the line and wait — retrying does not create approval |
+| `no developer approval is on file` | nobody answered `Approve` to the card yet (or the hook is not installed), and `pythia approve <token>` has not been run; ask with the card, or relay the line — retrying does not create approval |
+| `did not carry pythia's approval card verbatim` | the agent paraphrased the card in its question; the hook refused to mint — ask again with the exact `approve --card` text |
 | `That approval expired` / `already used` | grants are single-use and last 15 minutes — preview again, approve the new token |
 | `approval was given on connection X` | approved against a different database — approve on the connection this session targets |
 | `approve ... needs a real console` | an agent tried to mint its own approval; that is the gate working |
@@ -482,13 +495,18 @@ go through MCP.**
 | `--yes ... no terminal is attached` | an agent tried to self-approve — by design: preview, relay verbatim, stop; the developer approves, then `--confirm <token>` |
 | `Loosening the write policy ... no terminal` | same design: hand the developer the printed `policy set` command to run themselves |
 
-## 11. Optional: Claude Code permission settings and the session hook
+## 11. Optional: Claude Code permission settings and the two hooks
 
-The example settings now also carry a `SessionStart` hook running
+The example settings carry two hooks. `SessionStart` runs
 `python -m pythia guide --brief`: ~15 lines injected once per session, which
 is what makes skill routing deterministic — build requests reach
 `pythia-spec` whether or not the agent felt like checking its skills that
-day. Remove the `hooks` block if you prefer trigger-matching alone.
+day. `PostToolUse` on `AskUserQuestion` runs `python -m pythia approve
+--hook`: the chat approval door from §7. The plugin (`hooks/hooks.json`)
+installs both; with pip alone, copy the `hooks` block into
+`.claude/settings.json`. The example also *denies* `Bash(pythia approve
+--hook*)` — the hook is meant to run on a payload Claude Code wrote, and an
+agent piping a hand-made one from Bash would be forging an approval.
 
 ### The original section
 

@@ -36,7 +36,8 @@ at the role tier; your site's security model belongs to your DBA.
 | Oracle grants | anything outside the granted schema | nothing in this tool |
 | Policy (`.pythia/policy.json`) | whole statement classes; DML, DDL and grants are `deny` by default | editing the file, deliberately |
 | Confirmation token | applying content that differs from what was previewed | not applying at all |
-| Approval grant | an agent completing a write no human approved | fabricating the grant file or faking a console, deliberately — the `policy.json` tier |
+| Approval grant | an agent completing a write no human approved | fabricating the grant file, faking a console, or piping a hand-made hook payload into `approve --hook`, deliberately — the `policy.json` tier |
+| Card check in the chat door | a human approving the agent's paraphrase instead of the preview | nothing short of the above — the hook mints only when the question carries pythia's own card verbatim |
 | TTY requirement | a headless agent self-approving `--yes` or loosening policy | `PYTHIA_CI=1`, deliberately, in a real pipeline |
 | Snapshot + journal | losing the previous version of PL/SQL source | nothing — it runs before every write and no flag disables it |
 
@@ -45,14 +46,21 @@ dropped column, or a revoked grant. The rollback table in the README and in
 `pythia-apply` says which group is genuinely reversible, and the tool refuses
 the groups that are not rather than implying otherwise.
 
-The approval grant has its own honest limit: it assumes a developer with a
-terminal on the machine holding the repo. A purely remote developer — the
-agent on a server, the human only in chat — has no clean path today. That is
-a known gap, stated rather than papered over; closing it needs an approval
-channel that travels over the agent's own protocol, which is designed but not
-yet shipped. And what the grant raises is the *bar*, not a wall: it turns a
-write an agent could complete on its own authority into one that takes
-deliberate forgery, which is the same tier as editing `policy.json`.
+The approval grant has two doors since 0.10.0, and each has an honest
+reading. The console door assumes a developer with a terminal on the machine
+holding the repo. The chat door (`AskUserQuestion` + the `PostToolUse` hook)
+closes the remote-developer gap for Claude Code: the answer the hook reads was
+written into the payload by the client, not the agent, and the hook refuses
+unless the question carried pythia's own card verbatim — so what is approved
+is the preview, not a paraphrase. Its limit: the hook is a process the agent's
+shell could also start. An agent that pipes a hand-made payload into `pythia
+approve --hook` has forged an approval — the same tier as faking a console or
+writing the grant file by hand, and the example settings deny that command
+shape from Bash outright. Other clients (an MCP elicitation, a different
+harness) still need an approver of their own. What the grant raises is the
+*bar*, not a wall: it turns a write an agent could complete on its own
+authority into one that takes deliberate forgery, which is the same tier as
+editing `policy.json`.
 
 Row-set revalidation, added in 0.9.0, brings a limit of its own worth naming:
 previewing a `data_dml` statement now runs a `SELECT` derived from that

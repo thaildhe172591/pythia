@@ -1,0 +1,27 @@
+{
+  "description": "pythia: the chat approval door. When the developer answers Approve to the agent's AskUserQuestion carrying `pythia approve --card <token>`, this hook mints the one-time grant that `apply --confirm` requires. The payload's answer was filled in by Claude Code, never by the agent; the hook still checks that the question carried pythia's own card verbatim before minting.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/pythia.py\" approve --hook",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/pythia.py\" guide --brief"
+          }
+        ]
+      }
+    ]
+  }
+}

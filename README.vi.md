@@ -86,11 +86,13 @@ Chỉ sau Học và Hỏi mới được chạm database, và chỉ qua một c�
 DDL trong Oracle tự commit nên snapshot là đường lùi duy nhất — nó chạy đầu
 tiên và không cờ nào tắt được. Token gắn nội dung bảo đảm thứ được ghi đúng
 từng byte với thứ đã xem; còn **grant do chính dev cấp** bảo đảm là *có người
-duyệt*: `pythia approve` chỉ chạy được ở console của một con người, và thiếu
-grant một-lần đó thì `apply --confirm` từ chối. Dòng lệnh của agent không đổi
-một ký tự — cái đổi là nó dừng lại cho tới khi có người ra tay. Agent chạy
-không người không thể `--yes` cho chính nó, không thể tự duyệt, cũng không
-nới được policy — cả ba đều cần một con người ở terminal thật.
+duyệt* — qua một trong hai cửa, đều là của dev. Trong chat: agent hỏi bằng
+`AskUserQuestion`, nội dung câu hỏi là thẻ duyệt của chính pythia
+(`pythia approve --card <token>`), và câu trả lời **Approve** — do Claude Code
+ghi vào payload của hook, không phải agent — cấp grant một-lần. Ở console:
+`pythia approve <token>`. Thiếu grant đó thì `apply --confirm` từ chối. Agent
+chạy không người không thể `--yes` cho chính nó, không thể tự cấp grant, cũng
+không nới được policy — cả ba đều cần một con người, trả lời hoặc gõ.
 
 Dev tự sửa tay cũng được đỡ: `src` và `impact` lặng lẽ snapshot những gì
 chúng đọc, nên sửa bằng SQL Developer vẫn có file rollback chờ sẵn

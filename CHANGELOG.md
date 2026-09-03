@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.10.0 — 2026-09-02
+
+- **The developer approves in chat.** Approving used to mean leaving the
+  conversation, opening a terminal, and typing `pythia approve <token>` once
+  per preview — four times for the four-file change that prompted this
+  release. Now the agent asks: `pythia approve --card <token>` prints the
+  approval card (object, statement or impact, connection, time — the same
+  words the console command shows, read from the journal and never
+  recomputed), the agent puts it verbatim into an `AskUserQuestion` with the
+  options **Approve** / **Reject**, and the developer clicks. A `PostToolUse`
+  hook on `AskUserQuestion` runs `pythia approve --hook`, which reads the
+  payload Claude Code wrote and mints the same single-use, 15-minute,
+  connection-bound grant the console mints.
+- **The hook refuses a paraphrase.** It mints only when the answer is exactly
+  `Approve` *and* the question carried pythia's card verbatim (whitespace
+  aside). An agent that summarised the change in its own words gets no grant
+  and a note saying to ask again with the card — the developer approves
+  pythia's preview, never the agent's description of it. `Reject`, free text,
+  another tool, garbage on stdin: nothing minted, and nothing said unless a
+  token was involved.
+- **What the agent learns.** The hook's `additionalContext` tells it what
+  happened per token — minted (and the exact `--confirm` line), rejected, or
+  refused and why — so the next move is never a guess.
+- **Console approve takes several tokens at once.** `pythia approve a1 b2 c3`
+  mints three grants in one act; the card is printed for each.
+- The grant records `approver` (`console` or `chat`) and the chat `session`
+  id — audit data, like `revalidate`.
+- The plugin ships `hooks/hooks.json` with both hooks (SessionStart guide,
+  PostToolUse approve). The example settings carry the same, plus a `deny`
+  on `Bash(pythia approve --hook*)`: the hook is meant to run on a payload
+  the client wrote, and an agent piping a hand-made one would be forging.
+  SECURITY.md says so in its layer table.
+- Preview follow-up lines now name both doors — the card for chat, the
+  command for a terminal — and the `no developer approval` refusal does too.
+- The console door is unchanged: still a real console only, still no
+  `PYTHIA_CI` escape. `--card` needs no console and mints nothing.
+
 ## 0.9.0 — 2026-08-28
 
 - **A `data_dml` write is now approved on the rows it touches.** The preview of
