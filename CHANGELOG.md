@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.11.1 — 2026-09-05
+
+- **NONEDITIONABLE objects could not go through `apply` at all.** The
+  classifier spelled Oracle's keyword `NOEDITIONABLE`, without the middle N,
+  so `CREATE OR REPLACE NONEDITIONABLE PROCEDURE ...` never matched
+  `plsql_source` and fell through to `structural` — which is deny by default
+  and counts statements by semicolon, so a PL/SQL body came back as *"The
+  file contains more than one statement"*. The only way past it was deleting
+  the keyword, which Oracle then met with ORA-38824 on an editions-enabled
+  schema. Reported live on CORE_BH (`PBH_FILE_NH`,
+  `PBH_BT_TRINH_DUYET_HUY`), where it meant every such object was applied by
+  hand — no snapshot, no impact, no journal. Both spellings now match; only
+  the database decides whether the statement is valid.
+- **And the undo those objects would have got was broken the same way.**
+  `ALL_SOURCE` stores no `CREATE` header, so the journal builds one — as a
+  bare `CREATE OR REPLACE`, which on an editions-enabled schema is ORA-38824
+  against a NONEDITIONABLE object: a rollback that fails exactly when it is
+  needed. The header now carries the keyword from the file being applied,
+  which is the property the database holds — Oracle refuses to *change* it
+  through `CREATE OR REPLACE`, so a file that applies cleanly already spells
+  it right.
+- The preview's diff builds the same header, so a NONEDITIONABLE file no
+  longer shows its own first line as a change that is not one (a real
+  two-line edit read as "4 lines changed"). The confirm token is unaffected:
+  it hashes the file and `ALL_SOURCE` as they are, not the rendered header.
+
 ## 0.11.0 — 2026-09-03
 
 - **`pythia install` wires the Claude Code hooks.** 0.10.0 shipped the chat

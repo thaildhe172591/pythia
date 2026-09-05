@@ -713,7 +713,12 @@ def plscope_message(name, has_any_data):
 GROUPS = ("plsql_source", "data_dml", "structural", "grants", "session")
 
 PLSQL_SOURCE_RE = re.compile(
-    r"^create\s+(?:or\s+replace\s+)?(?:(?:no)?editionable\s+|(?:no)?force\s+)*"
+    # NONEDITIONABLE, not "noeditionable": Oracle's keyword has the middle N,
+    # and missing it dropped every NONEDITIONABLE object into structural —
+    # deny by default, and counted by semicolons, so a PL/SQL body read as
+    # "more than one statement". Both spellings are accepted here; only the
+    # database decides whether the statement is valid.
+    r"^create\s+(?:or\s+replace\s+)?(?:(?:non?)?editionable\s+|(?:no)?force\s+)*"
     r"(procedure|function|package\s+body|package|trigger|view|type\s+body|type)\b",
     re.I | re.S)
 
@@ -1231,12 +1236,29 @@ def prune_expired_grants(root, now=None):
     return gone
 
 
-def render_restore(obj_type, name, before_text):
+EDITIONABLE_KW_RE = re.compile(
+    r"^create\s+(?:or\s+replace\s+)?((?:non?)?editionable)\b", re.I)
+
+
+def create_prefix(after_text):
+    """The CREATE header ALL_SOURCE does not store, rebuilt for the version
+    held in the database. The editionable keyword is read off the file being
+    applied, because the database's own answer is not in ALL_SOURCE and
+    Oracle refuses to *change* the property through CREATE OR REPLACE
+    (ORA-38824) — so a file that applies cleanly already spells the property
+    the object has. Getting this wrong costs twice: a restore that fails
+    exactly when it is needed, and a phantom line in the diff the developer
+    approves."""
+    m = EDITIONABLE_KW_RE.match(skip_leading_noise(after_text))
+    return "CREATE OR REPLACE " + (f"{m.group(1).upper()} " if m else "")
+
+
+def render_restore(obj_type, name, before_text, after_text=""):
     """The statement that puts things back. For an object that did not exist,
     undo means DROP — a genuinely different promise than restoring source, so
     the caller records created=True and the report says it plainly."""
     if before_text.strip():
-        return "CREATE OR REPLACE " + before_text.rstrip() + "\n"
+        return create_prefix(after_text) + before_text.rstrip() + "\n"
     return f"DROP {obj_type} {name}\n"
 
 
@@ -1256,7 +1278,7 @@ def write_journal_entry(root, obj_type, name, before, after, meta, now=None):
     d.mkdir(parents=True)
     (d / "before.sql").write_text(before, encoding="utf-8")
     (d / "after.sql").write_text(after, encoding="utf-8")
-    (d / "restore.sql").write_text(render_restore(obj_type, name, before),
+    (d / "restore.sql").write_text(render_restore(obj_type, name, before, after),
                                    encoding="utf-8")
     full = {"object": name, "type": obj_type, "created": not before.strip(),
             "entry": eid, **meta}
@@ -2105,8 +2127,10 @@ def run_apply(conn, schema, ns, file_text, origin=None):
 
     # 3. PREVIEW — diff like against like: ALL_SOURCE never stores the
     # CREATE OR REPLACE header, so prepend it before comparing, or an
-    # unchanged object would show a phantom two-line change forever.
-    base = ("CREATE OR REPLACE " + db_source) if db_source.strip() else ""
+    # unchanged object would show a phantom two-line change forever. The
+    # editionable keyword is part of that header, or a NONEDITIONABLE file
+    # shows its own first line as a change that is not one.
+    base = (create_prefix(stmt) + db_source) if db_source.strip() else ""
     diff_text, changed = render_diff(base, stmt)
     warn = privilege_warning(conn, schema, ns.conn_user)
     style = (naming_violation(otype, name, load_conventions(ns.project_root))

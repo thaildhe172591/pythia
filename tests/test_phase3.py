@@ -32,6 +32,11 @@ def test_classify_groups():
     assert c("alter table t_order add (x number)") == "structural"  # session tested first
     assert c("CREATE OR REPLACE PROCEDURE p AS BEGIN NULL; END;") == "plsql_source"
     assert c("create or replace editionable package body pkg_order as end;") == "plsql_source"
+    # Oracle's keyword is NONEDITIONABLE, with the middle N. Missing it sent
+    # every such object to structural — deny by default, and counted by
+    # semicolons, so a PL/SQL body came back as "more than one statement".
+    assert c("create or replace NONEDITIONABLE procedure p as begin null; end;") == "plsql_source"
+    assert c("CREATE OR REPLACE NONEDITIONABLE PACKAGE BODY pkg AS END;") == "plsql_source"
     assert c("CREATE OR REPLACE FORCE VIEW v AS SELECT 1 FROM dual") == "plsql_source"
     assert c("CREATE TABLE t (x number)") == "structural"  # other CREATE
     assert c("insert into t values (1)") == "data_dml"
@@ -54,6 +59,27 @@ def test_parse_object():
     assert (t, n, s) == ("TYPE BODY", "T_THING", None)
     t, n, s = pythia.parse_object("CREATE OR REPLACE TRIGGER trg_x BEFORE INSERT ON t BEGIN NULL; END;")
     assert (t, n, s) == ("TRIGGER", "TRG_X", None)
+    # the identity drives the snapshot, so the editionable keyword must not
+    # shift what is parsed out of the statement
+    t, n, s = pythia.parse_object(
+        "CREATE OR REPLACE NONEDITIONABLE PROCEDURE core_bh.pbh_file_nh AS BEGIN NULL; END;")
+    assert (t, n, s) == ("PROCEDURE", "PBH_FILE_NH", "CORE_BH")
+
+
+def test_restore_keeps_the_editionable_property():
+    """ALL_SOURCE holds no CREATE prefix, so the restore builds one. On an
+    editions-enabled schema a bare CREATE OR REPLACE over a NONEDITIONABLE
+    object is ORA-38824 — an undo that fails exactly when it is needed."""
+    body = "PROCEDURE p AS BEGIN NULL; END;"
+    assert pythia.render_restore("PROCEDURE", "P", body, "CREATE OR REPLACE " + body) \
+        == "CREATE OR REPLACE " + body + "\n"
+    assert pythia.render_restore(
+        "PROCEDURE", "P", body,
+        "create or replace noneditionable procedure p as begin null; end;") \
+        == "CREATE OR REPLACE NONEDITIONABLE " + body + "\n"
+    # a new object still has no source to put back: undo is a DROP
+    assert pythia.render_restore("PROCEDURE", "P", "", "CREATE OR REPLACE NONEDITIONABLE PROCEDURE p") \
+        == "DROP PROCEDURE P\n"
 
 
 def test_prepare_statement_terminators():
@@ -1473,6 +1499,38 @@ def test_apply_reads_a_bom_file_as_the_statement_it_is():
             pythia.cmd_apply(FakeConn(base_script()), "APP",
                              apply_ns(td, file=str(f)))
         assert "approve --card" in buf.getvalue()      # it previewed
+
+
+def test_apply_previews_a_noneditionable_object_end_to_end():
+    """The reported bug, from the outside: NONEDITIONABLE missed the
+    classifier, fell through to structural — which counts statements by
+    semicolon — and a PL/SQL body came back as 'more than one statement'.
+    The only escape was dropping the keyword, which Oracle then met with
+    ORA-38824. Preview must produce a token, and the restore must keep the
+    property."""
+    import contextlib
+    import io
+    import pathlib
+    src = ("CREATE OR REPLACE NONEDITIONABLE PACKAGE BODY pkg_order AS\n"
+           "  new line;\nEND;\n/\n")
+    with tempfile.TemporaryDirectory() as td:
+        f = pathlib.Path(td) / "f.sql"
+        f.write_text(src, encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.cmd_apply(FakeConn(base_script()), "APP",
+                             apply_ns(td, file=str(f)))
+        out = buf.getvalue()
+        assert "more than one statement" not in out
+        assert "approve --card" in out                  # it previewed
+        entry = pythia.list_journal_entries(td)[0]
+        restore = (pythia.journal_root(td) / entry / "restore.sql").read_text(
+            encoding="utf-8")
+        assert restore.startswith("CREATE OR REPLACE NONEDITIONABLE ")
+        # and the keyword is not shown as a change it is not: ALL_SOURCE holds
+        # no header, so the diff's base has to carry the same one
+        assert "-CREATE OR REPLACE" not in out and "+CREATE OR REPLACE" not in out
+        assert "2 lines changed" in out          # the body line, not the header
 
 
 def test_apply_refuses_when_the_session_schema_is_not_the_configured_one():
