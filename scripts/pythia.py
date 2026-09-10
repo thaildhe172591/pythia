@@ -2331,10 +2331,17 @@ def token_mismatch_message(ns, row_set):
     base = ("The confirmation token does not match: the file or the "
             "database object changed since that preview. Preview again:\n"
             f"  {invocation()} apply {ns.file}")
-    if not row_set:
-        return base
     _, meta = find_preview_by_token(ns.project_root,
                                     str(ns.confirm).strip().lower())
+    if (meta or {}).get("applied"):
+        # the token names a preview that already ran. "the file changed" is
+        # the wrong story, and sends the agent hunting a difference that is
+        # not there
+        return (f"Token {str(ns.confirm).strip().lower()} was already applied "
+                "— one approval, one write.\nPreview again, then get the new "
+                f"token approved:\n  {invocation()} apply {ns.file}")
+    if not row_set:
+        return base
     then = (meta or {}).get("row_set") or {}
     if not then or fingerprint_text(then) == fingerprint_text(row_set):
         return base                       # the file moved, not the rows
@@ -3467,10 +3474,15 @@ def build_parser():
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     forbid_write_flag(argv)
-    for stream in (sys.stdout, sys.stderr):
+    # stdin too, and before anything reads it: the AskUserQuestion hook
+    # payload is UTF-8, and Windows would decode it as cp1252 — an em dash
+    # arrives as mojibake and no approval card ever matches again.
+    # line_buffering keeps stdout in order with stderr when both are pipes,
+    # so a driver error lands after the preview it belongs to, not above it.
+    for stream in (sys.stdout, sys.stderr, sys.stdin):
         try:
-            stream.reconfigure(encoding="utf-8")
-        except AttributeError:
+            stream.reconfigure(encoding="utf-8", line_buffering=True)
+        except (AttributeError, ValueError):
             pass
     ns = build_parser().parse_args(argv)
     # refusals that need no database come first — an unreachable or locked

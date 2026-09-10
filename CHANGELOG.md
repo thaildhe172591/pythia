@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.11.2 — 2026-09-11
+
+- **Chat approval was impossible for any card containing a non-ASCII
+  character.** `main()` reconfigured stdout and stderr to UTF-8 but left
+  stdin alone, so on Windows the `AskUserQuestion` hook payload — UTF-8 on a
+  pipe — was decoded as cp1252 and the em dash in *"There is no snapshot for
+  this group — after commit it cannot be undone"* arrived as `â€"`. The card
+  built from the journal still held U+2014, the substring check missed, and
+  the hook answered *"the question did not carry pythia's approval card
+  verbatim"* on a question that carried it exactly. Every structural
+  statement was affected, forever: no amount of re-asking could match.
+  Reported live on CORE_BH, where three approvals in a row were refused while
+  four plain-ASCII cards on the same object went through. stdin now joins the
+  other two streams. The whitespace-insensitive comparison was never the
+  problem, and is unchanged.
+- Console output no longer prints out of order when both streams are pipes.
+  stdout was block-buffered while stderr was not, so a driver error — an
+  ORA-38824 from `apply --confirm` — surfaced *above* the preview it belonged
+  to, with `Snapshot saved` as the last line, and a failed apply read like a
+  successful preview. The streams are line-buffered now, so the conclusion is
+  wherever it actually happened: last.
+- `apply --confirm` with a token from a preview that already ran says so,
+  instead of blaming the file. *"The file or the database object changed
+  since that preview"* is a different bug with a different fix, and it sent
+  agents hunting a difference that was not there.
+
 ## 0.11.1 — 2026-09-05
 
 - **NONEDITIONABLE objects could not go through `apply` at all.** The

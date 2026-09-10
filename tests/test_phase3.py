@@ -1565,5 +1565,49 @@ def main():
     print("OK")
 
 
+
+
+def test_hook_matches_a_card_with_a_non_ascii_dash_through_real_stdin():
+    """The whole hook, end to end, the way Claude Code runs it: UTF-8 bytes on
+    a pipe. Windows decodes stdin as cp1252 unless told otherwise, and the em
+    dash in the structural card would arrive as mojibake — no card would ever
+    match again. Subprocess on purpose: an in-process StringIO is already
+    decoded and cannot fail this way."""
+    import subprocess
+    with tempfile.TemporaryDirectory() as td:
+        stmt = "ALTER PROCEDURE PKG_ORDER COMPILE;"
+        pythia.write_journal_entry(
+            td, "STRUCTURAL", "STATEMENT", "", stmt,
+            {"token": "dc8d27", "connection": "DEV", "schema": "APP",
+             "group": "structural", "applied": False})
+        _, _, body = pythia.approval_card(td, "dc8d27")
+        card = "python -m pythia approve dc8d27\n" + "\n".join(body)
+        assert "—" in card, "the structural card is the non-ASCII one"
+        payload = json.dumps(_hook_payload(card, "Approve"), ensure_ascii=False)
+        p = subprocess.run(
+            [sys.executable,
+             str(pathlib.Path(pythia.__file__).resolve()), "approve", "--hook"],
+            input=payload.encode("utf-8"), cwd=td, capture_output=True)
+        assert p.returncode == 0, p.stderr.decode("utf-8", "replace")
+        g = pythia.read_grant(td, "dc8d27")
+        assert g and g["approver"] == "chat", p.stdout.decode("utf-8", "replace")
+
+
+def test_token_mismatch_names_an_already_applied_preview():
+    """A spent token is not a moved file. Saying 'the file or the object
+    changed' sends the agent looking for a difference that is not there."""
+    import argparse
+    with tempfile.TemporaryDirectory() as td:
+        pythia.write_journal_entry(
+            td, "PACKAGE BODY", "PKG_ORDER", OLD_SRC, NEW_FILE,
+            {"token": "7f3a91", "connection": "DEV", "schema": "APP",
+             "group": "plsql_source", "applied": True})
+        ns = argparse.Namespace(project_root=td, confirm="7f3a91",
+                                file="pkg.sql")
+        msg = pythia.token_mismatch_message(ns, None)
+        assert "already applied" in msg and "changed since that preview" not in msg
+
+
+
 if __name__ == "__main__":
     main()
