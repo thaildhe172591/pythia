@@ -10,8 +10,7 @@ description: Use when a PL/SQL change is ready to reach the database - applying 
 **Phase:** Ask → Do — the preview is relayed and approved before the one write door opens
 
 DDL in Oracle commits itself, so the snapshot pythia takes before writing is
-the only undo there is — and for DML not even that. This skill exists so that
-net is always used, and used honestly.
+the only undo there is — for DML not even that. This skill is how it gets used.
 
 ## The Iron Law
 
@@ -54,20 +53,21 @@ confirms a number you already knew.
    warning, exactly as printed. The developer approves what they see, not
    your paraphrase.
 3. **Ask for approval — one question per token.** `pythia approve --card
-   <token>` prints the card; ask an `AskUserQuestion` whose text is that card
-   verbatim (header `pythia`; options exactly `Approve` / `Reject`, no
-   "(Recommended)"; up to four tokens per call). `Approve` mints the grant via
-   the hook. Anything else — `Reject`, free text, silence, an earlier preview's
-   yes — is not approval: stop and ask what should change. File changed → step 1.
-   No hook installed? Relay `pythia approve <token>` for their own terminal.
+   <token>` prints the card; the `AskUserQuestion` text is that card and
+   nothing else — no word before it, no translation after it, no framing of
+   your own. The hook compares question to card, mints nothing when they
+   differ, and by then the developer has already clicked. Put the explanation
+   in the option descriptions; the hook does not read those. Header `pythia`;
+   options exactly `Approve` / `Reject`, no "(Recommended)"; up to four tokens
+   per call. Anything but `Approve` is not approval: stop and ask what should
+   change. File changed → step 1. No hook? Relay `pythia approve <token>`.
 4. **Apply** by running the exact `then the agent:` line pythia printed. Two
    refusals are normal here, and neither is a malfunction:
    - *"no developer approval is on file"* — the answer was not `Approve`, or
      the hook is not installed. Say so and wait; retrying does not create it.
    - *"the confirmation token does not match"* — the file or the database
-     changed since the preview. Go back to step 1, never "retry". If the fresh
-     preview's before-side differs from what you last saw, say so: someone may
-     have changed the object on this shared database.
+     changed since the preview. Go back to step 1, never "retry"; the fresh
+     preview warns by itself when the object moved outside pythia.
 5. **Read the exit code — it is the verdict. Never through a pipe:**
    `apply … | tail` returns *tail's* code, always 0. Unpiped, or `${PIPESTATUS[0]}`.
 
@@ -135,7 +135,7 @@ affected count and up to ten rows, and `--confirm` refuses if that set moved.
 | "I'll restore quietly to clean up my mistake" | Restores are writes. Same gate, same visibility. |
 | "`$?` said 0 after I piped to tail" | That was tail's 0. Read pythia's own words, or its unpiped code. |
 | "I'll run approve myself to unblock this" | The developer's act. Console approve refuses you; the hook mints only from *their* answer. Routing around it is what this gate exists to stop. |
-| "I'll summarise the card so the question reads nicer" | The hook refuses a paraphrase — the developer must approve pythia's words, not yours. Paste the card verbatim. |
+| "I'll add a line of my own around the card" | Any added word voids it, and the refusal arrives after they have clicked. Explanation goes in the option description. |
 
 ## When NOT to use this skill
 
