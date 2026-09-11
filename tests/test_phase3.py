@@ -492,6 +492,44 @@ def test_apply_writes_the_editionable_keyword_the_database_holds():
         assert e["restore"].upper().startswith("CREATE OR REPLACE NONEDITIONABLE")
 
 
+def test_drift_note_fires_only_when_the_object_moved():
+    """The field case: pythia wrote 118 lines, read them back two seconds
+    later, and eight minutes on the database held 117 — with no journal entry
+    in between. `src` was honest both times; nothing ever compared them."""
+    mine = "CREATE OR REPLACE PACKAGE BODY pkg_order AS\n  a;\n  b;\nEND;\n"
+    same = "PACKAGE BODY pkg_order AS\n  a;\n  b;\nEND;"
+    assert pythia.drift_note(same, mine, "E1") is None
+    # trailing whitespace is not drift
+    assert pythia.drift_note(same + "\n\n", mine, "E1") is None
+    assert pythia.drift_note(same.replace("\n", "\r\n"), mine, "E1") is None
+    # a line gone is
+    note = pythia.drift_note("PACKAGE BODY pkg_order AS\n  a;\nEND;", mine, "E1")
+    assert note and "E1" in note and "1 line" in note
+    # nothing to compare against
+    assert pythia.drift_note(same, "", "E1") is None
+    assert pythia.drift_note(same, None, None) is None
+
+
+def test_preview_warns_when_the_object_changed_outside_pythia():
+    with tempfile.TemporaryDirectory() as td:
+        # pythia applied this text once
+        pythia.write_journal_entry(
+            td, "PACKAGE BODY", "PKG_ORDER", "older\n",
+            "CREATE OR REPLACE " + OLD_SRC,
+            {"token": "aaaaaa", "connection": "DEV", "schema": "APP",
+             "group": "plsql_source", "applied": True})
+        # ...and the database now holds something else
+        moved = OLD_SRC.replace("  old line;\n", "")
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.run_apply(FakeConn(base_script(db_source=moved)), "APP",
+                             apply_ns(td), NEW_FILE)
+        out = buf.getvalue()
+        assert "outside pythia" in out and "1 line" in out, out
+
+
 def test_apply_preview_writes_nothing_and_gives_token():
     with tempfile.TemporaryDirectory() as td:
         conn = FakeConn(base_script())

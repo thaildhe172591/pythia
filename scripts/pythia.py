@@ -1293,6 +1293,54 @@ def create_prefix(after_text):
     return "CREATE OR REPLACE " + (f"{m.group(1).upper()} " if m else "")
 
 
+def source_body(after_text):
+    """The ALL_SOURCE-shaped half of a stored statement. create_prefix builds
+    the header ALL_SOURCE does not keep; this drops it again, plus the
+    SQL*Plus terminator, so the two can be compared as equals."""
+    body = skip_leading_noise(prepare_statement(after_text, "plsql_source"))
+    m = CREATE_HEAD_RE.match(body)
+    return body[m.end():] if m else body
+
+
+def drift_note(db_source, last_applied, entry):
+    """Whether the object moved since pythia last wrote it.
+
+    The snapshot proves what pythia did; nothing ever proved what anyone else
+    did. In the field a comment line was written, read back intact two seconds
+    later, and gone eight minutes on with no journal entry in between — and
+    the developer went hunting a lying `src` instead of a second writer. The
+    journal held both halves of the answer the whole time and nothing compared
+    them. Warn, never refuse: editing by hand is legitimate, not noticing is
+    not."""
+    if not last_applied or not db_source.strip():
+        return None
+    mine = source_body(last_applied).replace("\r\n", "\n").rstrip()
+    now = db_source.replace("\r\n", "\n").rstrip()
+    if mine == now:
+        return None
+    delta = len(now.splitlines()) - len(mine.splitlines())
+    how = (f"{abs(delta)} line{'s' if abs(delta) != 1 else ''} "
+           + ("more" if delta > 0 else "fewer")) if delta else         "the same line count, different text"
+    return (f"This object changed outside pythia since {entry} ({how}). The "
+            "diff below is\n  against the database as it stands now, not "
+            "against what pythia wrote.")
+
+
+def last_applied_after(root, obj_type, name):
+    """The text pythia last actually wrote to this object, from the journal."""
+    for eid in list_journal_entries(root):
+        try:
+            e = read_journal_entry(root, eid)
+        except SystemExit:
+            continue
+        meta = e["meta"]
+        if (meta.get("applied")
+                and str(meta.get("object", "")).upper() == name.upper()
+                and str(meta.get("type", "")).upper() == obj_type.upper()):
+            return eid, e["after"]
+    return None, None
+
+
 def render_restore(obj_type, name, before_text, after_text=""):
     """The statement that puts things back. For an object that did not exist,
     undo means DROP — a genuinely different promise than restoring source, so
@@ -2162,6 +2210,11 @@ def run_apply(conn, schema, ns, file_text, origin=None):
     # DROP-shaped undo that does not exist for those groups.
     created = not db_source.strip() and group == "plsql_source"
 
+    drift = None
+    if group == "plsql_source" and db_source.strip():
+        eid, last = last_applied_after(ns.project_root, otype, name)
+        drift = drift_note(db_source, last, eid)
+
     # 2. IMPACT
     summary = ""
     if group == "plsql_source":
@@ -2185,7 +2238,8 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                           "summary": summary, "warning": warn,
                           "row_set": row_set,
                           "naming_warning": style,
-                          "editionable_note": edition_note, "token": token,
+                          "editionable_note": edition_note, "drift": drift,
+                          "token": token,
                           "journal": entry, "will_apply": confirmed}))
     else:
         en = getattr(ns, "color", False)
@@ -2209,6 +2263,8 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         elif group == "data_dml":
             print("\n  INSERT — no rows exist beforehand, so there is no row "
                   "set to revalidate.")
+        if drift:
+            print(f"\n  {paint('! ' + drift, 'yellow', en)}")
         if edition_note:
             print(f"\n  {paint('! ' + edition_note, 'yellow', en)}")
         if warn:
