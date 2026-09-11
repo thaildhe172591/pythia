@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.12.0 — 2026-09-11
+
+Five findings from one session on an editions-enabled schema, 10-11/09. Two
+of the four bugs reported were already half-fixed by 0.11.1 and 0.11.2; the
+halves that were left are here, and the one whose cause turned out to be
+something else entirely got the fix the evidence asked for instead of the
+one that was requested.
+
+- **A refused write still read like one that landed.** 0.11.2 put the driver
+  error back in its place by line-buffering both streams, but the last word
+  was `Oracle error: ORA-38824` from a top-level handler, printed after the
+  preview, the diff and `Snapshot saved` had all gone out. Read through
+  `| tail -20` — which is how an agent reads it — the run was
+  indistinguishable from a success. `cur.execute` is guarded now, and apply
+  says `FAILED — nothing was written`, plus the thing the reader needs next:
+  the approval was not spent, because it never got as far as spending it.
+- **`apply` asks the database which editionable keyword the object has.**
+  0.11.1 taught the classifier, the journal header and the diff to carry
+  NONEDITIONABLE, and all three read it off the file. Nobody asked the
+  database, so the loop stayed open: `ALL_SOURCE` stores no CREATE header,
+  `src` hands back a bare `PROCEDURE "NAME"`, the statement built from it
+  says `CREATE OR REPLACE PROCEDURE`, and Oracle answers ORA-38824 — after
+  the developer has approved a preview that could never have worked.
+  `name-occupants.sql` was already asking `ALL_OBJECTS` about that owner and
+  name, so it returns `EDITIONABLE` too, and the statement is reconciled to
+  it once, before the snapshot. Announced in the preview, never silent; the
+  file on disk is untouched; the confirm token still hashes the file, so
+  reconciling does not move it. The journal records what ran rather than
+  what the file said, or `restore.sql` would rebuild its header without the
+  keyword and put the 0.11.1 bug back in the undo.
+- **The preview says when the object moved outside pythia.** Reported as
+  *`src` returned a line the database does not have*. The journal disagrees,
+  and the journal is a recording: an apply wrote 118 lines, the preview two
+  seconds later read 118 back with the line intact, and eight minutes on the
+  next preview read 117 without it — no entry in between. `src` was honest at
+  both readings; something that was not pythia did the writing. Every apply
+  already stores what it wrote, so the preview now compares that against
+  `ALL_SOURCE` as it stands and reports the line delta and the entry to look
+  at. A warning, not a refusal: editing by hand between two runs is
+  legitimate, and not noticing is the only part that hurts. Replayed over the
+  41 journal entries that produced the report it fires three times, all three
+  after the line vanished, and stays quiet on the read two seconds after the
+  write. IDEAS.md parked this as *cooperative object lock* on the strength of
+  an argument; it has a recording now.
+- **The approval question is the card, and only the card.** *"An
+  `AskUserQuestion` whose text is that card verbatim"* read, to at least one
+  agent, as *contains* that card verbatim. It wrapped the card in a sentence
+  of its own; the hook refused the paraphrase, correctly — and the refusal
+  arrived after the developer had already clicked Approve, because
+  `PostToolUse` is the only moment a hook gets. The wasted click is the whole
+  cost of the ambiguity, so `pythia-apply` now forbids the specific thing
+  that happened, and says where the explanation goes instead: the option
+  descriptions, which nothing compares against.
+- **`pythia-comment` is the eleventh skill.** One line,
+  `date - author - what changed`, ASCII, and a table of where the second line
+  belongs instead. It earned the slot in the same session: a five-line
+  explanatory block above a single select-list expression, one of whose lines
+  was then lost to a second writer — and that loss is what sent the developer
+  hunting a bug in `src`. Scoped to PL/SQL and `.sql` deliverables; the draft
+  also covered C#, JS and Razor, but this pack installs into every project a
+  developer has.
+
 ## 0.11.2 — 2026-09-11
 
 - **Chat approval was impossible for any card containing a non-ASCII

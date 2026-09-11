@@ -153,7 +153,7 @@ def test_no_manifest_hardcodes_a_stale_skill_count():
     so the check is: no manifest states a number the code can disprove."""
     import json
     n = len(EXPECTED)
-    words = {7: "seven", 8: "eight", 9: "nine"}
+    words = {7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven"}
     stale = [w for k, w in words.items() if k != n]
     for rel in (".claude-plugin/marketplace.json", "npm/package.json",
                 "npm/README.md"):
