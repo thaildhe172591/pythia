@@ -473,6 +473,45 @@ def test_apply_correct_token_writes_and_verifies_clean():
         assert e["meta"]["applied"] is True
 
 
+class ExplodingConn(FakeConn):
+    """The driver refuses the write. ORA-38824 on an editions-enabled schema
+    is the case that prompted this: by the time it lands, the preview and
+    "Snapshot saved" have already printed, so the run reads like a success."""
+
+    def __init__(self, script, error="ORA-38824: cannot change the EDITIONABLE "
+                                     "property of an existing object"):
+        super().__init__(script)
+        self.error = error
+
+    def cursor(self):
+        cur = super().cursor()
+        passthrough = cur.execute
+
+        def execute(sql, binds=None):
+            if sql.lstrip().lower().startswith("create"):
+                raise RuntimeError(self.error)
+            return passthrough(sql, binds)
+
+        cur.execute = execute
+        return cur
+
+
+def test_failed_apply_ends_in_a_verdict_and_keeps_the_approval():
+    """A write that the driver refused must not read like one that landed:
+    the last word is the failure, and it says nothing was written."""
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")
+        conn = ExplodingConn(base_script())
+        expect_exit(lambda: pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok),
+                                             NEW_FILE),
+                    "failed", "nothing was written", "ORA-38824")
+        eid = pythia.list_journal_entries(td)[0]
+        assert pythia.read_journal_entry(td, eid)["meta"]["applied"] is False
+        # one approval, one write — and there was no write, so it still stands
+        assert pythia.read_grant(td, tok)["used_at"] is None
+
+
 def test_apply_stale_token_refused():
     with tempfile.TemporaryDirectory() as td:
         tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", "something else", OLD_SRC)
@@ -538,7 +577,7 @@ def test_apply_snapshot_survives_failed_execute():
         conn = Exploding(base_script())
         try:
             pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
-        except RuntimeError:
+        except SystemExit:          # the driver error, now a closing verdict
             pass
         ids = pythia.list_journal_entries(td)
         assert len(ids) == 1                              # snapshot was already on disk

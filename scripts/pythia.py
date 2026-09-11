@@ -2203,7 +2203,15 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             cur.execute("ALTER SESSION SET plscope_settings = "
                         "'IDENTIFIERS:ALL, STATEMENTS:ALL'")
     with conn.cursor() as cur:
-        cur.execute(stmt)
+        try:
+            cur.execute(stmt)
+        except Exception as e:            # noqa: BLE001 - the driver refused
+            # the preview and "Snapshot saved" printed before this line ran,
+            # so without a closing verdict the run reads like one that landed
+            sys.exit(f"FAILED — nothing was written.\n{e}\n"
+                     "The object is unchanged. The approval is unspent: retry "
+                     "the same file with the same token, or fix the file and "
+                     "preview again for a new one.")
         affected = cur.rowcount if group == "data_dml" else None
     if group == "data_dml":
         # the last-millisecond check: the probe ran before this statement, and
