@@ -1240,6 +1240,46 @@ EDITIONABLE_KW_RE = re.compile(
     r"^create\s+(?:or\s+replace\s+)?((?:non?)?editionable)\b", re.I)
 
 
+CREATE_HEAD_RE = re.compile(
+    r"^(create\s+(?:or\s+replace\s+)?)((?:non?)?editionable\s+)?", re.I)
+
+
+def reconcile_editionable(stmt, editionable):
+    """Make the statement agree with the property the database already holds.
+
+    ALL_SOURCE stores no CREATE header, so a body read back with `src` comes
+    back bare and the keyword is the easiest thing in Oracle to lose — and
+    Oracle refuses to *change* the property through CREATE OR REPLACE, so the
+    statement cannot succeed. Left alone, ORA-38824 lands after the developer
+    has already approved the preview. Nothing here is guessed:
+    ALL_OBJECTS.EDITIONABLE is the answer, and the edit is announced.
+
+    Returns (statement, note). The file on disk is never touched."""
+    if editionable not in ("Y", "N"):
+        return stmt, None      # a new object, or a type that has no edition
+    body = skip_leading_noise(stmt)
+    m = CREATE_HEAD_RE.match(body)
+    if not m:
+        return stmt, None
+    have = (m.group(2) or "").strip().upper()
+    if editionable == "N":
+        want = "NONEDITIONABLE"
+    else:
+        # only NONEDITIONABLE contradicts an editionable object; a bare header
+        # and an explicit EDITIONABLE both say the same thing to Oracle
+        want = "" if have.endswith("EDITIONABLE") and have != "EDITIONABLE" else have
+    if have == want:
+        return stmt, None
+    head = stmt[:len(stmt) - len(body)]
+    fixed = head + m.group(1) + (want + " " if want else "") + body[m.end():]
+    verb = "added" if want else "removed"
+    # two lines, indented like the other preview warnings: one long line wraps
+    # into noise in a terminal
+    return fixed, (f"NONEDITIONABLE {verb} to match the object in the "
+                   "database — Oracle cannot\n  change that property through "
+                   "CREATE OR REPLACE (ORA-38824). Your file is unchanged.")
+
+
 def create_prefix(after_text):
     """The CREATE header ALL_SOURCE does not store, rebuilt for the version
     held in the database. The editionable keyword is read off the file being
@@ -2046,6 +2086,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
               "invocation's connection, which is now over.")
         return 0
 
+    edition_note = None
     if group == "plsql_source":
         otype, name, file_schema = parse_object(file_text)
         if file_schema and file_schema.upper() != schema:
@@ -2056,6 +2097,9 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         _, occ_rows = run_query(conn, load_query("name-occupants.sql"),
                                 {"s": schema, "n": name})
         blockers = name_conflicts(otype, [r[0] for r in occ_rows])
+        stmt, edition_note = reconcile_editionable(
+            stmt, next((cell(r[1]) for r in occ_rows
+                        if str(r[0]).upper() == otype.upper()), None))
         if blockers:
             sys.exit(f"{name} already exists as {', '.join(blockers)} in {schema} "
                      "— CREATE OR REPLACE cannot change an object's type "
@@ -2112,7 +2156,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             "tty": human_at_the_keyboard(),
             "invalid_before": invalid_before, **(origin or {})}
     entry = write_journal_entry(ns.project_root, otype, name, db_source,
-                                file_text, meta)
+                                stmt if edition_note else file_text, meta)
     # "created" is about an OBJECT that did not exist. A DML/DDL statement has
     # no object identity, so it is never "new" — and saying so would promise a
     # DROP-shaped undo that does not exist for those groups.
@@ -2140,7 +2184,8 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                           "created": created, "changed_lines": changed,
                           "summary": summary, "warning": warn,
                           "row_set": row_set,
-                          "naming_warning": style, "token": token,
+                          "naming_warning": style,
+                          "editionable_note": edition_note, "token": token,
                           "journal": entry, "will_apply": confirmed}))
     else:
         en = getattr(ns, "color", False)
@@ -2164,6 +2209,8 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         elif group == "data_dml":
             print("\n  INSERT — no rows exist beforehand, so there is no row "
                   "set to revalidate.")
+        if edition_note:
+            print(f"\n  {paint('! ' + edition_note, 'yellow', en)}")
         if warn:
             print(f"\n  {paint(warn, 'yellow', en)}")
         if style:

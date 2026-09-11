@@ -249,7 +249,8 @@ OLD_SRC = "PACKAGE BODY pkg_order AS\n  old line;\nEND;\n"
 NEW_FILE = "CREATE OR REPLACE PACKAGE BODY pkg_order AS\n  new line;\nEND;\n/\n"
 
 
-def base_script(errors=(), invalid_after=None, db_source=OLD_SRC):
+def base_script(errors=(), invalid_after=None, db_source=OLD_SRC,
+                editionable="Y"):
     invalid_before = [("X_ALREADY_BROKEN", "PROCEDURE")]
     return {
         "from all_source": ([("TEXT",)], [(ln + "\n",) for ln in db_source.splitlines()]),
@@ -268,7 +269,8 @@ def base_script(errors=(), invalid_after=None, db_source=OLD_SRC):
         "from session_privs": ([("PRIVILEGE",)], []),
         "current_schema": ([("CURRENT_SCHEMA",)], [("APP",)]),
         # main-namespace occupants of the target name (type-conflict check)
-        "object_name = upper(:n)": ([("OBJECT_TYPE",)], [("PACKAGE BODY",)]),
+        "object_name = upper(:n)": ([("OBJECT_TYPE", "EDITIONABLE")],
+                                    [("PACKAGE BODY", editionable)]),
     }
 
 
@@ -445,6 +447,49 @@ def test_insert_needs_no_row_set():
         assert not [s for s, _ in conn.executed if "ora_hash" in s.lower()]
         entry = pythia.list_journal_entries(td)[0]
         assert pythia.read_journal_entry(td, entry)["meta"]["row_set"] is None
+
+
+def test_reconcile_editionable_matches_the_database():
+    """ALL_SOURCE stores no CREATE header, so a body read back with `src`
+    comes back bare and the keyword is the easiest thing in Oracle to lose.
+    Oracle will not change the property through CREATE OR REPLACE, so the
+    statement has to agree with the object before it runs."""
+    r = pythia.reconcile_editionable
+    bare = "CREATE OR REPLACE PROCEDURE p AS BEGIN NULL; END;"
+    non = "CREATE OR REPLACE NONEDITIONABLE PROCEDURE p AS BEGIN NULL; END;"
+    stmt, note = r(bare, "N")
+    assert stmt == non and "NONEDITIONABLE" in note
+    stmt, note = r(non, "Y")
+    assert stmt == bare and "NONEDITIONABLE" in note
+    # already agreed: untouched, and nothing to announce
+    assert r(non, "N") == (non, None)
+    assert r(bare, "Y") == (bare, None)
+    # no property to match: a new object, or a type that cannot be editioned
+    assert r(bare, None) == (bare, None)
+    # the old misspelling is not the property Oracle holds either
+    stmt, _ = r("create or replace NOEDITIONABLE procedure p as begin null; end;", "N")
+    assert stmt.startswith("create or replace NONEDITIONABLE ")
+    # leading comments keep their place
+    stmt, _ = r("-- header\ncreate or replace procedure p as begin null; end;", "N")
+    assert stmt.startswith("-- header\ncreate or replace NONEDITIONABLE ")
+
+
+def test_apply_writes_the_editionable_keyword_the_database_holds():
+    """The whole point is that ORA-38824 never reaches the developer: they
+    approved a preview, and the write has to be able to succeed."""
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")
+        conn = FakeConn(base_script(editionable="N"))
+        code = pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
+        assert code == 0
+        ddl = wrote_ddl(conn)
+        assert len(ddl) == 1 and ddl[0].lstrip().upper().startswith(
+            "CREATE OR REPLACE NONEDITIONABLE PACKAGE BODY"), ddl
+        # the journal records what ran, so the undo keeps the property too
+        e = pythia.read_journal_entry(td, pythia.list_journal_entries(td)[0])
+        assert "NONEDITIONABLE" in e["after"]
+        assert e["restore"].upper().startswith("CREATE OR REPLACE NONEDITIONABLE")
 
 
 def test_apply_preview_writes_nothing_and_gives_token():
@@ -1557,7 +1602,9 @@ def test_apply_previews_a_noneditionable_object_end_to_end():
         f.write_text(src, encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            pythia.cmd_apply(FakeConn(base_script()), "APP",
+            # the object really is NONEDITIONABLE in the database, which is
+            # what makes the keyword in the file the right one
+            pythia.cmd_apply(FakeConn(base_script(editionable="N")), "APP",
                              apply_ns(td, file=str(f)))
         out = buf.getvalue()
         assert "more than one statement" not in out

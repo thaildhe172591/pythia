@@ -5,8 +5,9 @@
 --          ORA-00955. Found by an agent during the first field test.
 -- Binds:   :s  schema (object owner)
 --          :n  object name
--- Returns: OBJECT_TYPE
-select object_type
+-- Returns: OBJECT_TYPE, EDITIONABLE ('Y'/'N', null when the type
+--          has no edition — the apply reconciles the keyword to it)
+select object_type, editionable
   from all_objects
  where owner = :s
    and object_name = upper(:n)
