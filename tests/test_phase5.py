@@ -13,7 +13,7 @@ SKILLS = ROOT / "skills"
 EXPECTED = {"pythia-setup", "pythia-explore", "pythia-impact",
             "pythia-write", "pythia-apply", "pythia-review",
             "pythia-skill-author", "pythia-conventions", "pythia-spec",
-            "using-pythia"}
+            "pythia-comment", "using-pythia"}
 
 # spec: SKILL.md under 150 lines, detail pushed to reference/
 MAX_LINES = 150
@@ -153,7 +153,7 @@ def test_no_manifest_hardcodes_a_stale_skill_count():
     so the check is: no manifest states a number the code can disprove."""
     import json
     n = len(EXPECTED)
-    words = {7: "seven", 8: "eight", 9: "nine"}
+    words = {7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven"}
     stale = [w for k, w in words.items() if k != n]
     for rel in (".claude-plugin/marketplace.json", "npm/package.json",
                 "npm/README.md"):

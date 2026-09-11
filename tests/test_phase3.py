@@ -249,7 +249,8 @@ OLD_SRC = "PACKAGE BODY pkg_order AS\n  old line;\nEND;\n"
 NEW_FILE = "CREATE OR REPLACE PACKAGE BODY pkg_order AS\n  new line;\nEND;\n/\n"
 
 
-def base_script(errors=(), invalid_after=None, db_source=OLD_SRC):
+def base_script(errors=(), invalid_after=None, db_source=OLD_SRC,
+                editionable="Y"):
     invalid_before = [("X_ALREADY_BROKEN", "PROCEDURE")]
     return {
         "from all_source": ([("TEXT",)], [(ln + "\n",) for ln in db_source.splitlines()]),
@@ -268,7 +269,8 @@ def base_script(errors=(), invalid_after=None, db_source=OLD_SRC):
         "from session_privs": ([("PRIVILEGE",)], []),
         "current_schema": ([("CURRENT_SCHEMA",)], [("APP",)]),
         # main-namespace occupants of the target name (type-conflict check)
-        "object_name = upper(:n)": ([("OBJECT_TYPE",)], [("PACKAGE BODY",)]),
+        "object_name = upper(:n)": ([("OBJECT_TYPE", "EDITIONABLE")],
+                                    [("PACKAGE BODY", editionable)]),
     }
 
 
@@ -447,6 +449,87 @@ def test_insert_needs_no_row_set():
         assert pythia.read_journal_entry(td, entry)["meta"]["row_set"] is None
 
 
+def test_reconcile_editionable_matches_the_database():
+    """ALL_SOURCE stores no CREATE header, so a body read back with `src`
+    comes back bare and the keyword is the easiest thing in Oracle to lose.
+    Oracle will not change the property through CREATE OR REPLACE, so the
+    statement has to agree with the object before it runs."""
+    r = pythia.reconcile_editionable
+    bare = "CREATE OR REPLACE PROCEDURE p AS BEGIN NULL; END;"
+    non = "CREATE OR REPLACE NONEDITIONABLE PROCEDURE p AS BEGIN NULL; END;"
+    stmt, note = r(bare, "N")
+    assert stmt == non and "NONEDITIONABLE" in note
+    stmt, note = r(non, "Y")
+    assert stmt == bare and "NONEDITIONABLE" in note
+    # already agreed: untouched, and nothing to announce
+    assert r(non, "N") == (non, None)
+    assert r(bare, "Y") == (bare, None)
+    # no property to match: a new object, or a type that cannot be editioned
+    assert r(bare, None) == (bare, None)
+    # the old misspelling is not the property Oracle holds either
+    stmt, _ = r("create or replace NOEDITIONABLE procedure p as begin null; end;", "N")
+    assert stmt.startswith("create or replace NONEDITIONABLE ")
+    # leading comments keep their place
+    stmt, _ = r("-- header\ncreate or replace procedure p as begin null; end;", "N")
+    assert stmt.startswith("-- header\ncreate or replace NONEDITIONABLE ")
+
+
+def test_apply_writes_the_editionable_keyword_the_database_holds():
+    """The whole point is that ORA-38824 never reaches the developer: they
+    approved a preview, and the write has to be able to succeed."""
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")
+        conn = FakeConn(base_script(editionable="N"))
+        code = pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
+        assert code == 0
+        ddl = wrote_ddl(conn)
+        assert len(ddl) == 1 and ddl[0].lstrip().upper().startswith(
+            "CREATE OR REPLACE NONEDITIONABLE PACKAGE BODY"), ddl
+        # the journal records what ran, so the undo keeps the property too
+        e = pythia.read_journal_entry(td, pythia.list_journal_entries(td)[0])
+        assert "NONEDITIONABLE" in e["after"]
+        assert e["restore"].upper().startswith("CREATE OR REPLACE NONEDITIONABLE")
+
+
+def test_drift_note_fires_only_when_the_object_moved():
+    """The field case: pythia wrote 118 lines, read them back two seconds
+    later, and eight minutes on the database held 117 — with no journal entry
+    in between. `src` was honest both times; nothing ever compared them."""
+    mine = "CREATE OR REPLACE PACKAGE BODY pkg_order AS\n  a;\n  b;\nEND;\n"
+    same = "PACKAGE BODY pkg_order AS\n  a;\n  b;\nEND;"
+    assert pythia.drift_note(same, mine, "E1") is None
+    # trailing whitespace is not drift
+    assert pythia.drift_note(same + "\n\n", mine, "E1") is None
+    assert pythia.drift_note(same.replace("\n", "\r\n"), mine, "E1") is None
+    # a line gone is
+    note = pythia.drift_note("PACKAGE BODY pkg_order AS\n  a;\nEND;", mine, "E1")
+    assert note and "E1" in note and "1 line" in note
+    # nothing to compare against
+    assert pythia.drift_note(same, "", "E1") is None
+    assert pythia.drift_note(same, None, None) is None
+
+
+def test_preview_warns_when_the_object_changed_outside_pythia():
+    with tempfile.TemporaryDirectory() as td:
+        # pythia applied this text once
+        pythia.write_journal_entry(
+            td, "PACKAGE BODY", "PKG_ORDER", "older\n",
+            "CREATE OR REPLACE " + OLD_SRC,
+            {"token": "aaaaaa", "connection": "DEV", "schema": "APP",
+             "group": "plsql_source", "applied": True})
+        # ...and the database now holds something else
+        moved = OLD_SRC.replace("  old line;\n", "")
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.run_apply(FakeConn(base_script(db_source=moved)), "APP",
+                             apply_ns(td), NEW_FILE)
+        out = buf.getvalue()
+        assert "outside pythia" in out and "1 line" in out, out
+
+
 def test_apply_preview_writes_nothing_and_gives_token():
     with tempfile.TemporaryDirectory() as td:
         conn = FakeConn(base_script())
@@ -471,6 +554,45 @@ def test_apply_correct_token_writes_and_verifies_clean():
         e = pythia.read_journal_entry(td, eid)
         assert e["before"].rstrip() == OLD_SRC.rstrip()
         assert e["meta"]["applied"] is True
+
+
+class ExplodingConn(FakeConn):
+    """The driver refuses the write. ORA-38824 on an editions-enabled schema
+    is the case that prompted this: by the time it lands, the preview and
+    "Snapshot saved" have already printed, so the run reads like a success."""
+
+    def __init__(self, script, error="ORA-38824: cannot change the EDITIONABLE "
+                                     "property of an existing object"):
+        super().__init__(script)
+        self.error = error
+
+    def cursor(self):
+        cur = super().cursor()
+        passthrough = cur.execute
+
+        def execute(sql, binds=None):
+            if sql.lstrip().lower().startswith("create"):
+                raise RuntimeError(self.error)
+            return passthrough(sql, binds)
+
+        cur.execute = execute
+        return cur
+
+
+def test_failed_apply_ends_in_a_verdict_and_keeps_the_approval():
+    """A write that the driver refused must not read like one that landed:
+    the last word is the failure, and it says nothing was written."""
+    with tempfile.TemporaryDirectory() as td:
+        tok = pythia.apply_token("PACKAGE BODY", "PKG_ORDER", NEW_FILE, OLD_SRC)
+        pythia.mint_grant(td, tok, "DEV")
+        conn = ExplodingConn(base_script())
+        expect_exit(lambda: pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok),
+                                             NEW_FILE),
+                    "failed", "nothing was written", "ORA-38824")
+        eid = pythia.list_journal_entries(td)[0]
+        assert pythia.read_journal_entry(td, eid)["meta"]["applied"] is False
+        # one approval, one write — and there was no write, so it still stands
+        assert pythia.read_grant(td, tok)["used_at"] is None
 
 
 def test_apply_stale_token_refused():
@@ -538,7 +660,7 @@ def test_apply_snapshot_survives_failed_execute():
         conn = Exploding(base_script())
         try:
             pythia.run_apply(conn, "APP", apply_ns(td, confirm=tok), NEW_FILE)
-        except RuntimeError:
+        except SystemExit:          # the driver error, now a closing verdict
             pass
         ids = pythia.list_journal_entries(td)
         assert len(ids) == 1                              # snapshot was already on disk
@@ -1518,7 +1640,9 @@ def test_apply_previews_a_noneditionable_object_end_to_end():
         f.write_text(src, encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            pythia.cmd_apply(FakeConn(base_script()), "APP",
+            # the object really is NONEDITIONABLE in the database, which is
+            # what makes the keyword in the file the right one
+            pythia.cmd_apply(FakeConn(base_script(editionable="N")), "APP",
                              apply_ns(td, file=str(f)))
         out = buf.getvalue()
         assert "more than one statement" not in out

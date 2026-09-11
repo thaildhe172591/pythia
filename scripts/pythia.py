@@ -1240,6 +1240,46 @@ EDITIONABLE_KW_RE = re.compile(
     r"^create\s+(?:or\s+replace\s+)?((?:non?)?editionable)\b", re.I)
 
 
+CREATE_HEAD_RE = re.compile(
+    r"^(create\s+(?:or\s+replace\s+)?)((?:non?)?editionable\s+)?", re.I)
+
+
+def reconcile_editionable(stmt, editionable):
+    """Make the statement agree with the property the database already holds.
+
+    ALL_SOURCE stores no CREATE header, so a body read back with `src` comes
+    back bare and the keyword is the easiest thing in Oracle to lose — and
+    Oracle refuses to *change* the property through CREATE OR REPLACE, so the
+    statement cannot succeed. Left alone, ORA-38824 lands after the developer
+    has already approved the preview. Nothing here is guessed:
+    ALL_OBJECTS.EDITIONABLE is the answer, and the edit is announced.
+
+    Returns (statement, note). The file on disk is never touched."""
+    if editionable not in ("Y", "N"):
+        return stmt, None      # a new object, or a type that has no edition
+    body = skip_leading_noise(stmt)
+    m = CREATE_HEAD_RE.match(body)
+    if not m:
+        return stmt, None
+    have = (m.group(2) or "").strip().upper()
+    if editionable == "N":
+        want = "NONEDITIONABLE"
+    else:
+        # only NONEDITIONABLE contradicts an editionable object; a bare header
+        # and an explicit EDITIONABLE both say the same thing to Oracle
+        want = "" if have.endswith("EDITIONABLE") and have != "EDITIONABLE" else have
+    if have == want:
+        return stmt, None
+    head = stmt[:len(stmt) - len(body)]
+    fixed = head + m.group(1) + (want + " " if want else "") + body[m.end():]
+    verb = "added" if want else "removed"
+    # two lines, indented like the other preview warnings: one long line wraps
+    # into noise in a terminal
+    return fixed, (f"NONEDITIONABLE {verb} to match the object in the "
+                   "database — Oracle cannot\n  change that property through "
+                   "CREATE OR REPLACE (ORA-38824). Your file is unchanged.")
+
+
 def create_prefix(after_text):
     """The CREATE header ALL_SOURCE does not store, rebuilt for the version
     held in the database. The editionable keyword is read off the file being
@@ -1251,6 +1291,54 @@ def create_prefix(after_text):
     approves."""
     m = EDITIONABLE_KW_RE.match(skip_leading_noise(after_text))
     return "CREATE OR REPLACE " + (f"{m.group(1).upper()} " if m else "")
+
+
+def source_body(after_text):
+    """The ALL_SOURCE-shaped half of a stored statement. create_prefix builds
+    the header ALL_SOURCE does not keep; this drops it again, plus the
+    SQL*Plus terminator, so the two can be compared as equals."""
+    body = skip_leading_noise(prepare_statement(after_text, "plsql_source"))
+    m = CREATE_HEAD_RE.match(body)
+    return body[m.end():] if m else body
+
+
+def drift_note(db_source, last_applied, entry):
+    """Whether the object moved since pythia last wrote it.
+
+    The snapshot proves what pythia did; nothing ever proved what anyone else
+    did. In the field a comment line was written, read back intact two seconds
+    later, and gone eight minutes on with no journal entry in between — and
+    the developer went hunting a lying `src` instead of a second writer. The
+    journal held both halves of the answer the whole time and nothing compared
+    them. Warn, never refuse: editing by hand is legitimate, not noticing is
+    not."""
+    if not last_applied or not db_source.strip():
+        return None
+    mine = source_body(last_applied).replace("\r\n", "\n").rstrip()
+    now = db_source.replace("\r\n", "\n").rstrip()
+    if mine == now:
+        return None
+    delta = len(now.splitlines()) - len(mine.splitlines())
+    how = (f"{abs(delta)} line{'s' if abs(delta) != 1 else ''} "
+           + ("more" if delta > 0 else "fewer")) if delta else         "the same line count, different text"
+    return (f"This object changed outside pythia since {entry} ({how}). The "
+            "diff below is\n  against the database as it stands now, not "
+            "against what pythia wrote.")
+
+
+def last_applied_after(root, obj_type, name):
+    """The text pythia last actually wrote to this object, from the journal."""
+    for eid in list_journal_entries(root):
+        try:
+            e = read_journal_entry(root, eid)
+        except SystemExit:
+            continue
+        meta = e["meta"]
+        if (meta.get("applied")
+                and str(meta.get("object", "")).upper() == name.upper()
+                and str(meta.get("type", "")).upper() == obj_type.upper()):
+            return eid, e["after"]
+    return None, None
 
 
 def render_restore(obj_type, name, before_text, after_text=""):
@@ -2046,6 +2134,7 @@ def run_apply(conn, schema, ns, file_text, origin=None):
               "invocation's connection, which is now over.")
         return 0
 
+    edition_note = None
     if group == "plsql_source":
         otype, name, file_schema = parse_object(file_text)
         if file_schema and file_schema.upper() != schema:
@@ -2056,6 +2145,9 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         _, occ_rows = run_query(conn, load_query("name-occupants.sql"),
                                 {"s": schema, "n": name})
         blockers = name_conflicts(otype, [r[0] for r in occ_rows])
+        stmt, edition_note = reconcile_editionable(
+            stmt, next((cell(r[1]) for r in occ_rows
+                        if str(r[0]).upper() == otype.upper()), None))
         if blockers:
             sys.exit(f"{name} already exists as {', '.join(blockers)} in {schema} "
                      "— CREATE OR REPLACE cannot change an object's type "
@@ -2112,11 +2204,16 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             "tty": human_at_the_keyboard(),
             "invalid_before": invalid_before, **(origin or {})}
     entry = write_journal_entry(ns.project_root, otype, name, db_source,
-                                file_text, meta)
+                                stmt if edition_note else file_text, meta)
     # "created" is about an OBJECT that did not exist. A DML/DDL statement has
     # no object identity, so it is never "new" — and saying so would promise a
     # DROP-shaped undo that does not exist for those groups.
     created = not db_source.strip() and group == "plsql_source"
+
+    drift = None
+    if group == "plsql_source" and db_source.strip():
+        eid, last = last_applied_after(ns.project_root, otype, name)
+        drift = drift_note(db_source, last, eid)
 
     # 2. IMPACT
     summary = ""
@@ -2140,7 +2237,9 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                           "created": created, "changed_lines": changed,
                           "summary": summary, "warning": warn,
                           "row_set": row_set,
-                          "naming_warning": style, "token": token,
+                          "naming_warning": style,
+                          "editionable_note": edition_note, "drift": drift,
+                          "token": token,
                           "journal": entry, "will_apply": confirmed}))
     else:
         en = getattr(ns, "color", False)
@@ -2164,6 +2263,10 @@ def run_apply(conn, schema, ns, file_text, origin=None):
         elif group == "data_dml":
             print("\n  INSERT — no rows exist beforehand, so there is no row "
                   "set to revalidate.")
+        if drift:
+            print(f"\n  {paint('! ' + drift, 'yellow', en)}")
+        if edition_note:
+            print(f"\n  {paint('! ' + edition_note, 'yellow', en)}")
         if warn:
             print(f"\n  {paint(warn, 'yellow', en)}")
         if style:
@@ -2203,7 +2306,15 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             cur.execute("ALTER SESSION SET plscope_settings = "
                         "'IDENTIFIERS:ALL, STATEMENTS:ALL'")
     with conn.cursor() as cur:
-        cur.execute(stmt)
+        try:
+            cur.execute(stmt)
+        except Exception as e:            # noqa: BLE001 - the driver refused
+            # the preview and "Snapshot saved" printed before this line ran,
+            # so without a closing verdict the run reads like one that landed
+            sys.exit(f"FAILED — nothing was written.\n{e}\n"
+                     "The object is unchanged. The approval is unspent: retry "
+                     "the same file with the same token, or fix the file and "
+                     "preview again for a new one.")
         affected = cur.rowcount if group == "data_dml" else None
     if group == "data_dml":
         # the last-millisecond check: the probe ran before this statement, and
