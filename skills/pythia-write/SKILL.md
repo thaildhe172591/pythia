@@ -42,7 +42,8 @@ existing ones — not to introduce a better style.
      `unistr('...')`, so the text survives every client/DB charset exactly.
 5. **Check yourself before handing off.** Reread against
    `reference/patterns.md` — cursor and bulk patterns, exception discipline,
-   bind variables, commit ownership.
+   bind variables, commit ownership. Every comment you wrote or touched goes
+   through `pythia-comment` — one line, or it belongs somewhere else.
 
 ## Scope is the developer's sentence, not yours
 

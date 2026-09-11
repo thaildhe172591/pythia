@@ -20,6 +20,7 @@
         "./skills/pythia-spec",
         "./skills/pythia-impact",
         "./skills/pythia-write",
+        "./skills/pythia-comment",
         "./skills/pythia-conventions",
         "./skills/pythia-apply",
         "./skills/pythia-review",

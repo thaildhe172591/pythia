@@ -30,6 +30,7 @@ sessions drift: some ask, some silently decide.
 | "our standards / adopt this base's style" | `pythia-conventions` | |
 | "make a skill for how we do X" | `pythia-skill-author` | |
 | setup, connection failures, privilege warnings | `pythia-setup` | |
+| about to write a comment in code you are changing | `pythia-comment` — one line, or it belongs somewhere else | |
 | an ORA-/PLS- error to investigate | `pythia-explore` (`errors`, `src`) | `pythia-review` |
 
 Priority when several apply: **process before construction** — spec before
