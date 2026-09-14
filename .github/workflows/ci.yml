@@ -48,15 +48,18 @@ jobs:
       # skills resolving from the wheel's package data
       - run: cd /tmp && pythia --help && pythia policy
       - run: cd /tmp && python -c "import pythia; assert (pythia.QUERY_DIR / 'impact.sql').is_file(); assert (pythia.SKILLS_DIR / 'pythia-apply' / 'SKILL.md').is_file()"
-      # the no-Node whole-kit fallback: scaffold + bundled skill copies
-      # (absolute interpreter + empty PATH so npx is genuinely invisible)
+      # the no-Node whole-kit fallback: scaffold + bundled skill copies into
+      # both roots (.claude for Claude Code, .agents for Codex) + the Codex
+      # AGENTS.md harness (absolute interpreter + empty PATH so npx is invisible)
       - run: |
           PY=$(which python)
           mkdir /tmp/kit && cd /tmp/kit
           PATH=/nonexistent "$PY" -m pythia install
           test -f .claude/skills/pythia-apply/SKILL.md
-          test ! -e .agents/skills/pythia-apply
+          test -f .agents/skills/pythia-apply/SKILL.md
           test -f .claude/skills/pythia-review/reference/antipatterns.md
+          test -f .codex/hooks.json
+          grep -q "pythia:begin" AGENTS.md
           test -f .pythia/connections.json
 
   bench:
