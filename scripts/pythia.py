@@ -2818,6 +2818,51 @@ DO     writes go through `pythia apply` only - snapshot, token, verify. The
 """
 
 
+AGENTS_BEGIN = "<!-- pythia:begin (managed by `pythia install`; edit outside this block) -->"
+AGENTS_END = "<!-- pythia:end -->"
+
+
+def agents_md_block():
+    """The pythia section for AGENTS.md — Codex's always-loaded instruction
+    file. Body is BRIEF_GUIDE verbatim (the same constant `guide --brief`
+    prints and the Claude SessionStart hook runs, so the two cannot drift),
+    plus the one line Codex needs that Claude gets from its hook: where the
+    approval door is, since Codex has no chat-mint. Marker-wrapped so a re-run
+    replaces it in place and the developer's own text is untouched."""
+    return (f"{AGENTS_BEGIN}\n"
+            "## pythia — developing PL/SQL on Oracle\n\n"
+            f"{BRIEF_GUIDE.rstrip()}\n\n"
+            "On Codex there is no chat approval hook: the developer approves a "
+            "preview in this terminal with `pythia approve <token>`, then the "
+            "agent runs `pythia apply <file> --confirm <token>`.\n"
+            f"{AGENTS_END}")
+
+
+def merge_agents_md(path):
+    """Write the pythia block into an AGENTS.md. The file is the developer's,
+    shared with every AGENTS.md-reading agent, so only the delimited block is
+    ours: present -> replaced in place, absent -> appended below their text,
+    everything else byte-identical. Returns (path, action) where action is
+    'created' | 'updated' | 'unchanged'."""
+    path = pathlib.Path(path)
+    block = agents_md_block()
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    if old is None:
+        new, action = block + "\n", "created"
+    elif AGENTS_BEGIN in old and AGENTS_END in old:
+        pre = old[:old.index(AGENTS_BEGIN)]
+        post = old[old.index(AGENTS_END) + len(AGENTS_END):]
+        new = pre + block + post
+        action = "unchanged" if new == old else "updated"
+    else:
+        tail = "" if old.endswith("\n\n") else "\n" if old.endswith("\n") else "\n\n"
+        new, action = old + tail + block + "\n", "updated"
+    if new != old:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(new, encoding="utf-8")
+    return path, action
+
+
 OPERATING_GUIDE = """\
 THE OPERATING MODEL — Learn, Ask, Do (Hoc - Hoi - Lam)
 

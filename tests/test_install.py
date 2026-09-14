@@ -350,6 +350,37 @@ def test_global_install_wires_the_approve_hook_only():
         assert s["hooks"]["PostToolUse"] == pythia.CLAUDE_HOOKS["PostToolUse"]
 
 
+# --- Codex: AGENTS.md harness (TP1) ------------------------------------------
+
+def test_agents_md_block_is_the_guide_verbatim():
+    block = pythia.agents_md_block()
+    assert block.startswith(pythia.AGENTS_BEGIN)
+    assert block.rstrip().endswith(pythia.AGENTS_END)
+    assert pythia.BRIEF_GUIDE.rstrip() in block          # one source, no drift
+    assert "pythia approve <token>" in block             # the Codex approval door
+
+
+def test_merge_agents_md_creates_updates_and_is_idempotent():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "AGENTS.md"
+        p, action = pythia.merge_agents_md(path)
+        assert p == path and action == "created"
+        assert pythia.BRIEF_GUIDE.rstrip() in path.read_text(encoding="utf-8")
+        assert pythia.merge_agents_md(path)[1] == "unchanged"
+
+
+def test_merge_agents_md_preserves_the_developers_text():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "AGENTS.md"
+        path.write_text("# House rules\n\nUse tabs.\n", encoding="utf-8")
+        pythia.merge_agents_md(path)
+        body = path.read_text(encoding="utf-8")
+        assert body.startswith("# House rules\n\nUse tabs.\n")   # kept, on top
+        assert pythia.AGENTS_BEGIN in body and pythia.BRIEF_GUIDE.rstrip() in body
+        pythia.merge_agents_md(path)                             # a stale block
+        assert path.read_text(encoding="utf-8").count(pythia.AGENTS_BEGIN) == 1
+
+
 # Native paths: on POSIX ':' is the PATH separator and would cut a
 # Windows path in half, so these are built from os.sep.
 SCRIPTS = os.path.join(os.sep + 'opt', 'a', 'Scripts')
