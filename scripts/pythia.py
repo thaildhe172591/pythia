@@ -2921,6 +2921,10 @@ apply -> verify -> report.
                           AND to the developer's approval
   journal restore         undo, through the same six steps and the same gate
   unistr                  exact non-ASCII literals for what you are writing
+  mcp                     Codex only: a write-free MCP approver. The agent
+                          calls its pythia_approve tool, Codex shows the card
+                          as a select prompt, and the developer's Approve mints
+                          the grant. It never writes; apply still verifies it.
   install · agent-user · guide    setting the harness itself up
 
 The CLI enforces the gates: headless --yes is refused, policy cannot be
@@ -3392,6 +3396,221 @@ def merge_codex_hooks(path, events=None):
     return path, added
 
 
+# The MCP approver: a write-free stdio server whose one tool, pythia_approve,
+# mints the same grant `approve` mints — gated by an MCP elicitation the
+# developer answers in Codex. Writes never go through here; apply still
+# verifies the grant. Hand-rolled JSON-RPC (stdlib only).
+MCP_TOOL = "pythia_approve"
+MCP_PROTOCOL = "2025-06-18"
+MCP_ELICIT_METHOD = "elicitation/create"   # the one spelling to adjust if a
+#                                            live Codex disagrees (isolated)
+_MCP_TOOL_DEF = {
+    "name": MCP_TOOL,
+    "description": ("Ask the developer to approve a pythia apply preview by its "
+                    "token. Shows pythia's approval card and mints the one-time "
+                    "grant only if the developer picks Approve. Call it after "
+                    "`pythia apply <file>` prints a token; then run "
+                    "`pythia apply <file> --confirm <token>`."),
+    "inputSchema": {"type": "object",
+                    "properties": {"token": {"type": "string"}},
+                    "required": ["token"]},
+}
+
+
+def _rpc_result(mid, result):
+    return {"jsonrpc": "2.0", "id": mid, "result": result}
+
+
+def _rpc_error(mid, code, message):
+    return {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}}
+
+
+def mcp_handle(msg, state):
+    """Dispatch one incoming JSON-RPC message that is NOT a tools/call (those
+    need the elicitation round-trip and are handled in the loop). Returns
+    (outgoing_messages, done). A notification (no id) is answered with []."""
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        proto = (msg.get("params") or {}).get("protocolVersion") or MCP_PROTOCOL
+        return [_rpc_result(mid, {
+            "protocolVersion": proto,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "pythia",
+                           "version": getattr(sys.modules[__name__],
+                                              "__version__", "0")}})], False
+    if method == "notifications/initialized":
+        return [], False
+    if method == "tools/list":
+        return [_rpc_result(mid, {"tools": [_MCP_TOOL_DEF]})], False
+    if mid is None:
+        return [], False                       # any other notification
+    return [_rpc_error(mid, -32601, f"method not found: {method}")], False
+
+
+def _mcp_text(text, is_error=False):
+    return {"content": [{"type": "text", "text": text}], "isError": is_error}
+
+
+def mcp_approve_decision(root, token, elicit):
+    """Mint on a developer's Approve, delivered through an MCP elicitation.
+
+    Transport-free: `elicit(message, schema) -> (action, content)` performs the
+    round-trip (a fake in tests). The card is pythia's own, built from the
+    journal — so there is nothing for the agent to paraphrase and no verbatim
+    check to run. Fail-closed everywhere: the only path that mints is an
+    explicit accept whose decision is exactly Approve."""
+    token = str(token or "").strip().lower()
+    try:
+        _, meta, body = approval_card(root, token)   # refuses unknown/applied
+    except SystemExit as e:
+        return _mcp_text(str(e), is_error=True)
+    message = f"{invocation()} approve {token}\n" + "\n".join(body)
+    schema = {"type": "object",
+              "properties": {"decision": {"type": "string",
+                                          "enum": ["Approve", "Reject"]}},
+              "required": ["decision"]}
+    try:
+        action, content = elicit(message, schema)
+    except Exception as e:                        # noqa: BLE001 — fail closed
+        return _mcp_text(f"No grant minted: the approval prompt could not be "
+                         f"completed ({e}). Approve in a terminal instead: "
+                         f"{invocation()} approve {token}", is_error=True)
+    if action != "accept" or (content or {}).get("decision") != "Approve":
+        return _mcp_text(f"No grant minted for {token}: the developer did not "
+                         "approve (answered "
+                         f"{(content or {}).get('decision') or action!r}). "
+                         "Do not apply; ask what should change.", is_error=True)
+    prune_expired_grants(root)
+    mint_grant(root, token, meta.get("connection") or "",
+               revalidate=fingerprint_text(meta.get("row_set")), approver="mcp")
+    return _mcp_text(f"Approved — grant minted for {token}, single use, expires "
+                     f"in {GRANT_TTL_MINUTES} minutes. Now run: "
+                     f"{invocation()} apply <file> --confirm {token}")
+
+
+def mcp_serve(reader, writer, root):
+    """The stdio loop. Newline-delimited JSON-RPC in and out. A tools/call for
+    pythia_approve runs the elicitation round-trip inline: send
+    elicitation/create, then read until the matching-id response. One call in
+    flight at a time (Codex calls tools serially in a turn)."""
+    counter = [1000]
+
+    def send(msg):
+        writer.write(json.dumps(msg) + "\n")
+        writer.flush()
+
+    def read_msg():
+        line = reader.readline()
+        if not line:
+            return None
+        try:
+            return json.loads(line)
+        except ValueError:
+            return {}                       # skip a malformed line
+
+    def elicit(message, schema):
+        counter[0] += 1
+        eid = counter[0]
+        send({"jsonrpc": "2.0", "id": eid, "method": MCP_ELICIT_METHOD,
+              "params": {"message": message, "requestedSchema": schema}})
+        while True:
+            m = read_msg()
+            if m is None:
+                raise RuntimeError("client closed before answering the elicitation")
+            if m.get("id") == eid and ("result" in m or "error" in m):
+                if "error" in m:
+                    raise RuntimeError(str(m["error"]))
+                r = m["result"] or {}
+                return r.get("action"), r.get("content") or {}
+            # ignore anything else that arrives mid-elicitation
+
+    while True:
+        msg = read_msg()
+        if msg is None:
+            return
+        if msg.get("method") == "tools/call":
+            mid = msg.get("id")
+            params = msg.get("params") or {}
+            if params.get("name") != MCP_TOOL:
+                send(_rpc_error(mid, -32601, f"no such tool: {params.get('name')}"))
+                continue
+            token = (params.get("arguments") or {}).get("token", "")
+            result = mcp_approve_decision(root, token, elicit)
+            send(_rpc_result(mid, result))
+            continue
+        out, _ = mcp_handle(msg, {})
+        for m in out:
+            send(m)
+
+
+def cmd_mcp(conn, schema, ns):
+    """Run the MCP approver on stdio. Launched by Codex per its
+    [mcp_servers.pythia] config; lives for the session. Touches no database."""
+    mcp_serve(sys.stdin, sys.stdout, ns.project_root)
+
+
+# Codex config is TOML, and the stdlib cannot parse or write it on 3.9
+# (tomllib is read-only, 3.11+). So these merges never parse TOML: they append
+# a marker-delimited block when the target tables are absent, and refuse
+# (writing nothing) when a table already exists — the installer then prints
+# what to add. ponytail: literal-text collision check, not a TOML engine; a
+# table header inside a string/comment is not worth a parser here.
+CODEX_MCP_BEGIN = "# pythia:begin (managed by `pythia install`)"
+CODEX_MCP_END = "# pythia:end"
+CODEX_MCP_BLOCK = (f"{CODEX_MCP_BEGIN}\n"
+                   "[mcp_servers.pythia]\n"
+                   'command = "python"\n'
+                   'args = ["-m", "pythia", "mcp"]\n\n'
+                   "[approval_policy.granular]\n"
+                   "mcp_elicitations = true\n"
+                   f"{CODEX_MCP_END}")
+# requirements.toml is a separate admin-enforced file; forbidding these two is
+# what closes the danger-full-access elicitation auto-approve hole.
+CODEX_REQUIREMENTS = (f"{CODEX_MCP_BEGIN}\n"
+                      "# pythia needs elicitations to reach a human, so the two\n"
+                      "# modes that would auto-answer or skip them are disallowed.\n"
+                      'allowed_approval_policies = ["untrusted", "on-request", "on-failure"]\n'
+                      'allowed_sandbox_modes = ["read-only", "workspace-write"]\n'
+                      f"{CODEX_MCP_END}")
+
+
+def merge_codex_mcp_config(path):
+    """Append the MCP block to <project>/.codex/config.toml. Returns
+    (path, action): 'created' | 'appended' | 'present' | 'conflict'. Refuses
+    (writes nothing) if either table already exists without our marker."""
+    path = pathlib.Path(path)
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    if old is not None and CODEX_MCP_BEGIN in old:
+        return path, "present"
+    if old is not None and ("[mcp_servers.pythia]" in old
+                            or "[approval_policy.granular]" in old):
+        return path, "conflict"
+    if old is None:
+        new, action = CODEX_MCP_BLOCK + "\n", "created"
+    else:
+        tail = "" if old.endswith("\n\n") else "\n" if old.endswith("\n") else "\n\n"
+        new, action = old + tail + CODEX_MCP_BLOCK + "\n", "appended"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new, encoding="utf-8")
+    return path, action
+
+
+def merge_codex_requirements(path):
+    """Write <project>/.codex/requirements.toml forbidding danger-full-access
+    and never-approval. Returns (path, action): 'created' | 'present' |
+    'conflict'. An existing file without our marker is left untouched."""
+    path = pathlib.Path(path)
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    if old is not None and CODEX_MCP_BEGIN in old:
+        return path, "present"
+    if old is not None:
+        return path, "conflict"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(CODEX_REQUIREMENTS + "\n", encoding="utf-8")
+    return path, "created"
+
+
 def install_claude_hooks(base_dir, events=None):
     """Merge the two hooks and the deny rule into <base>/.claude/settings.json
     — the project's, or the home directory's for -g. The file is Claude
@@ -3473,6 +3692,31 @@ def report_codex_hooks(project_root, ns):
         print(f"\nCodex session-start hook already in {path}.")
 
 
+def report_codex_mcp(project_root, ns):
+    """Project scope: register the write-free MCP approver in Codex's config and
+    pin the sandbox so elicitations always reach a human. --no-hooks skips it,
+    as with the other Codex wiring. Needs Codex >= v0.120; older Codex ignores
+    the server and the console approve path still works."""
+    if getattr(ns, "no_hooks", False):
+        return
+    base = pathlib.Path(project_root) / ".codex"
+    cfg_path, cfg = merge_codex_mcp_config(base / "config.toml")
+    req_path, req = merge_codex_requirements(base / "requirements.toml")
+    if cfg in ("created", "appended"):
+        print(f"\nRegistered the pythia MCP approver in {cfg_path} "
+              "(Codex >= v0.120; run /mcp to trust it).")
+    elif cfg == "conflict":
+        print(f"\n! {cfg_path} already defines [mcp_servers.pythia] or "
+              "[approval_policy.granular]; add this yourself:\n"
+              + CODEX_MCP_BLOCK)
+    if req == "created":
+        print(f"Pinned the sandbox in {req_path} (no danger-full-access, so "
+              "elicitations always ask a human).")
+    elif req == "conflict":
+        print(f"\n! {req_path} already exists; add these constraints to it:\n"
+              + CODEX_REQUIREMENTS)
+
+
 def cmd_install(conn, schema, ns):
     import shutil
     en = getattr(ns, "color", False)
@@ -3516,6 +3760,7 @@ def cmd_install(conn, schema, ns):
     report_claude_hooks(ns.project_root, ns)
     report_codex_agents_md(ns.project_root)
     report_codex_hooks(ns.project_root, ns)
+    report_codex_mcp(ns.project_root, ns)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
     scripts_dir = installed_scripts_dir()
@@ -3536,10 +3781,10 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "approve": cmd_approve,
             "conventions": cmd_conventions, "guide": cmd_guide, "connections": cmd_connections, "install": cmd_install,
             "unistr": cmd_unistr, "agent-user": cmd_agent_user,
-            "history": cmd_history}
+            "history": cmd_history, "mcp": cmd_mcp}
 
 NO_DB_COMMANDS = {"policy", "journal", "install", "unistr", "guide", "connections",
-                  "history", "approve"}
+                  "history", "approve", "mcp"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -3683,6 +3928,9 @@ def build_parser():
     s.add_argument("text", nargs="*", help="text; omit to read stdin")
     s.add_argument("--loi", action="store_true",
                    help="wrap as 'loi:'||unistr(...)||':loi'")
+    sub.add_parser("mcp", parents=[common()],
+                   help="run the MCP approver for Codex (stdio; Codex launches "
+                        "it — the developer approves via an elicitation)")
     s = sub.add_parser("install", parents=[common()],
                        help="install the skill pack, scaffold .pythia/ config, wire the Claude Code hooks")
     s.add_argument("-g", "--global", dest="glob", action="store_true",

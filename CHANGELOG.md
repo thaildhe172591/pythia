@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.14.0 — 2026-09-14
+
+- **The Claude approve-and-execute experience, now on Codex.** 0.13.0 put the
+  harness on Codex but left approval on a second terminal. The developer wanted
+  what Claude gives: the agent asks, a select prompt appears, they click
+  Approve, the write runs — inline. The blocker was that Codex's hooks cannot
+  read a human's answer and it has no custom question tool (openai/codex#28833,
+  #23465). The one mechanism that carries a verified human choice back is MCP
+  elicitation (Codex >= v0.120): a new `pythia mcp` server, write-free, exposes
+  one tool, `pythia_approve`. It shows pythia's own card as a select prompt, and
+  the developer's Approve mints the same grant the console mints — single use,
+  connection-bound, `approver="mcp"`. Writes still never go through MCP; `apply`
+  still verifies the grant. Everything but an explicit accept-with-Approve is
+  fail-closed, so a headless run or an older Codex simply falls back to the
+  console `pythia approve <token>` — nothing regresses.
+- **The one hole is pinned shut.** Codex auto-approves elicitations under
+  `danger-full-access`, so `pythia install` writes a `.codex/requirements.toml`
+  the agent cannot override, disallowing that sandbox and `never`-approval —
+  and it registers the server in `.codex/config.toml`. Both edits are
+  append-only and refuse to touch a file that already defines those tables,
+  printing what to add instead: the stdlib cannot safely merge TOML, and a
+  developer's config is not ours to corrupt.
+- Approval on Codex is otherwise unchanged in substance from Claude: the card is
+  pythia's own, built from the journal, so there is nothing for the agent to
+  paraphrase. Proven end to end by driving the real `python -m pythia mcp` over
+  OS pipes — initialize, tools/list, a pythia_approve call, an elicitation
+  answered Approve, a grant minted `approver="mcp"`.
+
 ## 0.13.0 — 2026-09-14
 
 - **`pythia install` now serves Codex, not only Claude Code.** Until now Codex
