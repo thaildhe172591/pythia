@@ -3347,6 +3347,43 @@ CLAUDE_DENY = ["Bash(pythia approve --hook*)",
 # is recognised by what it runs, not by how it invokes it
 HOOK_MARKS = {"SessionStart": "guide --brief", "PostToolUse": "approve --hook"}
 
+# Codex loads hooks from <repo>/.codex/hooks.json once the layer is trusted
+# (/hooks). Only the session-start guide is wired — Codex has no answer-reading
+# PostToolUse and no question tool, so the chat approve-mint cannot port; the
+# developer approves in the terminal. Same shape and merge discipline as the
+# Claude hooks.
+CODEX_HOOKS = {
+    "SessionStart": [{"hooks": [
+        {"type": "command", "command": "python -m pythia guide --brief"}]}],
+}
+CODEX_HOOK_MARKS = {"SessionStart": "guide --brief"}
+
+
+def merge_codex_hooks(path, events=None):
+    """Merge pythia's Codex hooks into a hooks.json ({"hooks": {...}}). Every
+    other key survives, a hook already present in any spelling is recognised by
+    what it runs, and a file that will not parse is left byte-identical.
+    Returns (path, added|None)."""
+    path = pathlib.Path(path)
+    try:
+        s = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        hooks = s.setdefault("hooks", {})
+        added = []
+        for event in events or CODEX_HOOKS:
+            present = hooks.setdefault(event, [])
+            cmds = " ".join(h.get("command", "")
+                            for e in present for h in e.get("hooks", []))
+            if CODEX_HOOK_MARKS[event] not in cmds:
+                present.extend(json.loads(json.dumps(CODEX_HOOKS[event])))
+                added.append(f"hooks.{event}")
+    except (ValueError, TypeError, AttributeError):
+        return path, None
+    if added:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+    return path, added
+
 
 def install_claude_hooks(base_dir, events=None):
     """Merge the two hooks and the deny rule into <base>/.claude/settings.json

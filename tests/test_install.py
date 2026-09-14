@@ -381,6 +381,38 @@ def test_merge_agents_md_preserves_the_developers_text():
         assert path.read_text(encoding="utf-8").count(pythia.AGENTS_BEGIN) == 1
 
 
+# --- Codex: session-start hook (TP3) -----------------------------------------
+
+def test_merge_codex_hooks_creates_and_is_idempotent():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "hooks.json"
+        p, added = pythia.merge_codex_hooks(path)
+        assert p == path and added == ["hooks.SessionStart"]
+        s = json.loads(path.read_text(encoding="utf-8"))
+        assert s["hooks"]["SessionStart"] == pythia.CODEX_HOOKS["SessionStart"]
+        assert pythia.merge_codex_hooks(path) == (path, [])
+
+
+def test_merge_codex_hooks_recognises_an_existing_spelling():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "hooks.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"hooks": {"SessionStart": [
+            {"hooks": [{"type": "command",
+                        "command": "python3 -m pythia guide --brief"}]}]}}),
+            encoding="utf-8")
+        assert pythia.merge_codex_hooks(path) == (path, [])   # not doubled
+
+
+def test_merge_codex_hooks_refuses_a_file_it_cannot_parse():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "hooks.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("{not json", encoding="utf-8")
+        assert pythia.merge_codex_hooks(path) == (path, None)
+        assert path.read_text(encoding="utf-8") == "{not json"
+
+
 # Native paths: on POSIX ':' is the PATH separator and would cut a
 # Windows path in half, so these are built from os.sep.
 SCRIPTS = os.path.join(os.sep + 'opt', 'a', 'Scripts')
