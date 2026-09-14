@@ -161,6 +161,54 @@ Chạy từ bản clone cũng được: `python scripts/pythia.py <lệnh>` — 
 gợi ý mà nó in ra luôn khớp với cách bạn gọi. Windows, macOS, Linux và WSL
 đều có trong ma trận test của CI.
 
+## Cài đặt cho Claude Code và Codex
+
+`pythia install` cấu hình cho agent nào bạn dùng — trong một lần chạy, ở gốc
+dự án. Dưới đây là chính xác nó ghi gì cho mỗi agent, và một hai bước mà mỗi
+agent buộc bạn tự làm.
+
+### Claude Code
+
+1. Chạy `python -m pythia install` (hoặc `npx pythia-plsql`) ở gốc dự án. Nó
+   gộp ba thứ vào `.claude/settings.json`, giữ nguyên mọi key bạn đã có:
+   - hook **SessionStart** nạp guide Học → Hỏi → Làm mỗi phiên;
+   - hook **PostToolUse** trên `AskUserQuestion` mint grant duyệt;
+   - luật `deny` để agent không giả được grant đó.
+
+   Skills vào `.claude/skills` (hoặc `~/.claude/skills` khi `-g`).
+2. **Khởi động lại phiên Claude Code** để hook nạp.
+3. *Tuỳ chọn:* copy allow-list và `autoMode` từ
+   [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json).
+   Đó là quyền hạn của bạn, nên pythia không tự đặt
+   ([vì sao](GUIDE.vi.md#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)).
+
+**Duyệt một thay đổi:** agent preview bằng `pythia apply`, hỏi một
+`AskUserQuestion` mang thẻ duyệt, bạn bấm **Approve**, agent tự chạy
+`apply --confirm`.
+
+### Codex
+
+1. Chạy `python -m pythia install` ở gốc dự án. Nó:
+   - ghi harness vào **`AGENTS.md`** (Codex nạp mỗi phiên);
+   - đăng ký MCP approver (không ghi DB) vào **`.codex/config.toml`**;
+   - thêm hook SessionStart guide vào **`.codex/hooks.json`**.
+
+   Skills vào `.agents/skills` (hoặc `~/.agents/skills` khi `-g`) — đúng thư
+   mục Codex đọc.
+2. Trong Codex, **trust một lần**: `/mcp` (server `pythia`) và `/hooks`
+   (layer `.codex` của dự án).
+3. **Khởi động lại phiên Codex** để `AGENTS.md` mới nạp.
+4. Kiểm: `/skills` liệt kê các skill pythia, `/mcp` hiện `pythia: connected`.
+
+Cần **Codex ≥ v0.120** cho duyệt-trong-chat (MCP elicitation); Codex cũ hơn
+hoặc chạy headless thì lùi về console `pythia approve <token>`. **Đừng** chạy
+Codex dưới `danger-full-access` — sandbox đó tự-duyệt elicitation, vượt qua
+cú Approve của bạn.
+
+**Duyệt một thay đổi:** agent preview bằng `pythia apply`, gọi tool
+`pythia_approve`, bạn trả lời prompt select **Approve / Reject** ngay trong
+Codex, và khi Approve agent tự chạy `apply --confirm`.
+
 ## Các lệnh
 
 | Đọc | Phân tích | Ghi |
@@ -212,13 +260,10 @@ một lần chạy. Đây chỉ là tiện ích; bạn tự làm tay theo
 cũng được. `pythia check` sẽ cảnh báo khi tài khoản đang dùng có quyền cao
 hơn mức công việc cần.
 
-Dùng Claude Code? `pythia install` tự ghi hai hook — cửa duyệt trong chat và
-guide đầu phiên — cùng luật deny vào `.claude/settings.json`, gộp vào file
-đang có. Phần còn lại của
-[`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
-giúp nó thôi hỏi các lệnh chỉ-đọc và đề nghị dừng lại ở các lệnh ghi — tuỳ
-chọn, và do bạn tự cài
-([vì sao pythia không tự cài](GUIDE.vi.md#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)).
+Cú duyệt mà `apply` đòi được mint theo từng agent — hook `AskUserQuestion` của
+Claude Code, tool `pythia_approve` (MCP) của Codex, hoặc console
+`pythia approve <token>` ở bất kỳ đâu. Cách wire từng cái nằm ở
+[Cài đặt cho Claude Code và Codex](#cài-đặt-cho-claude-code-và-codex) phía trên.
 
 Chính sách ghi chia theo nhóm trong `.pythia/policy.json` (mặc định):
 
@@ -264,7 +309,7 @@ gợi ý** — agent phải đi qua chúng:
 | Hệ điều hành | Windows, macOS, Linux, WSL — CI test đủ cả ba họ |
 | Python | 3.9+ · chỉ cần stdlib và `python-oracledb` (thin mode) |
 | Oracle | phần lõi chạy được với hầu hết phiên bản; PL/Scope statement cần 12.2+; chỉ dùng view không vướng license |
-| Agent | mọi agent mà `npx skills` hỗ trợ (76) · plugin Claude Code |
+| Agent | mọi agent mà `npx skills` hỗ trợ (76) · plugin Claude Code · Codex (harness AGENTS.md + MCP approver, ≥ v0.120 cho duyệt kiểu chat) |
 
 ## Đóng góp
 
