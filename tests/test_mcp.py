@@ -79,7 +79,11 @@ def test_mint_only_on_accept_with_approve():
 
         res = pythia.mcp_approve_decision(td, token, elicit)
         assert res["isError"] is False
-        assert token in res["content"][0]["text"]
+        text = res["content"][0]["text"]
+        assert token in text
+        # the message tells the AGENT to continue itself, not the developer to
+        # type a command — 0.14.1 fix
+        assert "yourself" in text.lower()
         assert "PKG_ORDER" in seen["message"]                 # the card was shown
         assert seen["schema"]["properties"]["decision"]["enum"] == ["Approve", "Reject"]
         g = pythia.read_grant(td, token)
@@ -200,7 +204,10 @@ def test_merge_codex_mcp_config_appends_once_when_clean():
         body = path.read_text(encoding="utf-8")
         assert "[mcp_servers.pythia]" in body
         assert 'args = ["-m", "pythia", "mcp"]' in body
-        assert "mcp_elicitations = true" in body
+        # 0.14.1: we do NOT touch approval_policy — an incomplete granular table
+        # broke Codex v0.154 config loading, and elicitations work under the
+        # default interactive policy anyway.
+        assert "approval_policy" not in body
         assert pythia.merge_codex_mcp_config(path)[1] == "present"   # idempotent
 
 
@@ -216,43 +223,20 @@ def test_merge_codex_mcp_config_preserves_other_content():
         assert "[mcp_servers.pythia]" in body
 
 
-def test_merge_codex_mcp_config_refuses_on_table_collision():
+def test_merge_codex_mcp_config_refuses_on_server_collision():
     with tempfile.TemporaryDirectory() as td:
         path = pathlib.Path(td) / ".codex" / "config.toml"
         path.parent.mkdir(parents=True)
-        original = "[approval_policy.granular]\nmcp_elicitations = false\n"
+        original = '[mcp_servers.pythia]\ncommand = "other"\n'
         path.write_text(original, encoding="utf-8")
         p, action = pythia.merge_codex_mcp_config(path)
         assert action == "conflict"
         assert path.read_text(encoding="utf-8") == original          # untouched
 
 
-def test_merge_codex_requirements_creates_and_is_idempotent():
-    with tempfile.TemporaryDirectory() as td:
-        path = pathlib.Path(td) / ".codex" / "requirements.toml"
-        p, action = pythia.merge_codex_requirements(path)
-        assert action == "created"
-        body = path.read_text(encoding="utf-8")
-        assert "allowed_approval_policies" in body and "allowed_sandbox_modes" in body
-        assert "danger-full-access" not in body     # the forbidden mode is absent
-        assert '"never"' not in body                 # the forbidden policy is absent
-        assert pythia.merge_codex_requirements(path)[1] == "present"
-
-
-def test_merge_codex_requirements_refuses_an_existing_file():
-    with tempfile.TemporaryDirectory() as td:
-        path = pathlib.Path(td) / ".codex" / "requirements.toml"
-        path.parent.mkdir(parents=True)
-        original = "# org policy\nallowed_sandbox_modes = []\n"
-        path.write_text(original, encoding="utf-8")
-        p, action = pythia.merge_codex_requirements(path)
-        assert action == "conflict"
-        assert path.read_text(encoding="utf-8") == original          # untouched
-
-
 # --- Task 5: wire the MCP install into cmd_install (project scope) ----------
 
-def test_cmd_install_registers_the_mcp_server_and_pins_the_sandbox():
+def test_cmd_install_registers_the_mcp_server_and_warns_off_danger():
     import argparse
     import contextlib
     old = os.environ.get("PATH")
@@ -261,13 +245,16 @@ def test_cmd_install_registers_the_mcp_server_and_pins_the_sandbox():
         with tempfile.TemporaryDirectory() as td:
             ns = argparse.Namespace(project_root=td, glob=False, source=None,
                                     color=False, json=False, no_hooks=False)
-            with contextlib.redirect_stdout(io.StringIO()):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
                 pythia.cmd_install(None, None, ns)
             cfg = pathlib.Path(td) / ".codex" / "config.toml"
-            req = pathlib.Path(td) / ".codex" / "requirements.toml"
-            assert "[mcp_servers.pythia]" in cfg.read_text(encoding="utf-8")
-            assert "mcp_elicitations = true" in cfg.read_text(encoding="utf-8")
-            assert "allowed_sandbox_modes" in req.read_text(encoding="utf-8")
+            body = cfg.read_text(encoding="utf-8")
+            assert "[mcp_servers.pythia]" in body
+            assert "approval_policy" not in body                 # 0.14.1: never touched
+            # requirements.toml is no longer written; the pin became a warning
+            assert not (pathlib.Path(td) / ".codex" / "requirements.toml").exists()
+            assert "danger-full-access" in buf.getvalue()        # the warning
     finally:
         if old is not None:
             os.environ["PATH"] = old

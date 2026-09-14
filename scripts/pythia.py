@@ -3484,9 +3484,11 @@ def mcp_approve_decision(root, token, elicit):
     prune_expired_grants(root)
     mint_grant(root, token, meta.get("connection") or "",
                revalidate=fingerprint_text(meta.get("row_set")), approver="mcp")
-    return _mcp_text(f"Approved — grant minted for {token}, single use, expires "
-                     f"in {GRANT_TTL_MINUTES} minutes. Now run: "
-                     f"{invocation()} apply <file> --confirm {token}")
+    return _mcp_text(f"Approved — grant minted for {token} (single use, "
+                     f"{GRANT_TTL_MINUTES} min). Now run apply --confirm on the "
+                     "file you previewed YOURSELF — do not hand the developer a "
+                     f"command to type: {invocation()} apply <file> --confirm "
+                     f"{token}")
 
 
 def mcp_serve(reader, writer, root):
@@ -3558,33 +3560,30 @@ def cmd_mcp(conn, schema, ns):
 # table header inside a string/comment is not worth a parser here.
 CODEX_MCP_BEGIN = "# pythia:begin (managed by `pythia install`)"
 CODEX_MCP_END = "# pythia:end"
+# Only the server roster — nothing else. An earlier attempt also wrote an
+# [approval_policy.granular] table, but that table requires several fields
+# (sandbox_approval, rules, ...) and an incomplete one broke Codex v0.154 at
+# config-load time. Elicitations surface under the default interactive
+# approval policy without any of that, and the developer's approval policy is
+# theirs, not ours to set.
 CODEX_MCP_BLOCK = (f"{CODEX_MCP_BEGIN}\n"
                    "[mcp_servers.pythia]\n"
                    'command = "python"\n'
-                   'args = ["-m", "pythia", "mcp"]\n\n'
-                   "[approval_policy.granular]\n"
-                   "mcp_elicitations = true\n"
+                   'args = ["-m", "pythia", "mcp"]\n'
                    f"{CODEX_MCP_END}")
-# requirements.toml is a separate admin-enforced file; forbidding these two is
-# what closes the danger-full-access elicitation auto-approve hole.
-CODEX_REQUIREMENTS = (f"{CODEX_MCP_BEGIN}\n"
-                      "# pythia needs elicitations to reach a human, so the two\n"
-                      "# modes that would auto-answer or skip them are disallowed.\n"
-                      'allowed_approval_policies = ["untrusted", "on-request", "on-failure"]\n'
-                      'allowed_sandbox_modes = ["read-only", "workspace-write"]\n'
-                      f"{CODEX_MCP_END}")
 
 
 def merge_codex_mcp_config(path):
-    """Append the MCP block to <project>/.codex/config.toml. Returns
-    (path, action): 'created' | 'appended' | 'present' | 'conflict'. Refuses
-    (writes nothing) if either table already exists without our marker."""
+    """Append the MCP server registration to <project>/.codex/config.toml.
+    Returns (path, action): 'created' | 'appended' | 'present' | 'conflict'.
+    Refuses (writes nothing) if [mcp_servers.pythia] already exists without our
+    marker — the stdlib cannot safely merge TOML, so a collision is reported,
+    never overwritten."""
     path = pathlib.Path(path)
     old = path.read_text(encoding="utf-8") if path.is_file() else None
     if old is not None and CODEX_MCP_BEGIN in old:
         return path, "present"
-    if old is not None and ("[mcp_servers.pythia]" in old
-                            or "[approval_policy.granular]" in old):
+    if old is not None and "[mcp_servers.pythia]" in old:
         return path, "conflict"
     if old is None:
         new, action = CODEX_MCP_BLOCK + "\n", "created"
@@ -3594,21 +3593,6 @@ def merge_codex_mcp_config(path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new, encoding="utf-8")
     return path, action
-
-
-def merge_codex_requirements(path):
-    """Write <project>/.codex/requirements.toml forbidding danger-full-access
-    and never-approval. Returns (path, action): 'created' | 'present' |
-    'conflict'. An existing file without our marker is left untouched."""
-    path = pathlib.Path(path)
-    old = path.read_text(encoding="utf-8") if path.is_file() else None
-    if old is not None and CODEX_MCP_BEGIN in old:
-        return path, "present"
-    if old is not None:
-        return path, "conflict"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(CODEX_REQUIREMENTS + "\n", encoding="utf-8")
-    return path, "created"
 
 
 def install_claude_hooks(base_dir, events=None):
@@ -3693,28 +3677,28 @@ def report_codex_hooks(project_root, ns):
 
 
 def report_codex_mcp(project_root, ns):
-    """Project scope: register the write-free MCP approver in Codex's config and
-    pin the sandbox so elicitations always reach a human. --no-hooks skips it,
-    as with the other Codex wiring. Needs Codex >= v0.120; older Codex ignores
-    the server and the console approve path still works."""
+    """Project scope: register the write-free MCP approver in Codex's config.
+    --no-hooks skips it, as with the other Codex wiring. Needs Codex >= v0.120
+    for elicitation; older Codex ignores the server and the console approve
+    path still works."""
     if getattr(ns, "no_hooks", False):
         return
-    base = pathlib.Path(project_root) / ".codex"
-    cfg_path, cfg = merge_codex_mcp_config(base / "config.toml")
-    req_path, req = merge_codex_requirements(base / "requirements.toml")
+    cfg_path, cfg = merge_codex_mcp_config(pathlib.Path(project_root)
+                                           / ".codex" / "config.toml")
     if cfg in ("created", "appended"):
         print(f"\nRegistered the pythia MCP approver in {cfg_path} "
               "(Codex >= v0.120; run /mcp to trust it).")
     elif cfg == "conflict":
-        print(f"\n! {cfg_path} already defines [mcp_servers.pythia] or "
-              "[approval_policy.granular]; add this yourself:\n"
-              + CODEX_MCP_BLOCK)
-    if req == "created":
-        print(f"Pinned the sandbox in {req_path} (no danger-full-access, so "
-              "elicitations always ask a human).")
-    elif req == "conflict":
-        print(f"\n! {req_path} already exists; add these constraints to it:\n"
-              + CODEX_REQUIREMENTS)
+        print(f"\n! {cfg_path} already defines [mcp_servers.pythia]; add this "
+              "yourself:\n" + CODEX_MCP_BLOCK)
+    else:
+        print(f"\npythia MCP approver already registered in {cfg_path}.")
+    # The one bypass of the elicitation is Codex auto-approving it under the
+    # danger-full-access sandbox. pythia does not write requirements.toml to
+    # forbid that — it is enterprise-managed config, and the schema is
+    # version-fragile — so it warns instead.
+    print("Do not run Codex under `danger-full-access` with pythia: that "
+          "sandbox auto-approves elicitations, bypassing your Approve.")
 
 
 def cmd_install(conn, schema, ns):
