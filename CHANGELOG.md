@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.14.1 — 2026-09-14
+
+- **install no longer breaks Codex's config.** 0.14.0 wrote an
+  `[approval_policy.granular]` table carrying only `mcp_elicitations = true`,
+  but that table requires several fields on Codex v0.154 (`sandbox_approval`,
+  `rules`, …) and an incomplete one fails at config-load — the developer's
+  Codex would not start (`missing field sandbox_approval`). Seen the first
+  time 0.14.0 was installed against a real Codex. install now writes **only**
+  `[mcp_servers.pythia]`; MCP elicitations surface under the default
+  interactive approval policy without any granular table, and the approval
+  policy is the developer's to set, not pythia's. The rest of 0.14.0 is
+  confirmed working against live Codex v0.154: the server connects, the
+  `pythia_approve` elicitation renders its card with Approve/Reject, and
+  Approve mints a grant (`approver="mcp"`).
+- **requirements.toml is no longer written.** The danger-full-access pin
+  became a printed warning instead. That file is enterprise-managed config and
+  its schema is version-fragile in exactly the way that just broke
+  `config.toml`; the MCP approver is fail-closed regardless, and the
+  elicitation asks for an explicit Approve.
+- The `pythia_approve` result now tells the agent to run `apply --confirm`
+  itself on the file it previewed, rather than reading like a command for the
+  developer to type by hand.
+
 ## 0.14.0 — 2026-09-14
 
 - **The Claude approve-and-execute experience, now on Codex.** 0.13.0 put the
