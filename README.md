@@ -145,6 +145,56 @@ Running from a clone works too — `python scripts/pythia.py <command>`; every
 printed follow-up command matches how you invoked it. Windows, macOS, Linux
 and WSL are all CI-tested.
 
+## Setting up Claude Code and Codex
+
+`pythia install` configures whichever of these you use — in one run, from the
+project root. Here is exactly what it wires for each, and the one or two steps
+each agent needs you to finish by hand.
+
+### Claude Code
+
+1. Run `python -m pythia install` (or `npx pythia-plsql`) in the project root.
+   It merges three things into `.claude/settings.json`, keeping every key you
+   already have there:
+   - a **SessionStart** hook that loads the Learn → Ask → Do guide each session;
+   - a **PostToolUse** hook on `AskUserQuestion` that mints the approval grant;
+   - a `deny` rule so the agent cannot forge that grant.
+
+   Skills land in `.claude/skills` (or `~/.claude/skills` with `-g`).
+2. **Restart the Claude Code session** so the hooks load.
+3. *Optional:* copy the allow-list and `autoMode` from
+   [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json).
+   Those are your permission preferences, so pythia does not set them for you
+   ([why](GUIDE.md#11-optional-claude-code-permission-settings)).
+
+**Approving a change:** the agent previews with `pythia apply`, asks an
+`AskUserQuestion` carrying the approval card, you click **Approve**, and the
+agent runs `apply --confirm` itself.
+
+### Codex
+
+1. Run `python -m pythia install` in the project root. It:
+   - writes the harness into **`AGENTS.md`** (Codex loads it every session);
+   - registers a write-free MCP approver in **`.codex/config.toml`**;
+   - adds a SessionStart guide hook in **`.codex/hooks.json`**.
+
+   Skills land in `.agents/skills` (or `~/.agents/skills` with `-g`) — the
+   directory Codex reads.
+2. In Codex, **trust the pieces once**: `/mcp` (the `pythia` server) and
+   `/hooks` (the project `.codex` layer).
+3. **Restart the Codex session** so the new `AGENTS.md` loads.
+4. Check it: `/skills` lists the pythia skills, `/mcp` shows
+   `pythia: connected`.
+
+Needs **Codex ≥ v0.120** for the in-chat approval (MCP elicitation); an older
+or headless Codex falls back to the console `pythia approve <token>`. Do
+**not** run Codex under `danger-full-access` — that sandbox auto-approves
+elicitations and bypasses your Approve.
+
+**Approving a change:** the agent previews with `pythia apply`, calls the
+`pythia_approve` tool, you answer a select **Approve / Reject** prompt right in
+Codex, and on Approve the agent runs `apply --confirm` itself.
+
 ## Commands
 
 | Read | Understand | Write |
@@ -190,25 +240,10 @@ hand with
 works just as well.
 `pythia check` warns when the session runs with more power than the task needs.
 
-Using Claude Code? `pythia install` wires the two hooks — the approve-in-chat
-door and the session-start guide — and the deny rule into
-`.claude/settings.json`, merged into whatever is already there. The rest of
-[`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json)
-stops it prompting for the read-only commands and asks it to pause on
-writes — optional, and yours to install
-([why pythia does not](GUIDE.md#11-optional-claude-code-permission-settings)).
-
-Using Codex? The same `pythia install` writes the harness into `AGENTS.md`
-(loaded every session), registers a write-free MCP approver in
-`.codex/config.toml`, and adds a session-start guide hook in
-`.codex/hooks.json`. Trust them once in Codex with `/mcp` (and `/hooks`).
-Approval is then the same shape as on Claude Code: the agent runs `pythia
-apply`, calls the `pythia_approve` tool, and you answer a select **Approve /
-Reject** prompt right in Codex — on Approve the one-time grant is minted and
-the agent runs `apply --confirm` itself. This needs Codex ≥ v0.120 (for MCP
-elicitation); an older or headless Codex falls back to the console `pythia
-approve <token>`. Do not run Codex under `danger-full-access` — that sandbox
-auto-approves elicitations, bypassing your Approve.
+The developer approval that `apply` requires is minted per agent — Claude
+Code's `AskUserQuestion` hook, or Codex's `pythia_approve` MCP tool, or the
+console `pythia approve <token>` anywhere. How each is wired is in
+[Setting up Claude Code and Codex](#setting-up-claude-code-and-codex) above.
 
 Per-group write policy, `.pythia/policy.json` (defaults shown):
 
