@@ -3692,6 +3692,31 @@ def report_codex_hooks(project_root, ns):
         print(f"\nCodex session-start hook already in {path}.")
 
 
+def report_codex_mcp(project_root, ns):
+    """Project scope: register the write-free MCP approver in Codex's config and
+    pin the sandbox so elicitations always reach a human. --no-hooks skips it,
+    as with the other Codex wiring. Needs Codex >= v0.120; older Codex ignores
+    the server and the console approve path still works."""
+    if getattr(ns, "no_hooks", False):
+        return
+    base = pathlib.Path(project_root) / ".codex"
+    cfg_path, cfg = merge_codex_mcp_config(base / "config.toml")
+    req_path, req = merge_codex_requirements(base / "requirements.toml")
+    if cfg in ("created", "appended"):
+        print(f"\nRegistered the pythia MCP approver in {cfg_path} "
+              "(Codex >= v0.120; run /mcp to trust it).")
+    elif cfg == "conflict":
+        print(f"\n! {cfg_path} already defines [mcp_servers.pythia] or "
+              "[approval_policy.granular]; add this yourself:\n"
+              + CODEX_MCP_BLOCK)
+    if req == "created":
+        print(f"Pinned the sandbox in {req_path} (no danger-full-access, so "
+              "elicitations always ask a human).")
+    elif req == "conflict":
+        print(f"\n! {req_path} already exists; add these constraints to it:\n"
+              + CODEX_REQUIREMENTS)
+
+
 def cmd_install(conn, schema, ns):
     import shutil
     en = getattr(ns, "color", False)
@@ -3735,6 +3760,7 @@ def cmd_install(conn, schema, ns):
     report_claude_hooks(ns.project_root, ns)
     report_codex_agents_md(ns.project_root)
     report_codex_hooks(ns.project_root, ns)
+    report_codex_mcp(ns.project_root, ns)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
     scripts_dir = installed_scripts_dir()

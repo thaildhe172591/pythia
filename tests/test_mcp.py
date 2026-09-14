@@ -250,6 +250,46 @@ def test_merge_codex_requirements_refuses_an_existing_file():
         assert path.read_text(encoding="utf-8") == original          # untouched
 
 
+# --- Task 5: wire the MCP install into cmd_install (project scope) ----------
+
+def test_cmd_install_registers_the_mcp_server_and_pins_the_sandbox():
+    import argparse
+    import contextlib
+    old = os.environ.get("PATH")
+    os.environ["PATH"] = ""
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ns = argparse.Namespace(project_root=td, glob=False, source=None,
+                                    color=False, json=False, no_hooks=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                pythia.cmd_install(None, None, ns)
+            cfg = pathlib.Path(td) / ".codex" / "config.toml"
+            req = pathlib.Path(td) / ".codex" / "requirements.toml"
+            assert "[mcp_servers.pythia]" in cfg.read_text(encoding="utf-8")
+            assert "mcp_elicitations = true" in cfg.read_text(encoding="utf-8")
+            assert "allowed_sandbox_modes" in req.read_text(encoding="utf-8")
+    finally:
+        if old is not None:
+            os.environ["PATH"] = old
+
+
+def test_cmd_install_no_hooks_skips_the_mcp_files():
+    import argparse
+    import contextlib
+    old = os.environ.get("PATH")
+    os.environ["PATH"] = ""
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ns = argparse.Namespace(project_root=td, glob=False, source=None,
+                                    color=False, json=False, no_hooks=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                pythia.cmd_install(None, None, ns)
+            assert not (pathlib.Path(td) / ".codex" / "config.toml").exists()
+    finally:
+        if old is not None:
+            os.environ["PATH"] = old
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
