@@ -51,6 +51,14 @@ write them down here, do not implement them on impulse.
     out, as does anything needing Tuning Pack.
   - **A `plsql-safe-write` skill contributed upstream to `oracle/skills`.**
     The strongest distribution channel is the incumbent's own repo.
+  - **Defensive Codex PermissionRequest hook.** A `.codex/` hook that denies a
+    `pythia apply --confirm` carrying no live grant, and a raw `CREATE OR
+    REPLACE` through sqlplus/run-sql that skips the gate. Defence-in-depth:
+    `apply` already enforces the grant, so this overlaps it, risks false
+    positives on command matching, and needs a live Codex to verify — parked
+    until someone runs it against 0.150.1+ in the field. (0.13.0 shipped the
+    Codex harness via AGENTS.md and a SessionStart hook; this is the piece
+    left out of that release deliberately.)
 
   Ruled out deliberately, so they stay ruled out: an MCP server for the write
   path (writes never going through MCP *is* the differentiator), a Rust
