@@ -114,7 +114,7 @@ Or the same thing piecewise:
 
 ```bash
 pip install pythia-plsql   # the CLI (thin driver — no Oracle Instant Client needed)
-python -m pythia install   # skills + .pythia/ scaffold + Claude Code hooks + Codex AGENTS.md
+python -m pythia install   # skills + .pythia/ scaffold + Claude Code hooks + Codex AGENTS.md/MCP approver
 pythia check               # fill in connections.json first, then verify
 ```
 
@@ -198,9 +198,17 @@ stops it prompting for the read-only commands and asks it to pause on
 writes — optional, and yours to install
 ([why pythia does not](GUIDE.md#11-optional-claude-code-permission-settings)).
 
-On Codex, the same command writes the harness into `AGENTS.md` (loaded every
-session) and a session-start hook into `.codex/hooks.json`; approve previews in
-the terminal with `pythia approve <token>`, since Codex has no chat-mint.
+Using Codex? The same `pythia install` writes the harness into `AGENTS.md`
+(loaded every session), registers a write-free MCP approver in
+`.codex/config.toml`, and adds a session-start guide hook in
+`.codex/hooks.json`. Trust them once in Codex with `/mcp` (and `/hooks`).
+Approval is then the same shape as on Claude Code: the agent runs `pythia
+apply`, calls the `pythia_approve` tool, and you answer a select **Approve /
+Reject** prompt right in Codex — on Approve the one-time grant is minted and
+the agent runs `apply --confirm` itself. This needs Codex ≥ v0.120 (for MCP
+elicitation); an older or headless Codex falls back to the console `pythia
+approve <token>`. Do not run Codex under `danger-full-access` — that sandbox
+auto-approves elicitations, bypassing your Approve.
 
 Per-group write policy, `.pythia/policy.json` (defaults shown):
 
@@ -240,7 +248,7 @@ the developer approves the preview in chat) · `pythia-review` (antipatterns) ·
 | OS | Windows, macOS, Linux, WSL — full test matrix in CI |
 | Python | 3.9+ · stdlib + `python-oracledb` (thin mode) only |
 | Oracle | core works broadly; PL/Scope statement capture needs 12.2+; license-safe views only |
-| Agents | any `npx skills` agent (76) · native Claude Code plugin |
+| Agents | any `npx skills` agent (76) · native Claude Code plugin · Codex (AGENTS.md harness + MCP approver, ≥ v0.120 for chat-style approval) |
 
 ## Star History
 
