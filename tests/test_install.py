@@ -361,6 +361,34 @@ def test_global_install_wires_the_approve_hook_only():
         assert s["hooks"]["PostToolUse"] == pythia.CLAUDE_HOOKS["PostToolUse"]
 
 
+def test_cmd_install_serves_codex_in_the_project_scope():
+    """Project install writes the harness into AGENTS.md always, and the
+    session-start hook unless --no-hooks. (The .agents/skills copy is gated by
+    global_pack_present() — a machine with a global pack skips it — so that is
+    proven directly in test_fallback_serves_both_claude_and_codex, not here.)"""
+    import argparse
+    import contextlib
+    import io
+    old = os.environ.get("PATH")
+    os.environ["PATH"] = ""                     # no npx: bundled fallback
+    try:
+        for no_hooks in (False, True):
+            with tempfile.TemporaryDirectory() as td:
+                ns = argparse.Namespace(project_root=td, glob=False, source=None,
+                                        color=False, json=False, no_hooks=no_hooks)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    pythia.cmd_install(None, None, ns)
+                base = pathlib.Path(td)
+                agents_md = base / "AGENTS.md"
+                assert agents_md.is_file()                        # always
+                assert pythia.BRIEF_GUIDE.rstrip() in agents_md.read_text(encoding="utf-8")
+                hooks = base / ".codex" / "hooks.json"
+                assert hooks.is_file() != no_hooks                # skipped iff --no-hooks
+    finally:
+        if old is not None:
+            os.environ["PATH"] = old
+
+
 # --- Codex: AGENTS.md harness (TP1) ------------------------------------------
 
 def test_agents_md_block_is_the_guide_verbatim():

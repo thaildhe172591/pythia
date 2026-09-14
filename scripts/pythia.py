@@ -3446,6 +3446,33 @@ def report_claude_hooks(base_dir, ns, events=None):
         print(f"\nClaude Code hooks already in {path}.")
 
 
+def report_codex_agents_md(project_root):
+    """Project scope: write the harness into <project>/AGENTS.md, the file
+    Codex loads every session. Not done on -g — a global AGENTS.md is noise in
+    every non-Oracle session, as the Claude guide is per-project."""
+    path, action = merge_agents_md(pathlib.Path(project_root) / "AGENTS.md")
+    verb = {"created": "Wrote the pythia harness into",
+            "updated": "Updated the pythia block in",
+            "unchanged": "pythia harness already current in"}[action]
+    print(f"\n{verb} {path} (Codex and other AGENTS.md agents load it each session).")
+
+
+def report_codex_hooks(project_root, ns):
+    """Project scope: the Codex session-start guide hook. --no-hooks skips it,
+    as with the Claude hooks. AGENTS.md already carries the guide, so this is
+    reinforcement for hook-driven Codex users."""
+    if getattr(ns, "no_hooks", False):
+        return
+    path, added = merge_codex_hooks(pathlib.Path(project_root) / ".codex" / "hooks.json")
+    if added is None:
+        print(f"\n! {path} is not valid JSON, so it was left untouched.")
+    elif added:
+        print(f"\nWired the Codex session-start hook into {path}.")
+        print("In Codex, run /hooks once to trust this project's .codex layer.")
+    else:
+        print(f"\nCodex session-start hook already in {path}.")
+
+
 def cmd_install(conn, schema, ns):
     import shutil
     en = getattr(ns, "color", False)
@@ -3487,6 +3514,8 @@ def cmd_install(conn, schema, ns):
         else:
             clean_legacy_skills(ns.project_root)
     report_claude_hooks(ns.project_root, ns)
+    report_codex_agents_md(ns.project_root)
+    report_codex_hooks(ns.project_root, ns)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
     scripts_dir = installed_scripts_dir()
