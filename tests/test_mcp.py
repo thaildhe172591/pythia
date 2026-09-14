@@ -55,6 +55,70 @@ def test_unknown_method_with_id_is_an_error_not_a_crash():
     assert out[0]["id"] == 3
 
 
+# --- Task 2: the elicitation round-trip and the mint (fail-closed) ----------
+
+def _preview(root, token="a1b2c3"):
+    """A pending plsql_source preview in the journal, the way apply writes one."""
+    pythia.write_journal_entry(
+        root, "PACKAGE BODY", "PKG_ORDER", "old\n",
+        "CREATE OR REPLACE PACKAGE BODY pkg_order AS\n new;\nEND;\n",
+        {"token": token, "connection": "DEV", "schema": "APP",
+         "group": "plsql_source", "applied": False})
+    return token
+
+
+def test_mint_only_on_accept_with_approve():
+    with tempfile.TemporaryDirectory() as td:
+        token = _preview(td)
+        seen = {}
+
+        def elicit(message, schema):
+            seen["message"] = message
+            seen["schema"] = schema
+            return "accept", {"decision": "Approve"}
+
+        res = pythia.mcp_approve_decision(td, token, elicit)
+        assert res["isError"] is False
+        assert token in res["content"][0]["text"]
+        assert "PKG_ORDER" in seen["message"]                 # the card was shown
+        assert seen["schema"]["properties"]["decision"]["enum"] == ["Approve", "Reject"]
+        g = pythia.read_grant(td, token)
+        assert g and g["approver"] == "mcp" and g["used_at"] is None
+
+
+def test_no_mint_on_reject_decline_or_cancel():
+    for action, content in (("accept", {"decision": "Reject"}),
+                            ("decline", {}), ("cancel", {})):
+        with tempfile.TemporaryDirectory() as td:
+            token = _preview(td)
+            res = pythia.mcp_approve_decision(td, token, lambda m, s: (action, content))
+            assert res["isError"] is True
+            assert pythia.read_grant(td, token) is None       # nothing minted
+
+
+def test_no_mint_for_unknown_token_and_elicit_is_not_even_called():
+    with tempfile.TemporaryDirectory() as td:
+        called = []
+        res = pythia.mcp_approve_decision(
+            td, "nope99",
+            lambda m, s: called.append(1) or ("accept", {"decision": "Approve"}))
+        assert res["isError"] is True
+        assert called == []                                   # refused before asking
+        assert pythia.read_grant(td, "nope99") is None
+
+
+def test_elicit_error_fails_closed():
+    with tempfile.TemporaryDirectory() as td:
+        token = _preview(td)
+
+        def boom(message, schema):
+            raise RuntimeError("transport died")
+
+        res = pythia.mcp_approve_decision(td, token, boom)
+        assert res["isError"] is True
+        assert pythia.read_grant(td, token) is None
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

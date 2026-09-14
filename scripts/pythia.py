@@ -3444,6 +3444,47 @@ def mcp_handle(msg, state):
     return [_rpc_error(mid, -32601, f"method not found: {method}")], False
 
 
+def _mcp_text(text, is_error=False):
+    return {"content": [{"type": "text", "text": text}], "isError": is_error}
+
+
+def mcp_approve_decision(root, token, elicit):
+    """Mint on a developer's Approve, delivered through an MCP elicitation.
+
+    Transport-free: `elicit(message, schema) -> (action, content)` performs the
+    round-trip (a fake in tests). The card is pythia's own, built from the
+    journal — so there is nothing for the agent to paraphrase and no verbatim
+    check to run. Fail-closed everywhere: the only path that mints is an
+    explicit accept whose decision is exactly Approve."""
+    token = str(token or "").strip().lower()
+    try:
+        _, meta, body = approval_card(root, token)   # refuses unknown/applied
+    except SystemExit as e:
+        return _mcp_text(str(e), is_error=True)
+    message = f"{invocation()} approve {token}\n" + "\n".join(body)
+    schema = {"type": "object",
+              "properties": {"decision": {"type": "string",
+                                          "enum": ["Approve", "Reject"]}},
+              "required": ["decision"]}
+    try:
+        action, content = elicit(message, schema)
+    except Exception as e:                        # noqa: BLE001 — fail closed
+        return _mcp_text(f"No grant minted: the approval prompt could not be "
+                         f"completed ({e}). Approve in a terminal instead: "
+                         f"{invocation()} approve {token}", is_error=True)
+    if action != "accept" or (content or {}).get("decision") != "Approve":
+        return _mcp_text(f"No grant minted for {token}: the developer did not "
+                         "approve (answered "
+                         f"{(content or {}).get('decision') or action!r}). "
+                         "Do not apply; ask what should change.", is_error=True)
+    prune_expired_grants(root)
+    mint_grant(root, token, meta.get("connection") or "",
+               revalidate=fingerprint_text(meta.get("row_set")), approver="mcp")
+    return _mcp_text(f"Approved — grant minted for {token}, single use, expires "
+                     f"in {GRANT_TTL_MINUTES} minutes. Now run: "
+                     f"{invocation()} apply <file> --confirm {token}")
+
+
 def install_claude_hooks(base_dir, events=None):
     """Merge the two hooks and the deny rule into <base>/.claude/settings.json
     — the project's, or the home directory's for -g. The file is Claude
