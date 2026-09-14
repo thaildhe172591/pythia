@@ -3281,29 +3281,36 @@ def global_pack_present(home=None):
 
 
 def copy_bundled_skills(base_dir):
-    """No-Node fallback: copy the wheel-bundled pack into
-    <base>/.claude/skills/ ONLY — the directory Claude Code reliably reads
-    in both scopes (field evidence: a project's .agents/skills is invisible
-    to some Claude Code versions, and a second copy doubles every menu
-    entry). base_dir is the project root, or the home directory for -g.
+    """No-Node fallback: copy the wheel-bundled pack into BOTH conventional
+    roots — <base>/.claude/skills/ (Claude Code) and <base>/.agents/skills/
+    (Codex, and ~/.agents/skills on -g). base_dir is the project root, or the
+    home directory for -g. Node users get the same reach from `npx skills
+    add`; this is the machine that has only Python.
+
+    Trade-off, stated plainly: this reverses an earlier one-root-only choice.
+    A Claude Code version that reads both roots may list a pack entry twice —
+    accepted, because a Codex user without Node otherwise gets no skills at
+    all, and Codex reads only .agents/skills.
 
     Both destinations are cleared link-first before the copy. An earlier
     `npx skills add` leaves .claude/skills/<name> as a symlink into
-    .agents/skills/<name>; copying into that symlink would write through to
-    its target, which the .agents cleanup then deletes — leaving a dangling
-    link and no pack at all. Only the pack's own names are touched; other
-    skills in those directories are left alone."""
+    .agents/skills/<name>; removing both links first means each copytree
+    writes a fresh real directory, never through a link into a target the
+    other copy would then overwrite. Only the pack's own names are touched;
+    other skills in those directories are left alone."""
     import shutil
     base = pathlib.Path(base_dir)
-    dest_root = base / ".claude" / "skills"
+    claude_root = base / ".claude" / "skills"      # Claude Code reads this
+    agents_root = base / ".agents" / "skills"      # Codex reads this
     for pack in sorted(SKILLS_DIR.iterdir()):
         if not (pack / "SKILL.md").is_file():
             continue
-        _remove_link_first(dest_root / pack.name)
-        _remove_link_first(base / ".agents" / "skills" / pack.name)
-        shutil.copytree(pack, dest_root / pack.name)
+        _remove_link_first(claude_root / pack.name)
+        _remove_link_first(agents_root / pack.name)
+        shutil.copytree(pack, claude_root / pack.name)
+        shutil.copytree(pack, agents_root / pack.name)
     clean_legacy_skills(base_dir)
-    return [dest_root]
+    return [claude_root, agents_root]
 
 
 def _remove_link_first(path):

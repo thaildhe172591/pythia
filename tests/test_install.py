@@ -57,14 +57,25 @@ def test_missing_npx_falls_back_to_the_bundled_pack():
         (agents / "pythia-apply").mkdir()      # stale copy from 0.2.0-0.2.3
         (claude / "plsql-review").mkdir(parents=True)
         targets = pythia.copy_bundled_skills(td)
-        assert targets == [claude]
+        assert targets == [claude, agents]
         assert (claude / "pythia-apply" / "SKILL.md").is_file()
         assert (claude / "pythia-review" / "reference" / "antipatterns.md").is_file()
-        assert not (agents / "pythia-apply").exists()       # single copy
+        assert (agents / "pythia-apply" / "SKILL.md").is_file()   # Codex reads this
         assert (agents / "my-team-skill" / "SKILL.md").read_text(
             encoding="utf-8") == "x"                         # merge, not wipe
         assert not (claude / "plsql-review").exists()        # legacy cleaned
         pythia.copy_bundled_skills(td)                       # idempotent
+
+
+def test_fallback_serves_both_claude_and_codex():
+    """Claude reads .claude/skills; Codex reads .agents/skills. The no-Node
+    fallback must populate both, or a Codex user without Node gets nothing."""
+    with tempfile.TemporaryDirectory() as td:
+        base = pathlib.Path(td)
+        targets = pythia.copy_bundled_skills(td)
+        assert targets == [base / ".claude" / "skills", base / ".agents" / "skills"]
+        for root in targets:
+            assert (root / "pythia-apply" / "SKILL.md").is_file()
 
 
 def test_copy_survives_a_symlinked_destination():
