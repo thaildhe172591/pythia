@@ -60,7 +60,7 @@ confirms a number you already knew.
    in the option descriptions; the hook does not read those. Header `pythia`;
    options exactly `Approve` / `Reject`, no "(Recommended)"; up to four tokens
    per call. Anything but `Approve` is not approval: stop and ask what should
-   change. File changed → step 1. No hook (Codex, or none)? Relay `pythia approve <token>` in the terminal — Codex has no chat-mint.
+   change. File changed → step 1. On Codex: call the `pythia_approve` MCP tool with the token — its select prompt is your door — then run `--confirm` yourself. No tool/hook? Relay `pythia approve <token>` for the terminal.
 4. **Apply** by running the exact `then the agent:` line pythia printed. Two
    refusals are normal here, and neither is a malfunction:
    - *"no developer approval is on file"* — the answer was not `Approve`, or

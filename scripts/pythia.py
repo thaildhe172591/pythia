@@ -2286,8 +2286,11 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         "dim", en))
         if not confirmed:
             print("\n  To apply — the developer approves, then the agent confirms:")
-            print("    in chat:            the agent asks (AskUserQuestion) with the text of "
+            print("    in chat (Claude):   the agent asks (AskUserQuestion) with the text of "
                   + paint(f"{invocation()} approve --card {token}", "cyan", en))
+            print("    on Codex:           the agent calls the "
+                  + paint("pythia_approve", "cyan", en)
+                  + f" MCP tool with token {token}")
             print("    or in a terminal:   "
                   + paint(f"{invocation()} approve {token}", "cyan", en))
             print("    then the agent:     "
@@ -2826,15 +2829,20 @@ def agents_md_block():
     """The pythia section for AGENTS.md — Codex's always-loaded instruction
     file. Body is BRIEF_GUIDE verbatim (the same constant `guide --brief`
     prints and the Claude SessionStart hook runs, so the two cannot drift),
-    plus the one line Codex needs that Claude gets from its hook: where the
+    plus the lines Codex needs that Claude gets from its hook: where the
     approval door is, since Codex has no chat-mint. Marker-wrapped so a re-run
     replaces it in place and the developer's own text is untouched."""
     return (f"{AGENTS_BEGIN}\n"
             "## pythia — developing PL/SQL on Oracle\n\n"
             f"{BRIEF_GUIDE.rstrip()}\n\n"
-            "On Codex there is no chat approval hook: the developer approves a "
-            "preview in this terminal with `pythia approve <token>`, then the "
-            "agent runs `pythia apply <file> --confirm <token>`.\n"
+            "APPROVAL ON CODEX: your approval door is the `pythia_approve` MCP "
+            "tool, not AskUserQuestion (Codex has none). After `pythia apply "
+            "<file>` prints a token, call the `pythia_approve` tool with that "
+            "token — the developer answers a select prompt, and on Approve the "
+            "grant is minted. Then YOU run `pythia apply <file> --confirm "
+            "<token>` yourself; do not stop at the preview or hand the "
+            "developer a command to type. If the tool is not available "
+            "(older Codex), relay `pythia approve <token>` for their terminal.\n"
             f"{AGENTS_END}")
 
 
