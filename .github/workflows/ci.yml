@@ -24,6 +24,7 @@ jobs:
       - run: python tests/test_phase2.py
       - run: python tests/test_phase3.py
       - run: python tests/test_phase5.py
+      - run: python tests/test_mcp.py
 
   package:
     runs-on: ubuntu-latest

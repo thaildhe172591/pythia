@@ -66,7 +66,8 @@ def kit_version():
 
 # ---------------------------------------------------------------- reliability
 
-SUITES = ["test_phase1.py", "test_phase2.py", "test_phase3.py", "test_phase5.py"]
+SUITES = ["test_phase1.py", "test_phase2.py", "test_phase3.py", "test_phase5.py",
+          "test_mcp.py"]
 
 
 def run_suites():

@@ -3392,6 +3392,58 @@ def merge_codex_hooks(path, events=None):
     return path, added
 
 
+# The MCP approver: a write-free stdio server whose one tool, pythia_approve,
+# mints the same grant `approve` mints — gated by an MCP elicitation the
+# developer answers in Codex. Writes never go through here; apply still
+# verifies the grant. Hand-rolled JSON-RPC (stdlib only).
+MCP_TOOL = "pythia_approve"
+MCP_PROTOCOL = "2025-06-18"
+MCP_ELICIT_METHOD = "elicitation/create"   # the one spelling to adjust if a
+#                                            live Codex disagrees (isolated)
+_MCP_TOOL_DEF = {
+    "name": MCP_TOOL,
+    "description": ("Ask the developer to approve a pythia apply preview by its "
+                    "token. Shows pythia's approval card and mints the one-time "
+                    "grant only if the developer picks Approve. Call it after "
+                    "`pythia apply <file>` prints a token; then run "
+                    "`pythia apply <file> --confirm <token>`."),
+    "inputSchema": {"type": "object",
+                    "properties": {"token": {"type": "string"}},
+                    "required": ["token"]},
+}
+
+
+def _rpc_result(mid, result):
+    return {"jsonrpc": "2.0", "id": mid, "result": result}
+
+
+def _rpc_error(mid, code, message):
+    return {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}}
+
+
+def mcp_handle(msg, state):
+    """Dispatch one incoming JSON-RPC message that is NOT a tools/call (those
+    need the elicitation round-trip and are handled in the loop). Returns
+    (outgoing_messages, done). A notification (no id) is answered with []."""
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        proto = (msg.get("params") or {}).get("protocolVersion") or MCP_PROTOCOL
+        return [_rpc_result(mid, {
+            "protocolVersion": proto,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "pythia",
+                           "version": getattr(sys.modules[__name__],
+                                              "__version__", "0")}})], False
+    if method == "notifications/initialized":
+        return [], False
+    if method == "tools/list":
+        return [_rpc_result(mid, {"tools": [_MCP_TOOL_DEF]})], False
+    if mid is None:
+        return [], False                       # any other notification
+    return [_rpc_error(mid, -32601, f"method not found: {method}")], False
+
+
 def install_claude_hooks(base_dir, events=None):
     """Merge the two hooks and the deny rule into <base>/.claude/settings.json
     — the project's, or the home directory's for -g. The file is Claude
