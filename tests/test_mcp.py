@@ -119,6 +119,77 @@ def test_elicit_error_fails_closed():
         assert pythia.read_grant(td, token) is None
 
 
+# --- Task 3: the server loop, the mcp subcommand, and the guide -------------
+
+class ScriptedClient:
+    """Feeds the server initialize -> tools/call, then answers the server's
+    elicitation/create with a fixed (action, decision). Acts as both reader
+    and writer for mcp_serve."""
+    def __init__(self, token, action="accept", decision="Approve"):
+        self.out = io.StringIO()
+        self.answered = False
+        self.action, self.decision = action, decision
+        self._pending = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"protocolVersion": "2025-06-18", "capabilities": {}}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "pythia_approve", "arguments": {"token": token}}},
+        ]
+
+    def readline(self):
+        if self._pending:
+            return json.dumps(self._pending.pop(0)) + "\n"
+        if not self.answered:
+            for line in reversed(self.out.getvalue().splitlines()):
+                m = json.loads(line)
+                if m.get("method") == pythia.MCP_ELICIT_METHOD:
+                    self.answered = True
+                    return json.dumps({"jsonrpc": "2.0", "id": m["id"],
+                                       "result": {"action": self.action,
+                                                  "content": {"decision": self.decision}}}) + "\n"
+        return ""     # EOF -> server loop ends
+
+    def write(self, s):
+        self.out.write(s)
+
+    def flush(self):
+        pass
+
+    def messages(self):
+        return [json.loads(l) for l in self.out.getvalue().splitlines() if l.strip()]
+
+
+def test_serve_end_to_end_mints_on_scripted_approve():
+    with tempfile.TemporaryDirectory() as td:
+        token = _preview(td)
+        client = ScriptedClient(token)
+        pythia.mcp_serve(client, client, td)
+        msgs = client.messages()
+        assert any(m.get("result", {}).get("serverInfo", {}).get("name") == "pythia"
+                   for m in msgs)
+        assert any(m.get("method") == pythia.MCP_ELICIT_METHOD for m in msgs)
+        call_result = [m for m in msgs if m.get("id") == 2 and "result" in m][-1]
+        assert call_result["result"]["isError"] is False
+        assert pythia.read_grant(td, token)["approver"] == "mcp"
+
+
+def test_serve_fails_closed_on_scripted_decline():
+    with tempfile.TemporaryDirectory() as td:
+        token = _preview(td)
+        client = ScriptedClient(token, action="decline", decision="")
+        pythia.mcp_serve(client, client, td)
+        call_result = [m for m in client.messages()
+                       if m.get("id") == 2 and "result" in m][-1]
+        assert call_result["result"]["isError"] is True
+        assert pythia.read_grant(td, token) is None
+
+
+def test_mcp_is_a_no_db_command_in_the_guide():
+    assert "mcp" in pythia.COMMANDS
+    assert "mcp" in pythia.NO_DB_COMMANDS
+    assert "mcp" in pythia.OPERATING_GUIDE
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

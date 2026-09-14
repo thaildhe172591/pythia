@@ -2921,6 +2921,10 @@ apply -> verify -> report.
                           AND to the developer's approval
   journal restore         undo, through the same six steps and the same gate
   unistr                  exact non-ASCII literals for what you are writing
+  mcp                     Codex only: a write-free MCP approver. The agent
+                          calls its pythia_approve tool, Codex shows the card
+                          as a select prompt, and the developer's Approve mints
+                          the grant. It never writes; apply still verifies it.
   install · agent-user · guide    setting the harness itself up
 
 The CLI enforces the gates: headless --yes is refused, policy cannot be
@@ -3485,6 +3489,67 @@ def mcp_approve_decision(root, token, elicit):
                      f"{invocation()} apply <file> --confirm {token}")
 
 
+def mcp_serve(reader, writer, root):
+    """The stdio loop. Newline-delimited JSON-RPC in and out. A tools/call for
+    pythia_approve runs the elicitation round-trip inline: send
+    elicitation/create, then read until the matching-id response. One call in
+    flight at a time (Codex calls tools serially in a turn)."""
+    counter = [1000]
+
+    def send(msg):
+        writer.write(json.dumps(msg) + "\n")
+        writer.flush()
+
+    def read_msg():
+        line = reader.readline()
+        if not line:
+            return None
+        try:
+            return json.loads(line)
+        except ValueError:
+            return {}                       # skip a malformed line
+
+    def elicit(message, schema):
+        counter[0] += 1
+        eid = counter[0]
+        send({"jsonrpc": "2.0", "id": eid, "method": MCP_ELICIT_METHOD,
+              "params": {"message": message, "requestedSchema": schema}})
+        while True:
+            m = read_msg()
+            if m is None:
+                raise RuntimeError("client closed before answering the elicitation")
+            if m.get("id") == eid and ("result" in m or "error" in m):
+                if "error" in m:
+                    raise RuntimeError(str(m["error"]))
+                r = m["result"] or {}
+                return r.get("action"), r.get("content") or {}
+            # ignore anything else that arrives mid-elicitation
+
+    while True:
+        msg = read_msg()
+        if msg is None:
+            return
+        if msg.get("method") == "tools/call":
+            mid = msg.get("id")
+            params = msg.get("params") or {}
+            if params.get("name") != MCP_TOOL:
+                send(_rpc_error(mid, -32601, f"no such tool: {params.get('name')}"))
+                continue
+            token = (params.get("arguments") or {}).get("token", "")
+            result = mcp_approve_decision(root, token, elicit)
+            send(_rpc_result(mid, result))
+            continue
+        out, _ = mcp_handle(msg, {})
+        for m in out:
+            send(m)
+
+
+def cmd_mcp(conn, schema, ns):
+    """Run the MCP approver on stdio. Launched by Codex per its
+    [mcp_servers.pythia] config; lives for the session. Touches no database."""
+    mcp_serve(sys.stdin, sys.stdout, ns.project_root)
+
+
 def install_claude_hooks(base_dir, events=None):
     """Merge the two hooks and the deny rule into <base>/.claude/settings.json
     — the project's, or the home directory's for -g. The file is Claude
@@ -3629,10 +3694,10 @@ COMMANDS = {"check": cmd_check, "ls": cmd_ls, "src": cmd_src, "args": cmd_args,
             "approve": cmd_approve,
             "conventions": cmd_conventions, "guide": cmd_guide, "connections": cmd_connections, "install": cmd_install,
             "unistr": cmd_unistr, "agent-user": cmd_agent_user,
-            "history": cmd_history}
+            "history": cmd_history, "mcp": cmd_mcp}
 
 NO_DB_COMMANDS = {"policy", "journal", "install", "unistr", "guide", "connections",
-                  "history", "approve"}
+                  "history", "approve", "mcp"}
 
 
 # --- CLI ---------------------------------------------------------------------
@@ -3776,6 +3841,9 @@ def build_parser():
     s.add_argument("text", nargs="*", help="text; omit to read stdin")
     s.add_argument("--loi", action="store_true",
                    help="wrap as 'loi:'||unistr(...)||':loi'")
+    sub.add_parser("mcp", parents=[common()],
+                   help="run the MCP approver for Codex (stdio; Codex launches "
+                        "it — the developer approves via an elicitation)")
     s = sub.add_parser("install", parents=[common()],
                        help="install the skill pack, scaffold .pythia/ config, wire the Claude Code hooks")
     s.add_argument("-g", "--global", dest="glob", action="store_true",
