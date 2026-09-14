@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.14.2 — 2026-09-14
+
+- **The Codex agent now knows to use the `pythia_approve` tool.** With 0.14.1
+  the mechanism worked, but a field test showed the agent running `pythia
+  apply`, printing the token, and stopping: the preview's follow-up and the
+  `pythia-apply` skill only named `AskUserQuestion` (Claude's tool, which Codex
+  does not have) and the console — never the `pythia_approve` MCP tool that is
+  Codex's actual door. Three places now route it there: the apply preview
+  prints an "on Codex: the agent calls the `pythia_approve` MCP tool with token
+  …" line; the AGENTS.md harness block (loaded every Codex session) says the
+  approval door IS that tool and that the agent then runs `apply --confirm`
+  itself, rather than stopping at the preview or handing the developer a
+  command to type; and `pythia-apply` step 3 says the same. Confirmed on live
+  Codex v0.154: after the preview the agent calls the tool and the developer
+  gets the Approve prompt.
+
 ## 0.14.1 — 2026-09-14
 
 - **install no longer breaks Codex's config.** 0.14.0 wrote an
