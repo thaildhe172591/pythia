@@ -3550,6 +3550,67 @@ def cmd_mcp(conn, schema, ns):
     mcp_serve(sys.stdin, sys.stdout, ns.project_root)
 
 
+# Codex config is TOML, and the stdlib cannot parse or write it on 3.9
+# (tomllib is read-only, 3.11+). So these merges never parse TOML: they append
+# a marker-delimited block when the target tables are absent, and refuse
+# (writing nothing) when a table already exists — the installer then prints
+# what to add. ponytail: literal-text collision check, not a TOML engine; a
+# table header inside a string/comment is not worth a parser here.
+CODEX_MCP_BEGIN = "# pythia:begin (managed by `pythia install`)"
+CODEX_MCP_END = "# pythia:end"
+CODEX_MCP_BLOCK = (f"{CODEX_MCP_BEGIN}\n"
+                   "[mcp_servers.pythia]\n"
+                   'command = "python"\n'
+                   'args = ["-m", "pythia", "mcp"]\n\n'
+                   "[approval_policy.granular]\n"
+                   "mcp_elicitations = true\n"
+                   f"{CODEX_MCP_END}")
+# requirements.toml is a separate admin-enforced file; forbidding these two is
+# what closes the danger-full-access elicitation auto-approve hole.
+CODEX_REQUIREMENTS = (f"{CODEX_MCP_BEGIN}\n"
+                      "# pythia needs elicitations to reach a human, so the two\n"
+                      "# modes that would auto-answer or skip them are disallowed.\n"
+                      'allowed_approval_policies = ["untrusted", "on-request", "on-failure"]\n'
+                      'allowed_sandbox_modes = ["read-only", "workspace-write"]\n'
+                      f"{CODEX_MCP_END}")
+
+
+def merge_codex_mcp_config(path):
+    """Append the MCP block to <project>/.codex/config.toml. Returns
+    (path, action): 'created' | 'appended' | 'present' | 'conflict'. Refuses
+    (writes nothing) if either table already exists without our marker."""
+    path = pathlib.Path(path)
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    if old is not None and CODEX_MCP_BEGIN in old:
+        return path, "present"
+    if old is not None and ("[mcp_servers.pythia]" in old
+                            or "[approval_policy.granular]" in old):
+        return path, "conflict"
+    if old is None:
+        new, action = CODEX_MCP_BLOCK + "\n", "created"
+    else:
+        tail = "" if old.endswith("\n\n") else "\n" if old.endswith("\n") else "\n\n"
+        new, action = old + tail + CODEX_MCP_BLOCK + "\n", "appended"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new, encoding="utf-8")
+    return path, action
+
+
+def merge_codex_requirements(path):
+    """Write <project>/.codex/requirements.toml forbidding danger-full-access
+    and never-approval. Returns (path, action): 'created' | 'present' |
+    'conflict'. An existing file without our marker is left untouched."""
+    path = pathlib.Path(path)
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    if old is not None and CODEX_MCP_BEGIN in old:
+        return path, "present"
+    if old is not None:
+        return path, "conflict"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(CODEX_REQUIREMENTS + "\n", encoding="utf-8")
+    return path, "created"
+
+
 def install_claude_hooks(base_dir, events=None):
     """Merge the two hooks and the deny rule into <base>/.claude/settings.json
     — the project's, or the home directory's for -g. The file is Claude

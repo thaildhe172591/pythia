@@ -190,6 +190,66 @@ def test_mcp_is_a_no_db_command_in_the_guide():
     assert "mcp" in pythia.OPERATING_GUIDE
 
 
+# --- Task 4: config.toml and requirements.toml merges (TOML-safe) -----------
+
+def test_merge_codex_mcp_config_appends_once_when_clean():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "config.toml"
+        p, action = pythia.merge_codex_mcp_config(path)
+        assert p == path and action == "created"
+        body = path.read_text(encoding="utf-8")
+        assert "[mcp_servers.pythia]" in body
+        assert 'args = ["-m", "pythia", "mcp"]' in body
+        assert "mcp_elicitations = true" in body
+        assert pythia.merge_codex_mcp_config(path)[1] == "present"   # idempotent
+
+
+def test_merge_codex_mcp_config_preserves_other_content():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "config.toml"
+        path.parent.mkdir(parents=True)
+        path.write_text('model = "gpt-5"\n', encoding="utf-8")
+        _, action = pythia.merge_codex_mcp_config(path)
+        assert action == "appended"
+        body = path.read_text(encoding="utf-8")
+        assert body.startswith('model = "gpt-5"\n')                  # kept
+        assert "[mcp_servers.pythia]" in body
+
+
+def test_merge_codex_mcp_config_refuses_on_table_collision():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "config.toml"
+        path.parent.mkdir(parents=True)
+        original = "[approval_policy.granular]\nmcp_elicitations = false\n"
+        path.write_text(original, encoding="utf-8")
+        p, action = pythia.merge_codex_mcp_config(path)
+        assert action == "conflict"
+        assert path.read_text(encoding="utf-8") == original          # untouched
+
+
+def test_merge_codex_requirements_creates_and_is_idempotent():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "requirements.toml"
+        p, action = pythia.merge_codex_requirements(path)
+        assert action == "created"
+        body = path.read_text(encoding="utf-8")
+        assert "allowed_approval_policies" in body and "allowed_sandbox_modes" in body
+        assert "danger-full-access" not in body     # the forbidden mode is absent
+        assert '"never"' not in body                 # the forbidden policy is absent
+        assert pythia.merge_codex_requirements(path)[1] == "present"
+
+
+def test_merge_codex_requirements_refuses_an_existing_file():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "requirements.toml"
+        path.parent.mkdir(parents=True)
+        original = "# org policy\nallowed_sandbox_modes = []\n"
+        path.write_text(original, encoding="utf-8")
+        p, action = pythia.merge_codex_requirements(path)
+        assert action == "conflict"
+        assert path.read_text(encoding="utf-8") == original          # untouched
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):
