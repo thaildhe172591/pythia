@@ -2818,6 +2818,51 @@ DO     writes go through `pythia apply` only - snapshot, token, verify. The
 """
 
 
+AGENTS_BEGIN = "<!-- pythia:begin (managed by `pythia install`; edit outside this block) -->"
+AGENTS_END = "<!-- pythia:end -->"
+
+
+def agents_md_block():
+    """The pythia section for AGENTS.md — Codex's always-loaded instruction
+    file. Body is BRIEF_GUIDE verbatim (the same constant `guide --brief`
+    prints and the Claude SessionStart hook runs, so the two cannot drift),
+    plus the one line Codex needs that Claude gets from its hook: where the
+    approval door is, since Codex has no chat-mint. Marker-wrapped so a re-run
+    replaces it in place and the developer's own text is untouched."""
+    return (f"{AGENTS_BEGIN}\n"
+            "## pythia — developing PL/SQL on Oracle\n\n"
+            f"{BRIEF_GUIDE.rstrip()}\n\n"
+            "On Codex there is no chat approval hook: the developer approves a "
+            "preview in this terminal with `pythia approve <token>`, then the "
+            "agent runs `pythia apply <file> --confirm <token>`.\n"
+            f"{AGENTS_END}")
+
+
+def merge_agents_md(path):
+    """Write the pythia block into an AGENTS.md. The file is the developer's,
+    shared with every AGENTS.md-reading agent, so only the delimited block is
+    ours: present -> replaced in place, absent -> appended below their text,
+    everything else byte-identical. Returns (path, action) where action is
+    'created' | 'updated' | 'unchanged'."""
+    path = pathlib.Path(path)
+    block = agents_md_block()
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    if old is None:
+        new, action = block + "\n", "created"
+    elif AGENTS_BEGIN in old and AGENTS_END in old:
+        pre = old[:old.index(AGENTS_BEGIN)]
+        post = old[old.index(AGENTS_END) + len(AGENTS_END):]
+        new = pre + block + post
+        action = "unchanged" if new == old else "updated"
+    else:
+        tail = "" if old.endswith("\n\n") else "\n" if old.endswith("\n") else "\n\n"
+        new, action = old + tail + block + "\n", "updated"
+    if new != old:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(new, encoding="utf-8")
+    return path, action
+
+
 OPERATING_GUIDE = """\
 THE OPERATING MODEL — Learn, Ask, Do (Hoc - Hoi - Lam)
 
@@ -3236,29 +3281,36 @@ def global_pack_present(home=None):
 
 
 def copy_bundled_skills(base_dir):
-    """No-Node fallback: copy the wheel-bundled pack into
-    <base>/.claude/skills/ ONLY — the directory Claude Code reliably reads
-    in both scopes (field evidence: a project's .agents/skills is invisible
-    to some Claude Code versions, and a second copy doubles every menu
-    entry). base_dir is the project root, or the home directory for -g.
+    """No-Node fallback: copy the wheel-bundled pack into BOTH conventional
+    roots — <base>/.claude/skills/ (Claude Code) and <base>/.agents/skills/
+    (Codex, and ~/.agents/skills on -g). base_dir is the project root, or the
+    home directory for -g. Node users get the same reach from `npx skills
+    add`; this is the machine that has only Python.
+
+    Trade-off, stated plainly: this reverses an earlier one-root-only choice.
+    A Claude Code version that reads both roots may list a pack entry twice —
+    accepted, because a Codex user without Node otherwise gets no skills at
+    all, and Codex reads only .agents/skills.
 
     Both destinations are cleared link-first before the copy. An earlier
     `npx skills add` leaves .claude/skills/<name> as a symlink into
-    .agents/skills/<name>; copying into that symlink would write through to
-    its target, which the .agents cleanup then deletes — leaving a dangling
-    link and no pack at all. Only the pack's own names are touched; other
-    skills in those directories are left alone."""
+    .agents/skills/<name>; removing both links first means each copytree
+    writes a fresh real directory, never through a link into a target the
+    other copy would then overwrite. Only the pack's own names are touched;
+    other skills in those directories are left alone."""
     import shutil
     base = pathlib.Path(base_dir)
-    dest_root = base / ".claude" / "skills"
+    claude_root = base / ".claude" / "skills"      # Claude Code reads this
+    agents_root = base / ".agents" / "skills"      # Codex reads this
     for pack in sorted(SKILLS_DIR.iterdir()):
         if not (pack / "SKILL.md").is_file():
             continue
-        _remove_link_first(dest_root / pack.name)
-        _remove_link_first(base / ".agents" / "skills" / pack.name)
-        shutil.copytree(pack, dest_root / pack.name)
+        _remove_link_first(claude_root / pack.name)
+        _remove_link_first(agents_root / pack.name)
+        shutil.copytree(pack, claude_root / pack.name)
+        shutil.copytree(pack, agents_root / pack.name)
     clean_legacy_skills(base_dir)
-    return [dest_root]
+    return [claude_root, agents_root]
 
 
 def _remove_link_first(path):
@@ -3301,6 +3353,43 @@ CLAUDE_DENY = ["Bash(pythia approve --hook*)",
 # a hook already present in any spelling (python3, the plugin's script path)
 # is recognised by what it runs, not by how it invokes it
 HOOK_MARKS = {"SessionStart": "guide --brief", "PostToolUse": "approve --hook"}
+
+# Codex loads hooks from <repo>/.codex/hooks.json once the layer is trusted
+# (/hooks). Only the session-start guide is wired — Codex has no answer-reading
+# PostToolUse and no question tool, so the chat approve-mint cannot port; the
+# developer approves in the terminal. Same shape and merge discipline as the
+# Claude hooks.
+CODEX_HOOKS = {
+    "SessionStart": [{"hooks": [
+        {"type": "command", "command": "python -m pythia guide --brief"}]}],
+}
+CODEX_HOOK_MARKS = {"SessionStart": "guide --brief"}
+
+
+def merge_codex_hooks(path, events=None):
+    """Merge pythia's Codex hooks into a hooks.json ({"hooks": {...}}). Every
+    other key survives, a hook already present in any spelling is recognised by
+    what it runs, and a file that will not parse is left byte-identical.
+    Returns (path, added|None)."""
+    path = pathlib.Path(path)
+    try:
+        s = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        hooks = s.setdefault("hooks", {})
+        added = []
+        for event in events or CODEX_HOOKS:
+            present = hooks.setdefault(event, [])
+            cmds = " ".join(h.get("command", "")
+                            for e in present for h in e.get("hooks", []))
+            if CODEX_HOOK_MARKS[event] not in cmds:
+                present.extend(json.loads(json.dumps(CODEX_HOOKS[event])))
+                added.append(f"hooks.{event}")
+    except (ValueError, TypeError, AttributeError):
+        return path, None
+    if added:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(s, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+    return path, added
 
 
 def install_claude_hooks(base_dir, events=None):
@@ -3357,6 +3446,33 @@ def report_claude_hooks(base_dir, ns, events=None):
         print(f"\nClaude Code hooks already in {path}.")
 
 
+def report_codex_agents_md(project_root):
+    """Project scope: write the harness into <project>/AGENTS.md, the file
+    Codex loads every session. Not done on -g — a global AGENTS.md is noise in
+    every non-Oracle session, as the Claude guide is per-project."""
+    path, action = merge_agents_md(pathlib.Path(project_root) / "AGENTS.md")
+    verb = {"created": "Wrote the pythia harness into",
+            "updated": "Updated the pythia block in",
+            "unchanged": "pythia harness already current in"}[action]
+    print(f"\n{verb} {path} (Codex and other AGENTS.md agents load it each session).")
+
+
+def report_codex_hooks(project_root, ns):
+    """Project scope: the Codex session-start guide hook. --no-hooks skips it,
+    as with the Claude hooks. AGENTS.md already carries the guide, so this is
+    reinforcement for hook-driven Codex users."""
+    if getattr(ns, "no_hooks", False):
+        return
+    path, added = merge_codex_hooks(pathlib.Path(project_root) / ".codex" / "hooks.json")
+    if added is None:
+        print(f"\n! {path} is not valid JSON, so it was left untouched.")
+    elif added:
+        print(f"\nWired the Codex session-start hook into {path}.")
+        print("In Codex, run /hooks once to trust this project's .codex layer.")
+    else:
+        print(f"\nCodex session-start hook already in {path}.")
+
+
 def cmd_install(conn, schema, ns):
     import shutil
     en = getattr(ns, "color", False)
@@ -3398,6 +3514,8 @@ def cmd_install(conn, schema, ns):
         else:
             clean_legacy_skills(ns.project_root)
     report_claude_hooks(ns.project_root, ns)
+    report_codex_agents_md(ns.project_root)
+    report_codex_hooks(ns.project_root, ns)
     print(f"\nNext: fill in {path}")
     print(f"Then: {invocation()} check")
     scripts_dir = installed_scripts_dir()

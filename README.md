@@ -114,7 +114,7 @@ Or the same thing piecewise:
 
 ```bash
 pip install pythia-plsql   # the CLI (thin driver — no Oracle Instant Client needed)
-python -m pythia install   # skills into your agent + .pythia/ scaffold + Claude Code hooks
+python -m pythia install   # skills + .pythia/ scaffold + Claude Code hooks + Codex AGENTS.md
 pythia check               # fill in connections.json first, then verify
 ```
 
@@ -197,6 +197,10 @@ door and the session-start guide — and the deny rule into
 stops it prompting for the read-only commands and asks it to pause on
 writes — optional, and yours to install
 ([why pythia does not](GUIDE.md#11-optional-claude-code-permission-settings)).
+
+On Codex, the same command writes the harness into `AGENTS.md` (loaded every
+session) and a session-start hook into `.codex/hooks.json`; approve previews in
+the terminal with `pythia approve <token>`, since Codex has no chat-mint.
 
 Per-group write policy, `.pythia/policy.json` (defaults shown):
 

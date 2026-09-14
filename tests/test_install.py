@@ -57,14 +57,25 @@ def test_missing_npx_falls_back_to_the_bundled_pack():
         (agents / "pythia-apply").mkdir()      # stale copy from 0.2.0-0.2.3
         (claude / "plsql-review").mkdir(parents=True)
         targets = pythia.copy_bundled_skills(td)
-        assert targets == [claude]
+        assert targets == [claude, agents]
         assert (claude / "pythia-apply" / "SKILL.md").is_file()
         assert (claude / "pythia-review" / "reference" / "antipatterns.md").is_file()
-        assert not (agents / "pythia-apply").exists()       # single copy
+        assert (agents / "pythia-apply" / "SKILL.md").is_file()   # Codex reads this
         assert (agents / "my-team-skill" / "SKILL.md").read_text(
             encoding="utf-8") == "x"                         # merge, not wipe
         assert not (claude / "plsql-review").exists()        # legacy cleaned
         pythia.copy_bundled_skills(td)                       # idempotent
+
+
+def test_fallback_serves_both_claude_and_codex():
+    """Claude reads .claude/skills; Codex reads .agents/skills. The no-Node
+    fallback must populate both, or a Codex user without Node gets nothing."""
+    with tempfile.TemporaryDirectory() as td:
+        base = pathlib.Path(td)
+        targets = pythia.copy_bundled_skills(td)
+        assert targets == [base / ".claude" / "skills", base / ".agents" / "skills"]
+        for root in targets:
+            assert (root / "pythia-apply" / "SKILL.md").is_file()
 
 
 def test_copy_survives_a_symlinked_destination():
@@ -348,6 +359,97 @@ def test_global_install_wires_the_approve_hook_only():
         s = json.loads(path.read_text(encoding="utf-8"))
         assert "SessionStart" not in s["hooks"]
         assert s["hooks"]["PostToolUse"] == pythia.CLAUDE_HOOKS["PostToolUse"]
+
+
+def test_cmd_install_serves_codex_in_the_project_scope():
+    """Project install writes the harness into AGENTS.md always, and the
+    session-start hook unless --no-hooks. (The .agents/skills copy is gated by
+    global_pack_present() — a machine with a global pack skips it — so that is
+    proven directly in test_fallback_serves_both_claude_and_codex, not here.)"""
+    import argparse
+    import contextlib
+    import io
+    old = os.environ.get("PATH")
+    os.environ["PATH"] = ""                     # no npx: bundled fallback
+    try:
+        for no_hooks in (False, True):
+            with tempfile.TemporaryDirectory() as td:
+                ns = argparse.Namespace(project_root=td, glob=False, source=None,
+                                        color=False, json=False, no_hooks=no_hooks)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    pythia.cmd_install(None, None, ns)
+                base = pathlib.Path(td)
+                agents_md = base / "AGENTS.md"
+                assert agents_md.is_file()                        # always
+                assert pythia.BRIEF_GUIDE.rstrip() in agents_md.read_text(encoding="utf-8")
+                hooks = base / ".codex" / "hooks.json"
+                assert hooks.is_file() != no_hooks                # skipped iff --no-hooks
+    finally:
+        if old is not None:
+            os.environ["PATH"] = old
+
+
+# --- Codex: AGENTS.md harness (TP1) ------------------------------------------
+
+def test_agents_md_block_is_the_guide_verbatim():
+    block = pythia.agents_md_block()
+    assert block.startswith(pythia.AGENTS_BEGIN)
+    assert block.rstrip().endswith(pythia.AGENTS_END)
+    assert pythia.BRIEF_GUIDE.rstrip() in block          # one source, no drift
+    assert "pythia approve <token>" in block             # the Codex approval door
+
+
+def test_merge_agents_md_creates_updates_and_is_idempotent():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "AGENTS.md"
+        p, action = pythia.merge_agents_md(path)
+        assert p == path and action == "created"
+        assert pythia.BRIEF_GUIDE.rstrip() in path.read_text(encoding="utf-8")
+        assert pythia.merge_agents_md(path)[1] == "unchanged"
+
+
+def test_merge_agents_md_preserves_the_developers_text():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "AGENTS.md"
+        path.write_text("# House rules\n\nUse tabs.\n", encoding="utf-8")
+        pythia.merge_agents_md(path)
+        body = path.read_text(encoding="utf-8")
+        assert body.startswith("# House rules\n\nUse tabs.\n")   # kept, on top
+        assert pythia.AGENTS_BEGIN in body and pythia.BRIEF_GUIDE.rstrip() in body
+        pythia.merge_agents_md(path)                             # a stale block
+        assert path.read_text(encoding="utf-8").count(pythia.AGENTS_BEGIN) == 1
+
+
+# --- Codex: session-start hook (TP3) -----------------------------------------
+
+def test_merge_codex_hooks_creates_and_is_idempotent():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "hooks.json"
+        p, added = pythia.merge_codex_hooks(path)
+        assert p == path and added == ["hooks.SessionStart"]
+        s = json.loads(path.read_text(encoding="utf-8"))
+        assert s["hooks"]["SessionStart"] == pythia.CODEX_HOOKS["SessionStart"]
+        assert pythia.merge_codex_hooks(path) == (path, [])
+
+
+def test_merge_codex_hooks_recognises_an_existing_spelling():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "hooks.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"hooks": {"SessionStart": [
+            {"hooks": [{"type": "command",
+                        "command": "python3 -m pythia guide --brief"}]}]}}),
+            encoding="utf-8")
+        assert pythia.merge_codex_hooks(path) == (path, [])   # not doubled
+
+
+def test_merge_codex_hooks_refuses_a_file_it_cannot_parse():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / ".codex" / "hooks.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("{not json", encoding="utf-8")
+        assert pythia.merge_codex_hooks(path) == (path, None)
+        assert path.read_text(encoding="utf-8") == "{not json"
 
 
 # Native paths: on POSIX ':' is the PATH separator and would cut a

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.13.0 — 2026-09-14
+
+- **`pythia install` now serves Codex, not only Claude Code.** Until now Codex
+  got one thing — `npx skills add` reaching it as one of ~76 agents — and
+  nothing else: the harness never loaded, the no-Node fallback wrote a
+  directory Codex does not read, and no page told a Codex user where the
+  approval door was. Three verified facts about Codex shape the fix. Its
+  always-on instruction file is `AGENTS.md` (loaded every session), so
+  `install` merges a marker-delimited pythia block into `<project>/AGENTS.md` —
+  the same `BRIEF_GUIDE` the Claude session-start hook runs, one source so the
+  two cannot drift, and the developer's own AGENTS.md text is left untouched.
+  Its skills load from `.agents/skills/`, not `~/.codex/skills`, so the no-Node
+  fallback now populates that too (Node users were already served). And its
+  hooks live in `<project>/.codex/hooks.json`, so a session-start guide hook is
+  wired there, behind the same `--no-hooks` flag and a one-line `/hooks` trust
+  reminder.
+- **The guide stays per-project on Codex, as it does on Claude.** A global
+  `~/.codex/AGENTS.md` would load the harness into every session on the
+  machine, Oracle or not — the same noise the Claude design keeps out of
+  `~/.claude/settings.json`. So `-g` gives Codex only the skills.
+- **The chat approval gate does not port, and the docs say so plainly.** Codex
+  has no question tool and its PostToolUse cannot read a user's answer, which is
+  exactly what makes Claude's mint work. On Codex the developer approves in the
+  terminal — `pythia approve <token>` — and the AGENTS.md block and
+  `pythia-apply` both say it. `apply` enforces the grant either way, so the
+  write gate is unchanged. A defensive Codex `PermissionRequest` hook is parked
+  in IDEAS.md, pending a live-Codex field test.
+
 ## 0.12.0 — 2026-09-11
 
 Five findings from one session on an editions-enabled schema, 10-11/09. Two
