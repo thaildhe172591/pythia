@@ -13,7 +13,10 @@ SKILLS = ROOT / "skills"
 EXPECTED = {"pythia-setup", "pythia-explore", "pythia-impact",
             "pythia-write", "pythia-apply", "pythia-review",
             "pythia-skill-author", "pythia-conventions", "pythia-spec",
-            "pythia-comment", "using-pythia"}
+            "pythia-comment", "using-pythia",
+            # 0.15.0: the Oracle build pack and the delegation workflow
+            "pythia-table", "pythia-tune", "pythia-package", "pythia-deploy",
+            "pythia-autopilot", "pythia-verify"}
 
 # spec: SKILL.md under 150 lines, detail pushed to reference/
 MAX_LINES = 150
@@ -106,7 +109,11 @@ def test_apply_skill_keeps_the_honest_rollback_table():
 def test_reference_files_exist_where_promised():
     for rel in ("pythia-explore/reference/data-dictionary.md",
                 "pythia-write/reference/patterns.md",
-                "pythia-review/reference/antipatterns.md"):
+                "pythia-review/reference/antipatterns.md",
+                "pythia-table/reference/ddl-standards.md",
+                "pythia-tune/reference/tuning-checklist.md",
+                "pythia-package/reference/plsql-standards.md",
+                "pythia-setup/reference/environment.md"):
         assert (SKILLS / rel).is_file(), f"missing {rel}"
 
 
@@ -153,7 +160,8 @@ def test_no_manifest_hardcodes_a_stale_skill_count():
     so the check is: no manifest states a number the code can disprove."""
     import json
     n = len(EXPECTED)
-    words = {7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven"}
+    words = {7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven",
+             12: "twelve", 17: "seventeen"}
     stale = [w for k, w in words.items() if k != n]
     for rel in (".claude-plugin/marketplace.json", "npm/package.json",
                 "npm/README.md"):
@@ -188,6 +196,26 @@ def test_readme_and_security_carry_the_approval_gate():
     assert "Approval grant" in sec
     vi = (ROOT / "README.vi.md").read_text(encoding="utf-8")
     assert "approve" in vi
+
+
+def test_skills_pass_the_shipped_skill_linter():
+    """`pythia skill lint` is what a team runs on its own skills; the pack
+    itself must pass it, or the tool teaches a contract the pack breaks."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import pythia
+    for name in sorted(EXPECTED):
+        path = SKILLS / name / "SKILL.md"
+        if path.is_file():
+            assert pythia.skill_lint_findings(path) == [], \
+                f"{name}: {pythia.skill_lint_findings(path)}"
+
+
+def test_the_router_names_every_skill():
+    """using-pythia is consulted before any action. A skill it never names is
+    a skill that fires only by luck."""
+    text = (SKILLS / "using-pythia" / "SKILL.md").read_text(encoding="utf-8")
+    for name in sorted(EXPECTED - {"using-pythia"}):
+        assert name in text, f"using-pythia does not route to {name}"
 
 
 def main():

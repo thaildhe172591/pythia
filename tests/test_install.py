@@ -191,6 +191,7 @@ def test_one_version_across_every_manifest():
     assert market["metadata"]["version"] == v
     npm = json.loads((ROOT / "npm" / "package.json").read_text(encoding="utf-8"))
     assert npm["version"] == v
+    assert pythia.__version__ == v      # what the MCP server reports
     assert 'name = "pythia-plsql"' in pyproject
     assert 'pythia = "pythia:main"' in pyproject
     assert "oracledb" in pyproject
@@ -263,8 +264,8 @@ def test_install_claude_hooks_creates_settings_and_is_idempotent():
     with tempfile.TemporaryDirectory() as td:
         path, added = pythia.install_claude_hooks(td)
         assert path == pathlib.Path(td) / ".claude" / "settings.json"
-        assert added == ["hooks.SessionStart", "hooks.PostToolUse",
-                         "permissions.deny"]
+        assert added == ["hooks.SessionStart", "hooks.PreToolUse",
+                         "hooks.PostToolUse", "permissions.deny"]
         s = json.loads(path.read_text(encoding="utf-8"))
         assert s["hooks"] == pythia.CLAUDE_HOOKS
         assert s["permissions"]["deny"] == pythia.CLAUDE_DENY
@@ -293,7 +294,10 @@ def test_install_claude_hooks_merges_into_existing_settings():
                      "command": "python3 -m pythia approve --hook"}]}]}}),
             encoding="utf-8")
         _, added = pythia.install_claude_hooks(td)
-        assert added == ["hooks.SessionStart", "permissions.deny"]
+        # the AskUserQuestion approve hook was there in another spelling: kept,
+        # not doubled; only the Bash post-tool entry joins it
+        assert added == ["hooks.SessionStart", "hooks.PreToolUse",
+                         "hooks.PostToolUse", "permissions.deny"]
         s = json.loads(path.read_text(encoding="utf-8"))
         assert s["model"] == "opus"
         assert s["permissions"]["allow"] == ["Bash(git status)"]
@@ -303,7 +307,7 @@ def test_install_claude_hooks_merges_into_existing_settings():
                 for e in ev for h in e["hooks"]]
         assert "echo hi" in cmds
         assert sum("approve --hook" in c for c in cmds) == 1   # not doubled
-        assert sum("guide --brief" in c for c in cmds) == 1
+        assert sum("hook session-start" in c for c in cmds) == 1
 
 
 def test_install_claude_hooks_refuses_a_file_it_cannot_parse():
@@ -354,11 +358,14 @@ def test_global_install_wires_the_approve_hook_only():
     belongs there; the session-start guide would put 15 lines about pythia
     into every session of every project, so that one stays per project."""
     with tempfile.TemporaryDirectory() as td:
-        path, added = pythia.install_claude_hooks(td, events=("PostToolUse",))
-        assert added == ["hooks.PostToolUse", "permissions.deny"]
+        path, added = pythia.install_claude_hooks(
+            td, events=("PreToolUse", "PostToolUse"))
+        assert added == ["hooks.PreToolUse", "hooks.PostToolUse",
+                         "permissions.deny"]
         s = json.loads(path.read_text(encoding="utf-8"))
         assert "SessionStart" not in s["hooks"]
         assert s["hooks"]["PostToolUse"] == pythia.CLAUDE_HOOKS["PostToolUse"]
+        assert "enabledMcpjsonServers" not in s      # no .mcp.json at home
 
 
 def test_cmd_install_serves_codex_in_the_project_scope():
@@ -433,14 +440,27 @@ def test_merge_codex_hooks_creates_and_is_idempotent():
 
 
 def test_merge_codex_hooks_recognises_an_existing_spelling():
+    """A hook already there in another spelling is the developer's: kept, not
+    doubled. The pre-0.15 session hook (guide --brief) is upgraded in place to
+    hook session-start, which prints the same guide plus the live state."""
     with tempfile.TemporaryDirectory() as td:
         path = pathlib.Path(td) / ".codex" / "hooks.json"
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps({"hooks": {"SessionStart": [
             {"hooks": [{"type": "command",
-                        "command": "python3 -m pythia guide --brief"}]}]}}),
+                        "command": "python3 -m pythia hook session-start"}]}]}}),
             encoding="utf-8")
         assert pythia.merge_codex_hooks(path) == (path, [])   # not doubled
+        path.write_text(json.dumps({"hooks": {"SessionStart": [
+            {"hooks": [{"type": "command",
+                        "command": "python3 -m pythia guide --brief"}]}]}}),
+            encoding="utf-8")
+        assert pythia.merge_codex_hooks(path) == (path, ["hooks.SessionStart"])
+        entries = json.loads(path.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
+        assert len(entries) == 1
+        assert entries[0]["hooks"][0]["command"] == \
+            "python3 -m pythia hook session-start"           # spelling kept
+        assert pythia.merge_codex_hooks(path) == (path, [])
 
 
 def test_merge_codex_hooks_refuses_a_file_it_cannot_parse():
@@ -482,11 +502,19 @@ def test_add_to_user_path_reads_the_stored_value_not_the_process_env():
     import os
     written = []
     stored = USERBIN          # what the registry holds: user only
+    saved = os.environ.get("PATH")
     os.environ["PATH"] = os.pathsep.join(   # what the process sees: much more
         [SYS1, SYS2, stored])
-    changed = pythia.add_to_user_path(SCRIPTS,
-                                      read=lambda: stored,
-                                      write=written.append)
+    try:
+        changed = pythia.add_to_user_path(SCRIPTS,
+                                          read=lambda: stored,
+                                          write=written.append)
+    finally:
+        # a leaked fake PATH hides `python` from every later test
+        if saved is None:
+            os.environ.pop("PATH", None)
+        else:
+            os.environ["PATH"] = saved
     assert changed is True
     assert written == [stored + os.pathsep + SCRIPTS]
     assert SYS1 not in written[0]      # no system entries leaked in
@@ -555,6 +583,7 @@ def test_conventions_init_writes_both_halves_and_never_clobbers():
         for otype, pattern in rules["naming"].items():
             re.compile(pattern)                             # every one valid
         assert pythia.load_conventions(td) is not None      # accepted by the loader
+        assert "lint" in rules                               # the LEAD's block, discoverable
         prose = (d / "conventions.md").read_text(encoding="utf-8")
         assert "conventions.json" in prose                  # the halves reference
         # a second run leaves existing files alone

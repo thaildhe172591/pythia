@@ -28,6 +28,7 @@ hợp đồng. Mỗi skill khai báo nhịp nó phục vụ ở dòng `**Phase:*
 9. [Bộ skills cho agent](#9-bộ-skills-cho-agent)
 10. [Xử lý sự cố](#10-xử-lý-sự-cố)
 11. [Tuỳ chọn: cấu hình quyền cho Claude Code](#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)
+12. [Xây dựng trên Oracle: lint, deploy, autopilot, doctor](#12-xây-dựng-trên-oracle-lint-deploy-autopilot-doctor)
 
 ---
 
@@ -294,7 +295,8 @@ trước khi ghi là cách hoàn tác thật duy nhất.
 
 ```bash
 pythia apply PKG_ORDER_BODY.sql            # preview: diff + impact + cảnh báo + token
-pythia approve --card a1b2c3               # agent: lấy thẻ để hỏi (không cấp gì cả)
+#   -> agent gọi tool pythia_approve (MCP) với a1b2c3; DEVELOPER chọn Approve
+pythia approve --card a1b2c3               # hoặc: lấy thẻ để hỏi bằng AskUserQuestion (không cấp gì)
 #   -> AskUserQuestion, lựa chọn Approve / Reject; DEVELOPER trả lời ngay trong chat
 pythia approve a1b2c3                      # hoặc: DEVELOPER, ở terminal của chính mình
 pythia apply PKG_ORDER_BODY.sql --confirm a1b2c3   # ghi đúng nội dung đã preview
@@ -304,9 +306,15 @@ Các bước, không tắt được: **snapshot → impact → preview → appro
 verify → report**.
 
 **Hai bước, hai người.** Preview kết thúc bằng dòng `apply --confirm` của
-agent và hai cửa của dev. Cửa nào cũng cấp cùng một grant dùng-một-lần;
+agent và các cửa của dev. Cửa nào cũng cấp cùng một grant dùng-một-lần;
 thiếu nó thì confirm bị từ chối:
 
+- **Tool `pythia_approve`** (từ 0.15.0 trên Claude Code, 0.14.0 trên Codex):
+  MCP server không-ghi-DB mà `pythia install` đăng ký vào `.mcp.json`. Tool
+  được đánh dấu `requiresUserInteraction`, nên Claude Code luôn hỏi ở mọi
+  lần gọi, mọi permission mode trừ `dontAsk` — không allow rule nào bỏ qua
+  được — và MCP elicitation hiện đúng thẻ duyệt của pythia với Approve /
+  Reject. Agent không có gì để diễn giải lại.
 - **Trong chat** (từ 0.10.0): agent chạy `pythia approve --card <token>` rồi
   hỏi bằng `AskUserQuestion` với nội dung đúng nguyên văn thẻ đó, lựa chọn
   `Approve` / `Reject`. Claude Code ghi câu trả lời vào payload của hook
@@ -382,6 +390,7 @@ pythia policy set structural confirm # đổi một nhóm
 | Nhóm | Mặc định | Rollback có thật không? |
 |---|---|---|
 | `plsql_source` | `confirm` | **Có — hoàn toàn** (ALL_SOURCE) |
+| `comments` | `confirm` | **Có.** Nội dung `COMMENT ON` cũ được snapshot |
 | `data_dml` | `deny` | **Không.** Sau commit chỉ còn Flashback Query. Revalidation soi tập hàng trước khi ghi; nó không phải undo |
 | `structural` | `deny` | **Gần như không.** `DROP COLUMN` là vĩnh viễn |
 | `grants` | `deny` | Có, nhưng làm tay |
@@ -396,7 +405,10 @@ Nhóm không snapshot được mặc định `deny` — và lời từ chối n�
 ```
 
 Mặc định **bật**: mọi object apply qua pythia được compile kèm PL/Scope →
-`pythia plscope` luôn có index đầy đủ trên schema dev.
+`pythia plscope` luôn có index đầy đủ trên schema dev. Thêm hai công tắc,
+đều mặc định **bật**: `"auto_allow_reads"` — hook PreToolUse cho lệnh đọc của
+pythia (và lệnh ghi đã được duyệt) chạy thẳng không hỏi; `"block_raw_writes"`
+— chặn DDL/DML qua sqlplus hoặc `run-sql` của SQLcl, thứ đi vòng đường ghi.
 
 ### Conventions — quy ước nhà, dưới dạng config
 
@@ -411,6 +423,10 @@ pythia conventions           # xem quy ước đang có hiệu lực
 - `.pythia/conventions.md`: cùng bộ quy tắc nhưng bằng lời, kèm những điều
   không regex nào diễn đạt được. `pythia-write` đọc file này trước khi viết
   bất cứ thứ gì, và coi nó cao hơn các mẫu chung mà kit mang sẵn.
+
+Các luật của LEAD mà linter kiểm được nằm cùng file, dưới key `"lint"`: mức
+nghiêm trọng từng luật, comment bắt buộc, cột bắt buộc, tiền tố tham số, mẫu
+bị cấm (xem §12). Mọi lần `pythia lint` và preview của apply đều kiểm.
 
 Thay mẫu placeholder bằng mẫu thật — `pythia similar <TÊN_TIÊU_BIỂU>` cho
 thấy schema vốn đang đặt tên thế nào, tốt hơn là tự nghĩ ra quy ước mới.
@@ -479,16 +495,23 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 
 ## 11. Tuỳ chọn: cấu hình quyền cho Claude Code
 
-`pythia install` tự ghi hai hook vào `.claude/settings.json`, gộp vào file
+`pythia install` tự ghi bốn hook vào `.claude/settings.json`, gộp vào file
 có sẵn và không đụng key nào khác; chạy lại không thêm gì, `--no-hooks` để
-bỏ qua. `install -g` chỉ ghi hook approve và luật deny vào
-`~/.claude/settings.json` — file đó áp cho mọi dự án trên máy, guide đầu
-phiên ở đó sẽ thành nhiễu với dự án không dính Oracle. `SessionStart` chạy
-`python -m pythia guide --brief`: ~15 dòng bơm vào đầu mỗi phiên — chính nó
-làm việc định tuyến skill trở nên tất định: yêu cầu build đến được
-`pythia-spec` bất kể hôm đó agent có "nhớ" kiểm tra skills hay không.
-`PostToolUse` trên `AskUserQuestion` chạy `python -m pythia approve --hook`:
-cửa duyệt trong chat ở §7. Kèm theo là luật `deny` cho `Bash(pythia approve
+bỏ qua; đồng thời đăng ký MCP approver vào `.mcp.json`. `install -g` chỉ ghi
+hook PreToolUse/PostToolUse và luật deny vào `~/.claude/settings.json` — file
+đó áp cho mọi dự án trên máy, guide đầu phiên ở đó sẽ thành nhiễu với dự án
+không dính Oracle. `SessionStart` chạy `python -m pythia hook session-start`:
+guide một trang kèm trạng thái sống của dự án — chính nó làm việc định tuyến
+skill trở nên tất định: yêu cầu build đến được `pythia-spec` bất kể hôm đó
+agent có "nhớ" kiểm tra skills hay không. `PreToolUse` trên Bash và `run-sql`
+của SQLcl chạy `hook pre-tool`: lệnh đọc của pythia và lệnh ghi đã duyệt
+chạy thẳng, ghi qua sqlplus/SQLcl bị chặn. Matcher của nó không bao giờ là
+`""` hay `*` — hook PreToolUse bắt trúng `AskUserQuestion` làm câu hỏi trả về
+rỗng, đúng lỗi mà `pythia doctor` đi tìm. `PostToolUse` trên `AskUserQuestion`
+chạy `python -m pythia approve --hook`: cửa duyệt trong chat ở §5 — từ chối
+câu trả lời điền sẵn và nói rõ khi không có câu trả lời nào về.
+`PostToolUse` trên Bash chạy `hook post-tool`: nhắc luật đọc exit code ngay
+cạnh kết quả apply. Kèm theo là luật `deny` cho `Bash(pythia approve
 --hook*)` — hook phải chạy trên payload do Claude Code ghi, agent tự bơm
 payload từ Bash là giả mạo phê duyệt. Sau `pip install --upgrade`, chạy lại
 `python -m pythia install`; `npx pythia-plsql` làm cả hai. Plugin cài qua
@@ -527,6 +550,106 @@ thật nằm chỗ khác và không đổi: token trói lần ghi vào đúng b�
 agent là lớp duy nhất không thể nói vòng qua. Hãy đối xử với file này y như
 [`agent-user-setup.example.sql`](examples/agent-user-setup.example.sql) —
 kit đưa cho bạn, còn chạy hay không là bạn quyết.
+
+## 12. Xây dựng trên Oracle: lint, deploy, autopilot, doctor
+
+### `pythia lint` — kiểm chuẩn trước khi apply
+
+```bash
+pythia lint release/ PKG_ORDER_BODY.sql     # exit 2 nếu có lỗi mức error
+```
+
+Luật có sẵn phủ các antipattern PL/SQL (`WHEN OTHERS THEN NULL`, dynamic SQL
+nối chuỗi, COMMIT trong vòng lặp, DML từng dòng, `= ''`, mã lỗi ngoài
+-20999..-20000, `SELECT *`), chuẩn DDL (không có primary key, constraint
+không tên, `VARCHAR2(n)` theo byte, `ADD ... NOT NULL` không default, `LONG`,
+`DROP ... PURGE`) và, trên cả script, mọi bảng/cột mới thiếu `COMMENT ON`,
+mọi foreign key thiếu index. Mọi preview của apply hiện kết quả lint của câu
+lệnh, và autopilot lease không tự ghi file còn lỗi.
+
+LEAD tinh chỉnh trong `.pythia/conventions.json`:
+
+```json
+{
+  "naming": {"TABLE": "^T_[A-Z0-9_]+$"},
+  "lint": {
+    "rules": {"varchar2-byte-semantics": "error", "dbms-output": "off"},
+    "require_comments": "error",
+    "required_columns": ["CREATED_BY", "CREATED_AT"],
+    "param_prefix": "^P_",
+    "forbid": [{"id": "no-sysdate", "pattern": "\\bSYSDATE\\b",
+                "message": "dùng SYSTIMESTAMP", "severity": "warning"}]
+  }
+}
+```
+
+### `pythia deploy` — chạy script release qua đường ghi
+
+```bash
+pythia deploy release/                       # preview từng câu lệnh, một deploy token
+pythia deploy release/ --confirm 3f9a01c2b7  # sau khi dev đã duyệt token đó
+```
+
+Script được tách theo kiểu SQL*Plus: `;` kết thúc câu SQL, `/` đứng riêng một
+dòng kết thúc khối PL/SQL, tôn trọng literal và comment; lệnh SQL*Plus (SET,
+PROMPT…) được bỏ qua và liệt kê; `@include`, `EXEC`/`HOST`/`CONNECT`,
+`ALTER SESSION` và block ẩn danh bị từ chối. Thư mục có đánh số (`1_`, `02_`,
+`V3__`) chạy theo thứ tự số tự nhiên; không đánh số thì theo loại object
+(bảng trước code, spec trước body, trigger và grant sau cùng). Thẻ duyệt hiện
+đầy đủ từng câu lệnh; `--from N` chạy tiếp sau khi dừng, với lần duyệt mới. Policy từ chối ngay trước
+khi chạy bất cứ gì. Mỗi câu lệnh có snapshot, journal, verify riêng; dừng ở
+lần từ chối hoặc exit 3 đầu tiên và in danh sách hoàn tác, mới nhất trước.
+
+### `COMMENT ON` — nhóm riêng, có undo thật
+
+`COMMENT ON TABLE / COLUMN` thuộc nhóm `comments` (mặc định `confirm`): comment
+cũ được đọc trước khi ghi và `journal restore` đặt lại đúng như cũ.
+`pythia comments T` cho thấy cột nào đã có comment; `--scaffold` in sẵn câu
+`COMMENT ON` cho mọi cột còn thiếu.
+
+### `pythia autopilot` — uỷ quyền một phiên, đúng một lần
+
+```bash
+pythia autopilot request --groups plsql_source,comments,structural --hours 6 --note "module đơn hàng"
+#   -> agent hỏi bằng thẻ (tool pythia_approve / AskUserQuestion / console)
+pythia autopilot status       # đang hiệu lực gì, đến khi nào, đã ghi bao nhiêu
+pythia autopilot report       # mọi lần ghi trong lease, kết quả và lệnh hoàn tác
+pythia autopilot off          # thu hồi — lúc nào cũng được
+pythia autopilot on ...       # dev, tại console: xin + duyệt trong một lệnh
+```
+
+| Một lease… | |
+|---|---|
+| phủ | một connection, các nhóm ghi trên thẻ, trong số giờ (tối đa 24) và hạn mức số lần ghi |
+| không bao giờ phủ | connection đánh dấu `"protected": true` / `"env": "prod"`; câu lệnh phá huỷ trừ khi thẻ ghi INCLUDED; file còn lỗi lint |
+| tự dừng | khi object đang VALID chuyển INVALID, hoặc sau năm lần ghi lỗi liên tiếp |
+| vẫn giữ | snapshot, journal, verify, exit code — mọi lần ghi vẫn được ghi lại |
+| vượt qua | policy `deny`, chỉ cho các nhóm ghi trên thẻ, chỉ trong thời hạn lease |
+
+### `pythia doctor` — khi cú duyệt không về
+
+`pythia doctor` kiểm harness: hook đã nối, MCP approver đã đăng ký và bật,
+skill cài một chỗ (không trùng), policy, conventions, lease. Nó còn chỉ đích
+danh mọi cấu hình đã biết làm `AskUserQuestion` trả về mà không hiện câu hỏi
+— allow rule hoặc `allowed-tools` của skill có `AskUserQuestion`, hook
+PreToolUse/PermissionRequest có matcher bắt trúng nó (trong file settings
+hoặc plugin đã cài), chế độ `dontAsk`. `pythia doctor --db` kiểm thêm
+database: phiên bản, bộ ký tự, độ phủ PL/Scope và warnings, object INVALID,
+utPLSQL.
+
+### `pythia explain` và `pythia stats` — tối ưu, không cần license thêm
+
+`explain` chạy EXPLAIN PLAN + `DBMS_XPLAN.DISPLAY` cho câu SELECT/WITH — chỉ
+parse, không thực thi, các dòng PLAN_TABLE được rollback — kèm ghi chú về
+full scan, Cartesian join, ép kiểu ngầm, dynamic sampling. `stats` hiện thống
+kê optimizer của bảng, các index kèm cột, và foreign key thiếu index. Không
+dùng `V$`, AWR, ASH hay Tuning Pack.
+
+### `pythia skill` — skill riêng của team
+
+`pythia skill new <tên> --trigger <từ khoá>` tạo khung skill đúng format của
+pack trong `.claude/skills/`; `pythia skill lint` kiểm skill của team theo cùng
+hợp đồng với pack (exit 2 nếu có vấn đề).
 
 ---
 

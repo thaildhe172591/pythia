@@ -1,5 +1,5 @@
 {
-  "//": "Optional Claude Code settings for a project using pythia. `pythia install` writes the `hooks` block and the `deny` rule below into .claude/settings.json (merged into an existing file, never replacing it; --no-hooks skips). The allow list and autoMode are NOT installed: those are your permission preferences in another product's security config, and yours to own - copy them in if you want them. See GUIDE.md section 11.",
+  "//": "Optional Claude Code settings for a project using pythia. `pythia install` writes the `hooks` block, the `deny` rule and `enabledMcpjsonServers` below into .claude/settings.json (merged into an existing file, never replacing it; --no-hooks skips), and registers the pythia MCP approver in .mcp.json. The allow list and autoMode are NOT installed: those are your permission preferences in another product's security config, and yours to own - copy them in if you want them. The PreToolUse hook already lets pythia's read-only commands through without a prompt (opt out: {\"auto_allow_reads\": false} in .pythia/settings.json). See GUIDE.md section 11.",
   "//permissions": "DETERMINISTIC rule matching. These are pythia's read-only commands: sql refuses anything that is not SELECT/WITH, and none of the rest can write. Allowing them removes prompts that carry no decision. Everything absent from this list still prompts as usual - including every form of apply.",
   "permissions": {
     "allow": [
@@ -25,7 +25,17 @@
       "Bash(pythia journal show *)",
       "Bash(pythia journal diff *)",
       "Bash(pythia journal export *)",
-      "Bash(pythia approve --card *)"
+      "Bash(pythia approve --card *)",
+      "Bash(pythia lint *)",
+      "Bash(pythia explain *)",
+      "Bash(pythia stats *)",
+      "Bash(pythia comments *)",
+      "Bash(pythia doctor *)",
+      "Bash(pythia autopilot status*)",
+      "Bash(pythia autopilot report*)",
+      "Bash(pythia autopilot request *)",
+      "Bash(pythia autopilot off*)",
+      "Bash(pythia skill lint *)"
     ],
     "//deny": "approve --hook is the chat approval door and is meant to be run by the PostToolUse hook below, on a payload Claude Code wrote. An agent piping a hand-made payload into it from Bash would be forging an approval; deny that shape outright so the attempt is refused, not just visible.",
     "deny": [
@@ -37,7 +47,7 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "`pythia apply <file>` WITHOUT a --confirm flag is a preview: it reads the object, writes a snapshot to .pythia/journal/, prints a diff and a confirm token, and does not touch the database. Allow it - blocking the preview is what pushes a developer into running DDL by hand instead, with no snapshot at all.",
+      "Every pythia read command (check, ls, src, args, cols, ddl, grep, sql, invalid, errors, deps, impact, similar, plscope, history, conventions, unistr, policy without `set`, journal list/show/diff/export, lint, explain, stats, comments, doctor, autopilot status/report/request/off) is read-only. `pythia sql` and `pythia explain` refuse anything that is not SELECT/WITH; explain parses and never runs the query.",
       "Every pythia read command (check, ls, src, args, cols, ddl, grep, sql, invalid, errors, deps, impact, similar, plscope, history, conventions, unistr, policy without `set`, journal list/show/diff/export) is read-only. `pythia sql` refuses anything that is not SELECT/WITH."
     ],
     "soft_deny": [
@@ -45,17 +55,40 @@
       "`pythia apply <file> --confirm <token>` writes to the Oracle database, and DDL self-commits there - no transaction can roll it back. Pause for the developer, even though pythia already required a preview.",
       "`pythia journal restore <id> --confirm <token>` is also a write. Pause the same way.",
       "`pythia approve <token>` is the developer's own command and is deliberately absent from the allow list: it must keep prompting. It refuses outright without a real console, so an agent cannot run it anyway - but a prompt here makes the attempt visible. (`approve --card` is allowed: it prints what the agent asks with and mints nothing.)",
-      "`pythia policy set <group> <value>` changes which kinds of write are allowed at all. Pause; loosening it is the developer's decision, never the agent's."
+      "`pythia policy set <group> <value>` changes which kinds of write are allowed at all. Pause; loosening it is the developer's decision, never the agent's.",
+      "`pythia autopilot on` is the developer's own command (it delegates every covered write for hours). It refuses without a real console; agents use `autopilot request` and ask with its card."
     ]
   },
-  "//hooks": "Two DETERMINISTIC hooks. SessionStart injects the one-page harness so skill routing stops depending on the agent's mood (build requests go through pythia-spec, writes through apply, no slash commands needed; ~15 lines of context once per session). PostToolUse on AskUserQuestion is the chat approval door, since 0.10.0: when you answer Approve to the agent's question carrying `pythia approve --card <token>`, the hook mints the same one-time grant the console command mints - the answer in the payload was written by Claude Code, not the agent, and the hook refuses unless the question carried pythia's own card verbatim. Without this hook, approving in chat mints nothing and the console command remains the only door.",
+  "//hooks": "DETERMINISTIC hooks. SessionStart runs `hook session-start`: the one-page harness plus the project's live state (connections, autopilot lease, conventions, approval door) - ~25 lines once per session. PreToolUse on Bash and on SQLcl's run-sql runs `hook pre-tool`: pythia's read-only commands pass without a prompt that carries no decision, a write the developer already approved (grant on file, or an active autopilot lease) passes, and writes that skip the gate (sqlplus/SQLcl DDL, a forged approve --hook) are denied with the reason. Its matchers are never \"\" or \"*\" - a PreToolUse hook that catches AskUserQuestion makes the question return empty. PostToolUse on AskUserQuestion is the chat approval door (`approve --hook`): it mints the grant when you answer Approve to a question carrying pythia's card verbatim, and refuses pre-filled or empty answers. PostToolUse on Bash (`hook post-tool`) puts the verdict rules next to an apply/deploy result: exit 3 is broken, a piped exit code is the pipe's.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python -m pythia guide --brief"
+            "command": "python -m pythia hook session-start"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m pythia hook pre-tool",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*__run-sql.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m pythia hook pre-tool",
+            "timeout": 15
           }
         ]
       }
@@ -70,7 +103,21 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m pythia hook post-tool",
+            "timeout": 15
+          }
+        ]
       }
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "pythia"
+  ],
+  "//enabledMcpjsonServers": "install registers the pythia MCP approver in .mcp.json and enables it here. Its pythia_approve tool is marked requiresUserInteraction, so Claude Code prompts for it on every call in every permission mode except dontAsk, and its elicitation shows pythia's own approval card."
 }

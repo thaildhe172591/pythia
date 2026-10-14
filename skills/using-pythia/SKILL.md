@@ -25,17 +25,26 @@ sessions drift: some ask, some silently decide.
 | "build / add / change X" — and any decision is open | `pythia-spec` — the questions are mandatory, the spec/plan documents are offered and skippable | impact → write → apply |
 | "explain X / why / how does it work" | `pythia-explore` | |
 | "is it safe to touch X" | `pythia-impact` | |
+| "create a table / add a column / comment the columns" ("tạo bảng", "thêm cột") | `pythia-table` | deploy |
+| "write a package / procedure / trigger" ("viết package") | `pythia-package` | write → apply |
+| "change this procedure" — a small edit, spec settled | `pythia-impact`, then `pythia-write` | apply |
+| "it's slow / optimise this query" ("chậm", "tối ưu") | `pythia-tune` | table or write |
 | "review this" | `pythia-review` | |
-| "land / deploy / apply this" | `pythia-apply` | |
+| "land / apply this" — one statement | `pythia-apply` | |
+| "run this script / deploy the release" ("chạy script DDL") | `pythia-deploy` | |
+| "do it all without asking me" ("tự động hoàn toàn") | `pythia-autopilot` — one lease, never a blank cheque | spec first |
+| about to say done / fixed / faster | `pythia-verify` — evidence first | |
 | "our standards / adopt this base's style" | `pythia-conventions` | |
 | "make a skill for how we do X" | `pythia-skill-author` | |
-| setup, connection failures, privilege warnings | `pythia-setup` | |
+| setup, connection failures, privilege warnings, approvals not arriving | `pythia-setup` (`pythia doctor`) | |
 | about to write a comment in code you are changing | `pythia-comment` — one line, or it belongs somewhere else | |
 | an ORA-/PLS- error to investigate | `pythia-explore` (`errors`, `src`) | `pythia-review` |
 
 Priority when several apply: **process before construction** — spec before
-write, impact before apply. Announce the skill you opened ("Using
-pythia-spec — ...") so the developer can see which page you are on.
+write, impact before apply, verify before "done". Announce the skill you
+opened ("Using pythia-spec — ...") so the developer can see which page you
+are on. The session-start STATE lines say whether an autopilot lease is
+active — read them before deciding whether a write needs an approval.
 
 ## Working beside other packs
 

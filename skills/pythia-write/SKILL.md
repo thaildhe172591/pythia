@@ -40,10 +40,12 @@ existing ones — not to introduce a better style.
    - **Non-ASCII string literals** (Vietnamese messages, any accented text):
      never paste raw — run `pythia unistr "<text>"` and use the printed
      `unistr('...')`, so the text survives every client/DB charset exactly.
-5. **Check yourself before handing off.** Reread against
-   `reference/patterns.md` — cursor and bulk patterns, exception discipline,
-   bind variables, commit ownership. Every comment you wrote or touched goes
-   through `pythia-comment` — one line, or it belongs somewhere else.
+     (`COMMENT ON ... IS` is the exception: it takes a literal only.)
+5. **Check yourself before handing off.** `pythia lint <file>` first — the
+   built-in standards plus the LEAD's rules; errors are fixed before the
+   preview. Then reread against `reference/patterns.md` — cursor and bulk
+   patterns, exception discipline, bind variables, commit ownership. Every
+   comment you wrote or touched goes through `pythia-comment`.
 
 ## Scope is the developer's sentence, not yours
 
@@ -62,6 +64,8 @@ propose style changes to the developer separately, never silently.
 
 ## When NOT to use this skill
 
+- A new package, API or trigger design → `pythia-package` shapes it first.
+- Tables, columns, comments → `pythia-table`.
 - Understanding existing code → `pythia-explore`.
 - Measuring what a change breaks → `pythia-impact` (must already be done).
 - Landing the file on the database → `pythia-apply`, always — never

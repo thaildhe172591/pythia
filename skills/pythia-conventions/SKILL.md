@@ -77,6 +77,28 @@ It is a guess that will warn on every apply until someone deletes it.
    is ignorable; "the calling layer binds by prefix, so a wrong one silently
    unbinds the field" is not. Rules with named consequences get followed.
 
+## The LEAD's rules, machine-checked: the `lint` block
+
+Rules a regex over names cannot hold, but a linter can, go in
+`conventions.json` next to `naming` — every `pythia lint` and apply preview
+then checks them, and autopilot will not land an `error`:
+
+```json
+"lint": {
+  "rules": {"varchar2-byte-semantics": "error", "dbms-output": "off"},
+  "require_comments": "error",
+  "required_columns": ["CREATED_BY", "CREATED_AT"],
+  "param_prefix": "^P_",
+  "forbid": [{"id": "no-sysdate", "pattern": "\\bSYSDATE\\b",
+              "message": "use SYSTIMESTAMP", "severity": "warning"}]
+}
+```
+
+Severities: `off`, `info`, `warning`, `error`. `pythia lint --json` lists
+every built-in rule id. Measure a new rule the same way as a naming pattern:
+lint a handful of existing objects (`pythia src` into a file) — a rule that
+fires on the whole codebase is a rule for new code only, and says so.
+
 ## Adopting from an older base the team already runs
 
 Point the connection at that schema and run steps 1 and 2 there — a base

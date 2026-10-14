@@ -87,14 +87,25 @@ through one door: **snapshot → impact → preview → token → approve → ap
 verify → report**. DDL self-commits in Oracle, so the snapshot is the only real
 undo — it runs first and no flag disables it. A content-bound token guarantees
 what lands is byte-for-byte what was previewed, and a **developer-minted grant**
-guarantees a person approved it at all — through one of two doors, both the
-developer's. In chat: the agent asks with `AskUserQuestion`, the question text
-being pythia's own approval card (`pythia approve --card <token>`), and the
-answer **Approve** — written into the hook payload by Claude Code, never by
+guarantees a person approved it at all — through a door that is always the
+developer's. The `pythia_approve` tool (MCP, on Claude Code and Codex) shows
+pythia's own approval card as a select prompt, and Claude Code prompts for it
+in every permission mode but `dontAsk` — no allow rule can skip it. In chat:
+an `AskUserQuestion` whose text is the card (`pythia approve --card <token>`),
+whose **Approve** — written into the hook payload by Claude Code, never by
 the agent — mints the one-time grant. At a console: `pythia approve <token>`.
 Without that grant `apply --confirm` refuses. A headless agent cannot `--yes`
 its own writes, cannot mint approval, and cannot loosen policy — each of those
 takes a human, answering or typing.
+
+**When the developer wants the agent to just work**, they delegate once: an
+**autopilot lease** — one connection, the statement groups they name, a few
+hours and a write budget — approved through the same doors. Until it ends,
+`apply` and `deploy` land covered statements without asking; every write is
+still snapshotted, journaled and verified. A lease never covers a protected
+connection, destructive statements (unless the card named them), or a file
+with lint errors, and it pauses itself the moment other objects break.
+`pythia autopilot report` lists every write with its undo.
 
 The same discipline holds when the *developer* does the work: `src` and
 `impact` silently snapshot what they read, so even a change made by hand in
@@ -154,22 +165,39 @@ each agent needs you to finish by hand.
 ### Claude Code
 
 1. Run `python -m pythia install` (or `npx pythia-plsql`) in the project root.
-   It merges three things into `.claude/settings.json`, keeping every key you
-   already have there:
-   - a **SessionStart** hook that loads the Learn → Ask → Do guide each session;
-   - a **PostToolUse** hook on `AskUserQuestion` that mints the approval grant;
-   - a `deny` rule so the agent cannot forge that grant.
+   It registers the write-free **MCP approver** in `.mcp.json` and merges
+   into `.claude/settings.json`, keeping every key you already have there:
+   - a **SessionStart** hook: the Learn → Ask → Do guide plus the project's
+     live state (connections, autopilot lease, conventions, approval door);
+   - a **PreToolUse** guard on Bash and SQLcl `run-sql`: pythia's read-only
+     commands pass without a prompt that carries no decision, already-approved
+     writes pass, and writes that skip the gate (sqlplus/SQLcl DDL) are denied;
+   - **PostToolUse** hooks: on `AskUserQuestion` it mints the approval grant;
+     on Bash it puts the verdict rules (exit 3 is broken) next to the result;
+   - a `deny` rule so the agent cannot forge a grant, and the MCP server
+     enabled.
 
    Skills land in `.claude/skills` (or `~/.claude/skills` with `-g`).
-2. **Restart the Claude Code session** so the hooks load.
-3. *Optional:* copy the allow-list and `autoMode` from
+2. **Restart the Claude Code session** so the hooks and the MCP server load.
+3. **Run `pythia doctor`.** It confirms the wiring and names every setting
+   known to make `AskUserQuestion` return without showing the question — an
+   allow rule or a skill's `allowed-tools` naming it, a PreToolUse hook with an
+   empty or `*` matcher, `dontAsk` mode. That class of setting is why chat
+   approval could fail outside `bypassPermissions`; the MCP door is immune
+   to all but `dontAsk`.
+4. *Optional:* copy the allow-list and `autoMode` from
    [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json).
    Those are your permission preferences, so pythia does not set them for you
    ([why](GUIDE.md#11-optional-claude-code-permission-settings)).
 
-**Approving a change:** the agent previews with `pythia apply`, asks an
-`AskUserQuestion` carrying the approval card, you click **Approve**, and the
-agent runs `apply --confirm` itself.
+**Approving a change:** the agent previews with `pythia apply`, calls the
+`pythia_approve` tool (or asks an `AskUserQuestion` carrying the card), you
+click **Approve**, and the agent runs `apply --confirm` itself.
+
+**Working autonomously:** say so. The agent requests a lease
+(`pythia autopilot request`), you approve its card once, and it builds —
+tables, comments, packages, releases — without stopping for each write.
+`acceptEdits` mode plus a lease is the fully hands-off setup.
 
 ### Codex
 
@@ -200,13 +228,15 @@ Codex, and on Approve the agent runs `apply --confirm` itself.
 | Read | Understand | Write |
 |---|---|---|
 | `check` connectivity + counts | `deps` what it depends on | `apply` the six-step write |
-| `ls` find objects | `impact` what depends on it | `journal` list · diff · export · restore |
-| `src` source, compiler line numbers | `errors` compile errors, line:col | `policy` show · set |
-| `args` signatures | `invalid` everything broken | `unistr` exact non-ASCII literals |
-| `ddl` via DBMS_METADATA | `plscope` exact identifier usages | `agent-user` least-privilege setup |
-| `cols` columns + types | `similar` programs named like this | `history` every captured version |
-| `grep` search all source | | `approve` the developer's one-time grant |
-| `sql` free query (SELECT/WITH only) | | |
+| `ls` find objects | `impact` what depends on it | `deploy` a release script, in order, one approval |
+| `src` source, compiler line numbers | `errors` compile errors, line:col | `journal` list · diff · export · restore |
+| `args` signatures | `invalid` everything broken | `policy` show · set |
+| `ddl` via DBMS_METADATA | `plscope` exact identifier usages | `approve` the developer's one-time grant |
+| `cols` columns + types | `similar` programs named like this | `autopilot` request · status · report · off |
+| `comments` table/column comments, `--scaffold` | `lint` house + built-in standards | `unistr` exact non-ASCII literals |
+| `stats` optimizer stats, indexes, unindexed FKs | `explain` the plan, never run | `agent-user` least-privilege setup |
+| `grep` search all source | `doctor` harness + environment health | `history` every captured version |
+| `sql` free query (SELECT/WITH only) | | `skill new · lint` grow your own skills |
 
 Every command takes `--json` (machine output), `--conn` (pick a connection), and
 caps output with explicit truncation markers so context windows stay intact.
@@ -250,6 +280,7 @@ Per-group write policy, `.pythia/policy.json` (defaults shown):
 | Group | Default | Is rollback real? |
 |---|---|---|
 | `plsql_source` | `confirm` | **Yes — completely.** Source is recoverable from `ALL_SOURCE`. |
+| `comments` | `confirm` | **Yes.** The previous comment is snapshotted before every write. |
 | `data_dml` | `deny` | **No.** After commit only Flashback Query remains, within undo retention. Revalidation checks the row set *before* the write; it is not an undo. |
 | `structural` | `deny` | **Almost never.** `DROP COLUMN` is permanent; a dropped table may be in the Recycle Bin. |
 | `grants` | `deny` | Yes, but by hand. |
@@ -267,14 +298,23 @@ it audits every interaction in `DBTOOLS$MCP_LOG`. **Writes never do** — only
 
 ## Skills
 
-Eight skills teach the agent the workflow — gates, not suggestions:
+The skills teach the agent the workflow — gates, not suggestions:
 
-`pythia-spec` (open decisions are asked, not assumed) · `pythia-setup` ·
-`pythia-explore` · `pythia-impact` (before any change) ·
-`pythia-write` (copy the codebase's conventions) · `pythia-apply` (the gate:
-the developer approves the preview in chat) · `pythia-review` (antipatterns) ·
-`pythia-conventions` (adopt a house style, verified against real names) ·
-`pythia-skill-author` (capture your team's workflow as a skill).
+- **The method:** `using-pythia` (the router) · `pythia-spec` (open decisions
+  are asked, not assumed) · `pythia-explore` · `pythia-impact` (before any
+  change) · `pythia-verify` (evidence before "done").
+- **Building on Oracle:** `pythia-table` (tables, columns, constraints,
+  indexes, every column commented) · `pythia-package` (packages, procedures,
+  functions, triggers to industry-standard design) · `pythia-write` (copy the
+  codebase's conventions) · `pythia-comment` · `pythia-tune` (measure, change
+  one thing, measure again) · `pythia-review` (antipatterns).
+- **Landing it:** `pythia-apply` (the gate) · `pythia-deploy` (release
+  scripts, in order, one approval) · `pythia-autopilot` (one delegated lease
+  instead of every approval).
+- **The team's own way:** `pythia-conventions` (the LEAD's naming and lint
+  rules, verified against real names) · `pythia-skill-author` (capture a
+  workflow as a skill; `pythia skill new` / `skill lint`) · `pythia-setup`
+  (connections, agent user, `pythia doctor`, a robust dev environment).
 
 ## Compatibility
 
@@ -283,7 +323,7 @@ the developer approves the preview in chat) · `pythia-review` (antipatterns) ·
 | OS | Windows, macOS, Linux, WSL — full test matrix in CI |
 | Python | 3.9+ · stdlib + `python-oracledb` (thin mode) only |
 | Oracle | core works broadly; PL/Scope statement capture needs 12.2+; license-safe views only |
-| Agents | any `npx skills` agent (76) · native Claude Code plugin · Codex (AGENTS.md harness + MCP approver, ≥ v0.120 for chat-style approval) |
+| Agents | any `npx skills` agent (76) · native Claude Code plugin (hooks + MCP approver, any permission mode but `dontAsk`) · Codex (AGENTS.md harness + MCP approver, ≥ v0.120 for chat-style approval) |
 
 ## Star History
 

@@ -104,9 +104,31 @@ that carry a cost when broken, and say what the cost is; a rule with a named
 consequence gets followed. Commit both files to the project repo so the whole
 team and every agent session works from the same rules.
 
+## 5. Approvals, hooks and the environment — `pythia doctor`
+
+`pythia install` wires the Claude Code hooks, registers the `pythia_approve`
+MCP approver in `.mcp.json` (the approval door that prompts in every
+permission mode but `dontAsk`) and the Codex equivalents. After a restart:
+
+- `pythia doctor` — every hook wired, the approval door registered, and
+  every setting known to make `AskUserQuestion` return empty (an allow rule
+  or a skill's `allowed-tools` naming it, a PreToolUse hook with an empty or
+  `*` matcher, `dontAsk`). Each `fail` line is a reason approvals never
+  arrive; relay it with the file it names.
+- `pythia doctor --db` — version, character set, PL/Scope and compiler
+  warnings coverage, INVALID objects, utPLSQL.
+- Mark production-like connections `"protected": true` (or `"env": "prod"`)
+  in connections.json: autopilot then refuses them outright.
+
+`reference/environment.md` is the full checklist for a robust development
+environment: a local Oracle Free container, AL32UTF8, compiler settings,
+shared-schema hygiene, utPLSQL, and which client permission mode fits
+reviewing vs autonomous work.
+
 ## Done when
 
 - `pythia check` connects, shows the right schema, and prints **no**
   privilege warning.
+- `pythia doctor` shows no `fail` line.
 - `pythia policy` prints the write policy and the rollback table.
 - The credentials file is untracked (`git status` does not show it).
