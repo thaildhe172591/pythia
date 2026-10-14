@@ -86,13 +86,25 @@ Chỉ sau Học và Hỏi mới được chạm database, và chỉ qua một c�
 DDL trong Oracle tự commit nên snapshot là đường lùi duy nhất — nó chạy đầu
 tiên và không cờ nào tắt được. Token gắn nội dung bảo đảm thứ được ghi đúng
 từng byte với thứ đã xem; còn **grant do chính dev cấp** bảo đảm là *có người
-duyệt* — qua một trong hai cửa, đều là của dev. Trong chat: agent hỏi bằng
-`AskUserQuestion`, nội dung câu hỏi là thẻ duyệt của chính pythia
-(`pythia approve --card <token>`), và câu trả lời **Approve** — do Claude Code
-ghi vào payload của hook, không phải agent — cấp grant một-lần. Ở console:
-`pythia approve <token>`. Thiếu grant đó thì `apply --confirm` từ chối. Agent
-chạy không người không thể `--yes` cho chính nó, không thể tự cấp grant, cũng
-không nới được policy — cả ba đều cần một con người, trả lời hoặc gõ.
+duyệt* — qua một cửa luôn thuộc về dev. Tool `pythia_approve` (MCP, trên
+Claude Code và Codex) hiện thẻ duyệt của chính pythia dưới dạng prompt chọn,
+và Claude Code luôn hỏi cho tool này ở mọi permission mode trừ `dontAsk` —
+không allow rule nào bỏ qua được. Trong chat: một `AskUserQuestion` có nội
+dung là thẻ duyệt (`pythia approve --card <token>`), câu trả lời **Approve**
+— do Claude Code ghi vào payload của hook, không phải agent — cấp grant
+một-lần. Ở console: `pythia approve <token>`. Thiếu grant đó thì
+`apply --confirm` từ chối. Agent chạy không người không thể `--yes` cho chính
+nó, không thể tự cấp grant, cũng không nới được policy — cả ba đều cần một
+con người, trả lời hoặc gõ.
+
+**Khi dev muốn agent tự làm hết**, dev uỷ quyền đúng một lần: một **autopilot
+lease** — một connection, các nhóm câu lệnh dev chọn, vài giờ và một hạn mức
+số lần ghi — duyệt qua cùng các cửa trên. Trong thời hạn đó `apply` và
+`deploy` tự ghi các câu lệnh nằm trong phạm vi mà không hỏi lại; mỗi lần ghi
+vẫn snapshot, journal và verify. Lease không bao giờ phủ connection được
+đánh dấu protected (prod), không phủ câu lệnh phá huỷ (trừ khi thẻ ghi rõ),
+không phủ file còn lỗi lint, và tự dừng ngay khi object khác bị hỏng.
+`pythia autopilot report` liệt kê mọi lần ghi kèm lệnh hoàn tác.
 
 Dev tự sửa tay cũng được đỡ: `src` và `impact` lặng lẽ snapshot những gì
 chúng đọc, nên sửa bằng SQL Developer vẫn có file rollback chờ sẵn
@@ -170,21 +182,38 @@ agent buộc bạn tự làm.
 ### Claude Code
 
 1. Chạy `python -m pythia install` (hoặc `npx pythia-plsql`) ở gốc dự án. Nó
-   gộp ba thứ vào `.claude/settings.json`, giữ nguyên mọi key bạn đã có:
-   - hook **SessionStart** nạp guide Học → Hỏi → Làm mỗi phiên;
-   - hook **PostToolUse** trên `AskUserQuestion` mint grant duyệt;
-   - luật `deny` để agent không giả được grant đó.
+   đăng ký **MCP approver** (không ghi DB) vào `.mcp.json` và gộp vào
+   `.claude/settings.json`, giữ nguyên mọi key bạn đã có:
+   - hook **SessionStart**: guide Học → Hỏi → Làm kèm trạng thái sống của dự
+     án (connection, autopilot lease, conventions, cửa duyệt);
+   - hook **PreToolUse** trên Bash và `run-sql` của SQLcl: lệnh đọc của pythia
+     chạy thẳng không hỏi, lệnh ghi đã được duyệt chạy thẳng, lệnh ghi đi vòng
+     cổng (DDL qua sqlplus/SQLcl) bị chặn kèm lý do;
+   - hook **PostToolUse**: trên `AskUserQuestion` thì mint grant; trên Bash
+     thì nhắc luật đọc kết quả (exit 3 là hỏng) ngay cạnh kết quả;
+   - luật `deny` để agent không giả được grant, và bật MCP server.
 
    Skills vào `.claude/skills` (hoặc `~/.claude/skills` khi `-g`).
-2. **Khởi động lại phiên Claude Code** để hook nạp.
-3. *Tuỳ chọn:* copy allow-list và `autoMode` từ
+2. **Khởi động lại phiên Claude Code** để hook và MCP server nạp.
+3. **Chạy `pythia doctor`.** Nó xác nhận mọi thứ đã nối, và chỉ đích danh
+   từng cấu hình làm `AskUserQuestion` trả về rỗng mà không hiện câu hỏi —
+   allow rule hoặc `allowed-tools` của một skill có `AskUserQuestion`, hook
+   PreToolUse có matcher rỗng hoặc `*`, chế độ `dontAsk`. Chính nhóm cấu hình
+   đó là lý do duyệt trong chat có thể hỏng ở các mode khác
+   `bypassPermissions`; cửa MCP miễn nhiễm với tất cả trừ `dontAsk`.
+4. *Tuỳ chọn:* copy allow-list và `autoMode` từ
    [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json).
    Đó là quyền hạn của bạn, nên pythia không tự đặt
    ([vì sao](GUIDE.vi.md#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)).
 
-**Duyệt một thay đổi:** agent preview bằng `pythia apply`, hỏi một
-`AskUserQuestion` mang thẻ duyệt, bạn bấm **Approve**, agent tự chạy
-`apply --confirm`.
+**Duyệt một thay đổi:** agent preview bằng `pythia apply`, gọi tool
+`pythia_approve` (hoặc hỏi một `AskUserQuestion` mang thẻ duyệt), bạn bấm
+**Approve**, agent tự chạy `apply --confirm`.
+
+**Làm việc tự động hoàn toàn:** cứ nói với agent. Agent xin một lease
+(`pythia autopilot request`), bạn duyệt thẻ của nó một lần, và nó làm — bảng,
+comment, package, script release — không dừng lại ở từng lần ghi. Mode
+`acceptEdits` cộng một lease là cấu hình rảnh tay hoàn toàn.
 
 ### Codex
 
@@ -214,13 +243,15 @@ Codex, và khi Approve agent tự chạy `apply --confirm`.
 | Đọc | Phân tích | Ghi |
 |---|---|---|
 | `check` kết nối + đếm object | `impact` cái gì phụ thuộc vào nó | `apply` quy trình ghi 6 bước |
-| `ls` tìm object theo tên | `deps` nó phụ thuộc vào cái gì | `journal` list · diff · export · restore |
-| `src` source, đúng số dòng compiler | `errors` lỗi biên dịch kèm dòng:cột | `policy` xem · sửa |
-| `args` tham số của procedure | `invalid` mọi object đang hỏng | `unistr` chuỗi tiếng Việt chuẩn |
-| `cols` cột và kiểu dữ liệu | `plscope` chỗ nào dùng identifier này | `agent-user` tạo user least-privilege |
-| `ddl` lấy DDL qua DBMS_METADATA | `similar` chương trình tên tương tự | `history` các bản đã chụp |
-| `grep` tìm chuỗi trong toàn bộ source | | `approve` dev cấp grant một-lần |
-| `sql` truy vấn tự do (chỉ SELECT/WITH) | | |
+| `ls` tìm object theo tên | `deps` nó phụ thuộc vào cái gì | `deploy` chạy script release theo thứ tự, duyệt một lần |
+| `src` source, đúng số dòng compiler | `errors` lỗi biên dịch kèm dòng:cột | `journal` list · diff · export · restore |
+| `args` tham số của procedure | `invalid` mọi object đang hỏng | `policy` xem · sửa |
+| `cols` cột và kiểu dữ liệu | `plscope` chỗ nào dùng identifier này | `approve` dev cấp grant một-lần |
+| `ddl` lấy DDL qua DBMS_METADATA | `similar` chương trình tên tương tự | `autopilot` request · status · report · off |
+| `comments` comment bảng/cột, `--scaffold` | `lint` chuẩn của LEAD + chuẩn có sẵn | `unistr` chuỗi tiếng Việt chuẩn |
+| `stats` thống kê, index, FK thiếu index | `explain` execution plan, không chạy câu lệnh | `agent-user` tạo user least-privilege |
+| `grep` tìm chuỗi trong toàn bộ source | `doctor` sức khoẻ harness + môi trường | `history` các bản đã chụp |
+| `sql` truy vấn tự do (chỉ SELECT/WITH) | | `skill new · lint` tự phát triển skill |
 
 Lệnh nào cũng có `--json` (cho máy đọc) và `--conn` (chọn kết nối). Output
 luôn bị giới hạn độ dài kèm dấu báo đã cắt, để không nuốt hết context window
@@ -260,9 +291,9 @@ một lần chạy. Đây chỉ là tiện ích; bạn tự làm tay theo
 cũng được. `pythia check` sẽ cảnh báo khi tài khoản đang dùng có quyền cao
 hơn mức công việc cần.
 
-Cú duyệt mà `apply` đòi được mint theo từng agent — hook `AskUserQuestion` của
-Claude Code, tool `pythia_approve` (MCP) của Codex, hoặc console
-`pythia approve <token>` ở bất kỳ đâu. Cách wire từng cái nằm ở
+Cú duyệt mà `apply` đòi được mint theo từng agent — tool `pythia_approve`
+(MCP) trên Claude Code và Codex, hook `AskUserQuestion` của Claude Code, hoặc
+console `pythia approve <token>` ở bất kỳ đâu. Cách wire từng cái nằm ở
 [Cài đặt cho Claude Code và Codex](#cài-đặt-cho-claude-code-và-codex) phía trên.
 
 Chính sách ghi chia theo nhóm trong `.pythia/policy.json` (mặc định):
@@ -270,6 +301,7 @@ Chính sách ghi chia theo nhóm trong `.pythia/policy.json` (mặc định):
 | Nhóm | Mặc định | Có rollback thật không? |
 |---|---|---|
 | `plsql_source` | `confirm` | **Có, hoàn toàn** — lấy lại source từ `ALL_SOURCE`. |
+| `comments` | `confirm` | **Có.** Comment cũ được snapshot trước mỗi lần ghi. |
 | `data_dml` | `deny` | **Không.** Commit rồi thì chỉ còn Flashback Query, trong thời hạn undo retention. Revalidation soi tập hàng *trước* khi ghi; nó không phải undo. |
 | `structural` | `deny` | **Gần như không.** `DROP COLUMN` là mất vĩnh viễn; bảng bị drop may lắm còn trong Recycle Bin. |
 | `grants` | `deny` | Có, nhưng phải làm tay. |
@@ -287,20 +319,28 @@ preview, verify và journal.
 
 ## Skills
 
-Bảy skill dạy agent quy trình làm việc. Đây là **luật bắt buộc, không phải
+Các skill dạy agent quy trình làm việc. Đây là **luật bắt buộc, không phải
 gợi ý** — agent phải đi qua chúng:
 
 | Skill | Việc chính |
 |---|---|
-| `pythia-setup` | cấu hình kết nối, tạo user agent, chẩn đoán lỗi đăng nhập |
+| `using-pythia` | bộ định tuyến: mở đúng skill trước mọi hành động |
+| `pythia-setup` | cấu hình kết nối, user agent, `pythia doctor`, môi trường Oracle chuẩn |
 | `pythia-explore` | hỏi database để hiểu code, không đọc dump |
 | `pythia-impact` | **bắt buộc chạy trước** khi đề xuất bất kỳ thay đổi nào |
 | `pythia-spec` | quyết định spec được hỏi, không bị tự chốt |
-| `pythia-conventions` | nạp quy ước từ schema base/tài liệu chuẩn, có kiểm chứng |
+| `pythia-table` | bảng, cột, constraint, index, sequence — cột nào cũng có comment |
+| `pythia-package` | package, procedure, function, trigger theo chuẩn thiết kế quốc tế |
+| `pythia-tune` | tối ưu truy vấn: đo, đổi một thứ, đo lại |
+| `pythia-conventions` | nạp quy ước của LEAD (đặt tên + luật lint), có kiểm chứng |
 | `pythia-write` | viết code theo đúng quy ước sẵn có của codebase |
-| `pythia-apply` | dev phải xem preview và đồng ý trong chat trước khi ghi |
-| `pythia-review` | review code theo 7 antipattern, chỉ rõ từng dòng |
-| `pythia-skill-author` | biến cách làm việc của team bạn thành skill mới |
+| `pythia-comment` | comment một dòng, đúng một khuôn |
+| `pythia-apply` | dev xem preview và duyệt trước khi ghi |
+| `pythia-deploy` | chạy script release nhiều câu lệnh theo thứ tự, duyệt một lần |
+| `pythia-autopilot` | dev uỷ quyền một lần, agent làm trong phạm vi lease |
+| `pythia-verify` | có bằng chứng rồi mới báo "xong" |
+| `pythia-review` | review code theo antipattern + lint, chỉ rõ từng dòng |
+| `pythia-skill-author` | biến cách làm việc của team thành skill mới (`pythia skill new`) |
 
 ## Tương thích
 

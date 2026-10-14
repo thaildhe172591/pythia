@@ -6,5 +6,21 @@
     "PACKAGE": "^PKG_[A-Z0-9_]+$",
     "SEQUENCE": "^S_[A-Z0-9_]+$",
     "TRIGGER": "^TRG_[A-Z0-9_]+$"
+  },
+  "lint": {
+    "rules": {
+      "varchar2-byte-semantics": "warning"
+    },
+    "require_comments": "warning",
+    "required_columns": [],
+    "param_prefix": "^P_",
+    "forbid": [
+      {
+        "id": "no-sysdate",
+        "pattern": "\\bSYSDATE\\b",
+        "message": "use SYSTIMESTAMP for audit columns",
+        "severity": "info"
+      }
+    ]
   }
 }

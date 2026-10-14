@@ -13,8 +13,11 @@ Review in two passes: what the database *knows* is wrong, then what the
 checklist says is *likely* wrong. Machine signals first — they are free and
 exact.
 
-## Pass 1 — the database's own verdict
+## Pass 1 — the machine's verdict
 
+0. `pythia lint <file>` (a proposed file) — the built-in standards and the
+   LEAD's rules from `conventions.json`, anchored to line numbers. Report
+   its errors as findings; do not re-derive them by hand.
 1. `pythia errors NAME` — compile errors and warnings with line:column.
    An object that does not compile needs no style review yet.
 2. `pythia src NAME` — read the source with the compiler's line numbers, so

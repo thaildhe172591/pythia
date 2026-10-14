@@ -1,5 +1,94 @@
 # Changelog
 
+## 0.15.0 — 2026-10-14
+
+Four requests from the field, one release: approval that works in every
+permission mode, a way to let the agent work without approving every write,
+an Oracle build pack (tables, comments, packages, tuning, releases) held to
+the LEAD's standards, and a harness that catches the agent's mistakes
+earlier.
+
+- **Approval no longer depends on `AskUserQuestion` rendering.** Reported:
+  the approval question never appeared outside `bypassPermissions`, so no
+  answer arrived and nothing could be approved. Claude Code documents
+  AskUserQuestion as always prompting, but a known class of setups makes it
+  return empty without showing anything — an allow rule or a skill's
+  `allowed-tools` naming it, a PreToolUse hook whose matcher is empty or
+  `*` (anthropics/claude-code#13439, #29547). Three fixes:
+  - **The MCP approver now serves Claude Code too.** `pythia install`
+    registers the write-free `pythia mcp` server in `.mcp.json` (and enables
+    it); the plugin declares it. Its `pythia_approve` tool is marked
+    `anthropic/requiresUserInteraction`, so Claude Code prompts for it on
+    every call in every permission mode except `dontAsk`, no allow rule can
+    skip it, and its elicitation shows pythia's own card. It is now the first
+    door everywhere; AskUserQuestion is the fallback.
+  - **The chat hook fails closed and says why.** It refuses answers that
+    arrived pre-filled in `tool_input.answers` (written by the agent or a
+    hook, not chosen by a person), and when a pythia question comes back with
+    no answer it tells the agent the question never rendered, to switch to
+    the tool, and to run `pythia doctor` — instead of staying silent while
+    the agent retried the same broken door.
+  - **`pythia doctor`** checks the wiring and names every setting of that
+    class it finds, in the project's and the user's settings, skills and
+    installed plugins. `--db` adds the database environment.
+- **Autopilot: delegate a session once.** `pythia autopilot request` prints a
+  card naming the connection, the statement groups, the hours and a write
+  budget; the developer approves it through any door (`autopilot on` at a
+  console does both). While the lease lasts, `apply` and `deploy` land
+  covered statements without a per-write approval — snapshot, journal and
+  verify unchanged. A lease never covers a connection marked `protected` /
+  `env: prod`, destructive statements unless the card included them by name,
+  or a file with lint errors; it pauses itself when objects that were VALID
+  break or after five failures in a row. `autopilot report` lists every write
+  with its verdict and undo; `autopilot off` revokes. A lease overrides a
+  `deny` policy only for the groups its card names, and the card says so.
+- **`pythia deploy`: release scripts through the write path.** Splits
+  SQL*Plus-style scripts (`;`, lone `/`, literals and q-quotes respected,
+  directives skipped, `@includes` and anonymous blocks refused), orders a
+  directory by what each file creates unless it is numbered, refuses policy
+  violations before anything runs, previews every statement, takes one
+  approval for the set (a 10-hex token), and runs each through apply's six
+  steps — stopping at the first refusal or exit 3 with the undo list.
+- **`COMMENT ON TABLE / COLUMN` is the `comments` group** (default
+  `confirm`) with a real undo: the previous comment is snapshotted and
+  `journal restore` puts it back. Before this, comments were refused as
+  unclassifiable. `pythia comments T` shows what is documented;
+  `--scaffold` prints the statements for what is not.
+- **`pythia lint`: the standards before the apply.** PL/SQL antipatterns,
+  DDL standards (primary keys, named constraints, CHAR semantics for
+  Vietnamese text, `ADD NOT NULL` without default), and script-wide rules
+  (every new column commented, every FK indexed). The LEAD tunes severities,
+  mandatory comments, required columns, the parameter prefix and forbidden
+  patterns in `conventions.json` under `"lint"`. Every apply preview shows
+  the findings; exit 2 on errors.
+- **`pythia explain` and `pythia stats`** — the estimated plan (EXPLAIN PLAN
+  + DBMS_XPLAN, parsed never run, rolled back) with notes on full scans,
+  Cartesian joins, implicit conversions and dynamic sampling; a table's
+  statistics, indexes and unindexed foreign keys. License-safe.
+- **Hooks that enforce the harness.** PreToolUse on Bash and SQLcl
+  `run-sql`: pythia's read-only commands (one plain invocation, nothing
+  chained) and already-approved writes pass without a prompt; sqlplus/SQLcl
+  DDL and DML are denied with the reason; a forged `approve --hook` is
+  denied. PostToolUse on Bash puts the exit-code verdict next to an apply
+  result. SessionStart now prints the guide plus the live state
+  (connections, lease, conventions, approval door); the old `guide --brief`
+  hook is upgraded in place by `install`. No PreToolUse matcher is ever `""`
+  or `*`. Opt-outs: `auto_allow_reads`, `block_raw_writes` in
+  `.pythia/settings.json`. Hook commands use `python3` where `python` does
+  not exist.
+- **Six new skills** — `pythia-table` (DDL standards, comments, expand and
+  contract), `pythia-package` (spec as contract, exceptions, transactions,
+  thin triggers), `pythia-tune` (measure, change one thing, measure again),
+  `pythia-deploy`, `pythia-autopilot`, `pythia-verify` (evidence before
+  "done") — with references for DDL standards, PL/SQL standards, a tuning
+  checklist and a robust environment setup. The router, `pythia-apply`,
+  `-write`, `-review`, `-conventions`, `-setup` and `-skill-author` know
+  them. `pythia skill new` / `skill lint` let a team grow its own skills to
+  the pack's contract.
+- `prepare_statement` no longer reads a `;` inside a literal as a second
+  statement (`set note = 'a; b'` was refused).
+- `pythia.__version__` exists; the MCP server reports it.
+
 ## 0.14.2 — 2026-09-14
 
 - **The Codex agent now knows to use the `pythia_approve` tool.** With 0.14.1

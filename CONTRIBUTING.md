@@ -17,6 +17,9 @@ python tests/test_phase1.py   # CLI foundation: config, resolution, output
 python tests/test_phase2.py   # query library + bind-contract lint
 python tests/test_phase3.py   # write path against a fake connection
 python tests/test_phase5.py   # skill-pack lint + README contract
+python tests/test_phase6.py   # scripts, lint, autopilot, deploy, hooks, doctor
+python tests/test_mcp.py      # the MCP approver
+python tests/test_install.py  # install wiring, manifests, versions
 ```
 
 The write path is tested with a fake connection that records every statement,
@@ -24,7 +27,7 @@ which is how the safety properties are *proven*, not assumed: the snapshot
 lands on disk before any execute (even when the execute explodes), `deny`
 touches nothing, a stale token never writes, a broken apply exits 3.
 
-CI runs all four suites on Ubuntu, Windows and macOS, Python 3.9 and 3.13.
+CI runs the suites on Ubuntu, Windows and macOS, Python 3.9 and 3.13.
 
 The benchmark ([BENCHMARK.md](BENCHMARK.md), method in
 [bench/README.md](bench/README.md)) runs the same suites plus direct probes

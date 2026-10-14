@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "PL/SQL development kit for AI agents on Oracle Database",
-    "version": "0.14.2"
+    "version": "0.15.0"
   },
   "plugins": [
     {
@@ -23,6 +23,12 @@
         "./skills/pythia-comment",
         "./skills/pythia-conventions",
         "./skills/pythia-apply",
+        "./skills/pythia-table",
+        "./skills/pythia-package",
+        "./skills/pythia-tune",
+        "./skills/pythia-deploy",
+        "./skills/pythia-autopilot",
+        "./skills/pythia-verify",
         "./skills/pythia-review",
         "./skills/pythia-skill-author"
       ]

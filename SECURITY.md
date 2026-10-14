@@ -37,7 +37,10 @@ at the role tier; your site's security model belongs to your DBA.
 | Policy (`.pythia/policy.json`) | whole statement classes; DML, DDL and grants are `deny` by default | editing the file, deliberately |
 | Confirmation token | applying content that differs from what was previewed | not applying at all |
 | Approval grant | an agent completing a write no human approved | fabricating the grant file, faking a console, or piping a hand-made hook payload into `approve --hook`, deliberately — the `policy.json` tier |
-| Card check in the chat door | a human approving the agent's paraphrase instead of the preview | nothing short of the above — the hook mints only when the question carries pythia's own card verbatim |
+| Card check in the chat door | a human approving the agent's paraphrase instead of the preview | nothing short of the above — the hook mints only when the question carries pythia's own card verbatim, and refuses answers pre-filled in the tool input |
+| MCP approver (`pythia_approve`) | an approval given without a person seeing pythia's card | an Elicitation hook the developer configured to auto-accept, Codex's `danger-full-access`, or Claude Code's `dontAsk` (which denies the tool instead) |
+| Autopilot lease | a delegation wider than the developer approved | editing `lease.json` by hand, deliberately — the `policy.json` tier; the lease never covers a protected connection, destructive statements the card did not include, or lint errors |
+| PreToolUse guard | sqlplus/SQLcl writes that skip the write path, forged `approve --hook` calls | obfuscating the command past a regex — it is a seatbelt for a well-meaning agent, not a sandbox |
 | TTY requirement | a headless agent self-approving `--yes` or loosening policy | `PYTHIA_CI=1`, deliberately, in a real pipeline |
 | Snapshot + journal | losing the previous version of PL/SQL source | nothing — it runs before every write and no flag disables it |
 
@@ -56,11 +59,51 @@ is the preview, not a paraphrase. Its limit: the hook is a process the agent's
 shell could also start. An agent that pipes a hand-made payload into `pythia
 approve --hook` has forged an approval — the same tier as faking a console or
 writing the grant file by hand, and `pythia install` writes a deny rule for
-that command shape into the Claude Code settings outright. Other clients (an MCP elicitation, a different
-harness) still need an approver of their own. What the grant raises is the
+that command shape into the Claude Code settings outright. Since 0.14.0 (Codex) and 0.15.0 (Claude Code) the
+MCP approver is a third door: its tool is marked `requiresUserInteraction`,
+so Claude Code prompts for it in every permission mode but `dontAsk`, and the
+elicitation shows pythia's own card — which also makes it immune to the
+settings that make `AskUserQuestion` return empty (`pythia doctor` lists
+them). What the grant raises is the
 *bar*, not a wall: it turns a write an agent could complete on its own
 authority into one that takes deliberate forgery, which is the same tier as
 editing `policy.json`.
+
+### Autopilot, and why it is not a hole in the gate (0.15.0)
+
+A lease is the same human act as an approval, given once for a scope it
+names: one connection, the statement groups on the card, a duration of at
+most 24 hours and a write budget. It starts only through an approval door —
+the console, the chat card, the MCP elicitation — never from the agent's own
+command (`autopilot on` refuses without a console). It narrows what the agent
+may do without asking; it widens nothing else:
+
+- protected connections (`"protected": true`, `"env": "prod"`) are refused
+  outright, whatever the card says;
+- destructive statements — DROP, TRUNCATE, ALTER ... DROP, renames, SET
+  UNUSED, REVOKE, UPDATE/DELETE without WHERE — stay one-approval-at-a-time
+  unless the developer asked for them by name, and the card says they
+  cannot be undone;
+- a file with lint errors is not landed;
+- objects that were VALID going INVALID, or five failed writes in a row,
+  pause it until the developer looks;
+- every write still snapshots, journals and verifies, and `autopilot
+  report` lists each one with its undo.
+
+A lease overrides a `deny` policy only for the groups its card names and
+only while it is active — the card says so next to the group. That is the
+point of approving a card rather than editing a file: the developer reads
+the consequence at the moment they grant it.
+
+### The hooks are seatbelts, not a sandbox (0.15.0)
+
+The PreToolUse hook allows pythia's read-only commands only as one plain
+invocation — no `;`, `&&`, pipes, redirections, `$(...)` or backticks — so an
+allowed command cannot carry a second one. It allows a write only when a
+live grant or lease already exists, which `apply` re-verifies itself. Its
+deny on sqlplus/SQLcl writes is pattern matching: a determined agent can
+phrase a command it does not recognise. The account's Oracle grants remain
+the only boundary that cannot be argued with.
 
 Row-set revalidation, added in 0.9.0, brings a limit of its own worth naming:
 previewing a `data_dml` statement now runs a `SELECT` derived from that

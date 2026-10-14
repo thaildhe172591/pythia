@@ -48,10 +48,14 @@ write them down here, do not implement them on impulse.
     DEV overwrite each other, and a snapshot does not prevent that.
   - **`explain` and `hotspots`.** License-safe views only: `V$SQL`,
     `V$SQL_PLAN` are fine; `DBA_HIST_*`/AWR/ASH need Diagnostic Pack and stay
-    out, as does anything needing Tuning Pack.
+    out, as does anything needing Tuning Pack. *`explain` shipped in 0.15.0*
+    (EXPLAIN PLAN + DBMS_XPLAN.DISPLAY, no V$ at all); `hotspots` over
+    `V$SQL` is still open — it needs a grant the agent user does not have.
   - **A `plsql-safe-write` skill contributed upstream to `oracle/skills`.**
     The strongest distribution channel is the incumbent's own repo.
-  - **Defensive Codex PermissionRequest hook.** A `.codex/` hook that denies a
+  - **Defensive Codex PermissionRequest hook.** *The Claude Code half
+    shipped in 0.15.0* as the PreToolUse guard (`hook pre-tool`). The Codex
+    half below is still parked. A `.codex/` hook that denies a
     `pythia apply --confirm` carrying no live grant, and a raw `CREATE OR
     REPLACE` through sqlplus/run-sql that skips the gate. Defence-in-depth:
     `apply` already enforces the grant, so this overlaps it, risks false
@@ -68,6 +72,12 @@ write them down here, do not implement them on impulse.
 
 Shipped from this list in 0.2.0: PL/Scope compile inside `apply`
 (settings.json switch), proxy-aware privilege warnings, `journal prune`.
+
+Shipped in 0.15.0: autopilot leases, `deploy`, the `comments` group,
+`lint`, `explain`/`stats`, `doctor`, the MCP approver on Claude Code.
+Still open from those: lint rules that read the live schema (an FK index
+that exists in the database but not in the script), and a `--resume` for a
+deploy stopped half-way.
 
 Shipped in 0.9.0: row-set revalidation for `data_dml` — approve on the rows,
 refuse if the set moved, and the `commit` that group had never had.

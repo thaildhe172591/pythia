@@ -1,6 +1,6 @@
 {
   "name": "pythia",
-  "version": "0.14.2",
+  "version": "0.15.0",
   "description": "PL/SQL development for AI agents on Oracle Database - expert data-dictionary queries, impact analysis, and a snapshot-verified write path with honest rollback.",
   "author": {
     "name": "thaild"
@@ -14,5 +14,14 @@
     "database",
     "agent-skills",
     "sql"
-  ]
+  ],
+  "mcpServers": {
+    "pythia": {
+      "command": "python",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/pythia.py",
+        "mcp"
+      ]
+    }
+  }
 }

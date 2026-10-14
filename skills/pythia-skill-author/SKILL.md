@@ -58,7 +58,14 @@ as `.pythia/conventions.json` (machine-checked at every apply preview) plus
 `.pythia/conventions.md` (prose the agent reads). Reserve skills for
 workflows — things with steps, gates and judgment.
 
-## Step 4 — Place it
+## Step 4 — Place it, and lint it
+
+`pythia skill new <name> --trigger <the developer's words>` scaffolds
+`.claude/skills/<name>/SKILL.md` in this pack's format; fill it from steps
+1–3. `pythia skill lint` checks every project skill against the same
+contract the pack is held to — frontmatter that parses, a `Use when`
+trigger, the name matching its folder, the line budget, a Phase line,
+references that exist — and exits 2 on a problem.
 
 User skills live in the **developer's project**, e.g.
 `.claude/skills/<name>/SKILL.md` for Claude Code (other agents: the layout

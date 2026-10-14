@@ -21,25 +21,27 @@ NO WRITE THE DEVELOPER HAS NOT SEEN AND APPROVED
 Every write: new objects, fixes, restores, batch runs. No exception for
 "trivial" — a one-line change can invalidate twelve dependents.
 
-Three moves are FORBIDDEN for agents, and the CLI enforces all three (no
-terminal attached → refusal):
+Four moves are FORBIDDEN for agents, and pythia enforces all four (the CLI
+refuses without a terminal; the pre-tool hook denies the last):
 
 - `--yes` — it is the developer's flag, never yours.
 - Minting the approval. `pythia approve <token>` is the developer's console
-  command; an agent cannot run it. Your door is to ASK (step 3): the pythia
-  hook mints the grant only from the developer's own answer to your question.
-- `pythia policy set <group>` to anything LOOSER — loosening policy is the
-  developer's decision; hand them the exact command to run themselves.
+  command; an agent cannot run it. Your door is to ASK (step 3): the grant is
+  minted only from the developer's own answer.
+- `pythia policy set <group>` to anything LOOSER, and `pythia autopilot on` —
+  the developer's decisions; hand them the exact command to run themselves.
+- Writing around the gate — sqlplus, SQLcl `run-sql`, a driver script.
 
 One move is yours: `--confirm` — only after `Approve`, or a console approve.
+**Exception: an active autopilot lease** (`pythia-autopilot`) the developer
+approved — then `pythia apply <file>` lands covered statements itself, and
+the preview says `autopilot: applying under lease`, or why it does not.
 
 ## When the change will NOT go through apply
 
-Sometimes the developer runs the file themselves — a DBA executes it, a
-release process owns it, or policy denies the group. The preview still ran, so
-a rollback file for the live version exists at
-`.pythia/journal/<entry>/restore.sql` (`pythia history <OBJECT>` lists every
-captured version). Never let a change leave your hands without naming it.
+A DBA or a release process runs it, or policy denies the group: the preview
+still left a rollback for the live version at
+`.pythia/journal/<entry>/restore.sql` (`pythia history <OBJECT>`). Name it.
 
 ## The Workflow
 
@@ -48,19 +50,24 @@ analysis for this object, run `pythia-impact` first — apply's `impact:` line
 confirms a number you already knew.
 
 1. **Preview.** `pythia apply <file>` writes nothing: it snapshots, computes
-   impact, prints a diff, warnings, and a confirm token.
+   impact, prints a diff, warnings, lint findings, and a confirm token.
 2. **Relay the preview — verbatim.** The diff, the `impact:` line, every `!`
    warning, exactly as printed. The developer approves what they see, not
    your paraphrase.
-3. **Ask for approval — one question per token.** `pythia approve --card
-   <token>` prints the card; the `AskUserQuestion` text is that card and
-   nothing else — no word before it, no translation after it, no framing of
-   your own. The hook compares question to card, mints nothing when they
-   differ, and by then the developer has already clicked. Put the explanation
-   in the option descriptions; the hook does not read those. Header `pythia`;
-   options exactly `Approve` / `Reject`, no "(Recommended)"; up to four tokens
-   per call. Anything but `Approve` is not approval: stop and ask what should
-   change. File changed → step 1. On Codex: call the `pythia_approve` MCP tool with the token — its select prompt is your door — then run `--confirm` yourself. No tool/hook? Relay `pythia approve <token>` for the terminal.
+3. **Ask for approval — one door, one token at a time:**
+   - **First choice: the `pythia_approve` tool** (MCP, Claude Code and
+     Codex) with the token. It prompts in every permission mode but
+     `dontAsk`, and shows pythia's own card — nothing for you to word.
+   - **Else `AskUserQuestion`**: `pythia approve --card <token>` prints the
+     card; the question text is that card and nothing else — no word before
+     it, no translation after it. The hook compares question to card and
+     mints nothing when they differ. Explanation goes in the option
+     descriptions. Header `pythia`; options exactly `Approve` / `Reject`; up
+     to four tokens per call; never pre-fill `answers`. If the hook says
+     *no answer came back*, the question never rendered — switch to the
+     tool, do not ask the same way twice (`pythia doctor` names the cause).
+   - **Else** relay `pythia approve <token>` for the developer's terminal.
+   Anything but `Approve` is not approval: stop and ask what should change.
 4. **Apply** by running the exact `then the agent:` line pythia printed. Two
    refusals are normal here, and neither is a malfunction:
    - *"no developer approval is on file"* — the answer was not `Approve`, or
@@ -84,33 +91,28 @@ confirms a number you already knew.
 ## Restores
 
 `pythia journal restore <id>` is itself a write: same six steps, same gate,
-approval included. Preview the reverse diff, ask with the card the same way,
-then confirm. Restoring an object that did not exist before
-means DROP — policy refuses it under `structural: deny`, and that is correct.
+approval included. Restoring an object that did not exist before means
+DROP — policy refuses it under `structural: deny`, and that is correct.
 
-## Batch mode
+## More than one statement
 
-`--yes` skips the pause, not the preview — it is the developer's flag, and at
-their terminal it *is* the approval. A frustrated "stop asking" grants it for
-the task at hand, not from now on; it never covers restores.
-
-- **Stop at the first exit 3.** Never keep applying onto a broken state.
-- Afterwards report: one line per success, full detail (errors, newly INVALID,
-  restore command) for the failure, and the files NOT applied because the
-  batch stopped.
+A script, a release, a table with its comments: `pythia-deploy` — one
+preview of every statement, one approval, run in order, stopped at the first
+exit 3. "Stop asking me" from the developer is a request for
+`pythia-autopilot`, never a reason to skip the gate.
 
 ## Never bypass the write path
 
-When `pythia apply` is available, do not write through anything else — not
-SQLcl MCP `run-sql`, not `sqlplus`, not a driver script. Those paths have no
-snapshot, no impact preview, no verify, no journal. A refusal from apply is
-information for the developer, not an obstacle to route around.
+Not SQLcl MCP `run-sql`, not `sqlplus`, not a driver script: no snapshot, no
+preview, no verify, no journal. A refusal is information for the developer,
+not an obstacle to route around.
 
 ## Is rollback real? Be honest about it
 
 | Group | Is rollback real? |
 |---|---|
 | `plsql_source` | **Yes — completely.** The source is recoverable from `ALL_SOURCE`. |
+| `comments` | **Yes.** The previous comment is snapshotted before every write. |
 | `data_dml` | **No.** After commit only Flashback Query remains, and only within undo retention. Revalidation checks the row set *before* the write; it is not an undo. |
 | `structural` | **Almost never.** `DROP COLUMN` is permanent; a dropped table may be in the Recycle Bin. |
 | `grants` | Yes, but by hand. |
@@ -135,15 +137,13 @@ affected count and up to ten rows, and `--confirm` refuses if that set moved.
 | "I'll restore quietly to clean up my mistake" | Restores are writes. Same gate, same visibility. |
 | "`$?` said 0 after I piped to tail" | That was tail's 0. Read pythia's own words, or its unpiped code. |
 | "I'll run approve myself to unblock this" | The developer's act. Console approve refuses you; the hook mints only from *their* answer. Routing around it is what this gate exists to stop. |
-| "I'll add a line of my own around the card" | Any added word voids it, and the refusal arrives after they have clicked. Explanation goes in the option description. |
+| "I'll add a line of my own around the card" | Any added word voids it. Explanation goes in the option description — or use the `pythia_approve` tool. |
+| "Lint flagged it, but it compiles" | Errors are fixed before the preview reaches the developer; autopilot will not land them. |
 
 ## When NOT to use this skill
 
-- Reading or exploring — use `pythia-explore`.
-- Judging blast radius before editing — use `pythia-impact` (apply's preview
-  is confirmation, not discovery).
-- Editing files not yet meant to land on the database.
+- Reading → `pythia-explore`. Blast radius → `pythia-impact` (the preview
+  confirms, it does not discover). Several statements → `pythia-deploy`.
 
-> Invocation note: examples say `pythia ...`; run it however this project
-> provides it (e.g. `python scripts/pythia.py ...`). Every pythia output
-> prints follow-up commands in the right form — prefer pasting those.
+> Examples say `pythia ...`; every pythia output prints follow-ups in the
+> form this project runs — prefer pasting those.

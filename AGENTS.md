@@ -15,7 +15,7 @@ output on any command.
 
 Every task moves Learn → Ask → Do (`pythia guide` prints the whole model).
 The rules below are those movements in enforceable form:
-Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11 (and 2's threshold) · Do: 3, 8.
+Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11, 13 (and 2's threshold) · Do: 3, 8, 12.
 
 1. **Ask the database, never the dump.** Repo exports drift (a real audit:
    all types and packages missing, 89% of indexes). Use `ls / src / args /
@@ -23,14 +23,18 @@ Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11 (and 2's threshold) · Do: 3, 8.
 2. **Impact before change.** Run `pythia impact <OBJECT>` before proposing
    any modification. Ten or more dependents, or any cross-schema dependent:
    show the developer the list before writing code.
-3. **Writes go through `pythia apply` only.** Never `CREATE OR REPLACE`
-   through SQLcl MCP `run-sql`, `sqlplus`, or a driver script — those have
-   no snapshot, no verify, no journal.
-4. **The developer sees every preview.** Relay apply's diff, impact line and
-   warnings verbatim; the preview ends your turn. `--confirm` only after
-   the developer's approval arrives as a new message. `--yes` and loosening
-   `policy set` are the developer's actions — the CLI refuses them without
-   a terminal.
+3. **Writes go through `pythia apply` (one statement) or `pythia deploy`
+   (a script) only.** Never `CREATE OR REPLACE` through SQLcl MCP `run-sql`,
+   `sqlplus`, or a driver script — those have no snapshot, no verify, no
+   journal; the PreToolUse hook denies them.
+4. **The developer sees every preview.** Relay apply's diff, impact line,
+   lint and warnings verbatim, then ask through a door: the `pythia_approve`
+   tool (MCP — it prompts in every permission mode but `dontAsk`), else an
+   `AskUserQuestion` whose text is `pythia approve --card <token>` verbatim,
+   else the developer's terminal. `--confirm` only after the approval
+   arrives. `--yes`, loosening `policy set` and `autopilot on` are the
+   developer's actions — the CLI refuses them without a terminal. The one
+   exception is rule 13's lease.
 5. **Scope is what was asked.** Dependents that break are reported with a
    proposal, never auto-fixed.
 6. **Exit codes are the verdict:** `0` clean · `1` refused (relay the reason,
@@ -43,7 +47,8 @@ Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11 (and 2's threshold) · Do: 3, 8.
    and approval as any apply.
 9. **House style outranks generic style.** If `.pythia/conventions.md`
    exists, read it before writing any object; `pythia conventions` shows the
-   machine-checked naming patterns, and apply previews warn on drift.
+   machine-checked naming patterns and the LEAD's lint rules. Run
+   `pythia lint <file>` before any apply; errors are fixed, not argued.
 10. **Never open `.pythia/connections.json`.** It holds passwords, and a
     permission gate should stop you. `pythia connections` lists the names,
     users, schemas and targets with no secrets in the output.
@@ -54,14 +59,30 @@ Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11 (and 2's threshold) · Do: 3, 8.
     written. A new decision discovered mid-build stops the build. The
     questions are mandatory; a written spec/plan is offered afterwards
     and the developer may skip it.
+12. **Evidence before "done".** Before any completion claim: every write's
+    exit code (unpiped), `pythia errors` on what you touched, `pythia
+    invalid` against the baseline, `pythia lint` clean. Say "broken" first
+    and "not verified" plainly (`pythia-verify`).
+13. **Autopilot is the developer's delegation, not yours.** When they want
+    the agent to work without per-write approvals, request a lease
+    (`pythia autopilot request`, narrowest scope that fits) and ask once
+    through a door. Inside an active lease covered writes land without
+    asking; outside its scope — another group, a destructive statement,
+    lint errors, a protected connection — the normal gate applies. A paused
+    lease means stop and show the developer. End with `pythia autopilot
+    report`.
 
 ## Where things are
 
 - `scripts/pythia.py` — the CLI (stdlib + python-oracledb, thin mode)
 - `queries/*.sql` — every SQL statement the tool runs, reviewable in isolation
-- `skills/` — the workflow skills (`pythia-apply` is the write gate)
+- `skills/` — the workflow skills (`pythia-apply` is the write gate,
+  `using-pythia` the router)
+- `hooks/hooks.json` — the plugin's Claude Code hooks (same as
+  `pythia install` writes into `.claude/settings.json`)
 - `examples/` — connection config and the least-privilege agent-user setup
 - `tests/` — the suites, no database required; run them before claiming done
+  (`test_phase6.py` covers scripts, lint, autopilot, deploy, hooks, doctor)
 
 ## Contributing changes to pythia itself
 
