@@ -990,7 +990,9 @@ def test_pre_tool_lets_reads_through_and_nothing_chained():
     with tempfile.TemporaryDirectory() as td:
         assert decision(pre(td, "pythia ls PKG_%")) == "allow"
         assert decision(pre(td, 'python -m pythia sql "select a||b from t"')) == "allow"
-        real = pathlib.Path(pythia.__file__).resolve()
+        # forward slashes: the Bash tool is a POSIX shell even on Windows
+        # (Git Bash), where an unquoted D:\a\b path loses its backslashes
+        real = pathlib.Path(pythia.__file__).resolve().as_posix()
         assert decision(pre(td, f"python3 {real} impact T_ORDER")) == "allow"
         assert decision(pre(td, "pythia apply f.sql")) == "allow"     # preview
         for cmd in ("pythia ls x && rm -rf /", "pythia ls x; rm y",
