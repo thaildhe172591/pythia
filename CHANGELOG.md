@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.1 — 2026-10-14
 
 - **`pythia install` writes the harness into `CLAUDE.md`.** Claude Code
   loads CLAUDE.md every session; until now it got pythia's rules only from
