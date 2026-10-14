@@ -143,9 +143,15 @@ launcher is written only to that machine's files — `.claude/settings.local.jso
 `.mcp.json`, where it would break every teammate's hooks the same way.
 `pythia doctor` starts each launcher it finds and reports `fail` for one
 that cannot import pythia. It runs only what is exactly an interpreter plus
-`-m pythia` or a `pythia.py` path, without a shell and from an empty
-directory, and an absolute path in a shared file is named, never executed:
-hook commands in a project's settings are repository content. The pythia
+`-m pythia` or an absolute `pythia.py` path, never a relative path, without a
+shell and from an empty directory; a bare name is resolved on PATH alone
+(Windows would search the interpreter's directory and the current one
+first, where a repository can drop a `python.exe`). From a shared file — or
+a `settings.local.json` that git tracks — only `<bare interpreter> -m pythia`
+runs; any path there, the interpreter's or a `pythia.py`'s, is named and
+never executed: hook commands in a project's settings are repository
+content. A virtual, pipx, uv or conda environment always gets the absolute
+launcher, since `python` reaches it only while it is activated. The pythia
 block in `CLAUDE.md` tells the agent what a session with no `STATE` line or
 no `pythia_approve` tool means, because then nothing else can.
 

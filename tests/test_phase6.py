@@ -1334,6 +1334,133 @@ def test_a_moved_interpreter_is_respelled_in_this_machines_files_only():
         assert "python3 -m pythia" in cmds and '"python -m pythia' not in cmds
 
 
+def test_respell_never_touches_another_tools_hook():
+    """`hook post-tool` is two words any tool may use. Only a command started
+    by a pythia launcher is pythia's to respell (or to count as present)."""
+    launcher = '"/v/bin/python" -m pythia'
+    theirs = "~/bin/audit.sh hook post-tool"
+    with tempfile.TemporaryDirectory() as td:
+        local = pathlib.Path(td) / ".claude" / "settings.local.json"
+        local.parent.mkdir()
+        local.write_text(json.dumps({"hooks": {"PostToolUse": [
+            {"matcher": "Edit", "hooks": [{"type": "command", "command": theirs}]}]}}),
+            encoding="utf-8")
+        pythia.install_claude_hooks(td, launcher=launcher, local=True)
+        s = json.loads(local.read_text(encoding="utf-8"))
+        cmds = [h["command"] for ev in s["hooks"].values()
+                for e in ev for h in e["hooks"]]
+        assert theirs in cmds                                    # untouched
+        assert f"{launcher} hook post-tool" in cmds              # ours added
+
+
+def test_a_bare_launcher_is_found_on_path_only():
+    """Windows runs a bare name from the interpreter's own directory or the
+    current directory before PATH — so a bare name is resolved by walking
+    PATH alone (relative entries skipped) and that path is what runs."""
+    exe = "python.exe" if os.name == "nt" else "python"
+    with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as cwd:
+        for d in (d1, cwd):
+            f = pathlib.Path(d) / exe
+            f.write_text("", encoding="utf-8")
+            f.chmod(0o755)
+        here = os.getcwd()
+        os.chdir(cwd)
+        try:
+            assert pythia.path_lookup("python", path=os.pathsep.join(["", ".", "x"])) is None
+            found = pythia.path_lookup("python", path=os.pathsep.join([".", d1]))
+            assert found and pathlib.Path(found).parent == pathlib.Path(d1)
+        finally:
+            os.chdir(here)
+    ok, why = pythia.launcher_starts("no-such-python-xyz -m pythia")
+    assert not ok and "PATH" in why
+
+
+def test_conda_counts_as_an_environment_that_must_be_active():
+    assert pythia.in_virtualenv(prefix="/c", base="/c", env={"CONDA_PREFIX": "/c"})
+    with tempfile.TemporaryDirectory() as p:
+        (pathlib.Path(p) / "conda-meta").mkdir()
+        assert pythia.in_virtualenv(prefix=p, base=p, env={})
+    assert not pythia.in_virtualenv(prefix="/u", base="/u", env={})
+    ok = lambda l, cwd=None: (True, "")                       # noqa: E731
+    with tempfile.TemporaryDirectory() as env:
+        st, msg = pythia.launcher_health(
+            "python -m pythia", which=lambda n: f"{env}/bin/{n}",
+            env={"CONDA_PREFIX": env}, starts=ok)
+        assert st == "warn" and "environment" in msg
+
+
+def test_a_tracked_settings_local_is_a_shared_file():
+    """A repository can commit .claude/settings.local.json. Then it is
+    repository content: doctor names its paths without running them, and
+    install does not write this machine's interpreter into it."""
+    import shutil
+    import subprocess
+    if not shutil.which("git"):
+        return
+    launcher = '"/v/bin/python" -m pythia'
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        subprocess.run(["git", "init", "-q", td], check=True)
+        local = pathlib.Path(td) / ".claude" / "settings.local.json"
+        local.parent.mkdir()
+        local.write_text(json.dumps({"hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command":
+                '"/nonexistent/python" -m pythia hook pre-tool'}]}]}}),
+            encoding="utf-8")
+        subprocess.run(["git", "-C", td, "add", "-f", str(local)], check=True)
+        assert pythia.git_tracks(td, ".claude/settings.local.json")
+        rows = pythia.harness_checks(td, home)
+        assert any(s == "warn" and a == "hook launch" and "shares" in m
+                   for s, a, m in rows), rows
+        before = local.read_text(encoding="utf-8")
+        old = pythia.register_local_mcp
+        pythia.register_local_mcp = lambda *a, **kw: ("present", "")
+        try:
+            _, out = quiet(pythia.report_local_launcher, td, launcher, "why")
+        finally:
+            pythia.register_local_mcp = old
+        assert local.read_text(encoding="utf-8") == before
+        assert "tracked" in out
+
+
+def test_plain_launcher_refuses_relative_paths():
+    for text in ("tools/python -m pythia", 'python "tools/pythia.py"',
+                 "./python -m pythia", r"tools\python.exe -m pythia"):
+        assert pythia.plain_launcher(text) is None, text
+    assert pythia.plain_launcher('"/abs/python" -m pythia')
+    assert pythia.plain_launcher('"C:/Py/python.exe" "C:/k/scripts/pythia.py"')
+    assert pythia.plain_launcher("python -m pythia")
+
+
+def test_a_shared_path_is_named_before_anything_is_resolved():
+    for text in ('"/abs/python" -m pythia', 'python3.13 "/s/pythia.py"'):
+        st, msg = pythia.launcher_health(text, shared=True, which=lambda n: None)
+        assert st == "warn" and "shares" in msg, (text, st, msg)
+
+
+def test_the_exclude_file_is_found_in_worktrees_and_survives_odd_bytes():
+    with tempfile.TemporaryDirectory() as td:
+        common = pathlib.Path(td) / "main.git"
+        wt_git = common / "worktrees" / "wt"
+        wt_git.mkdir(parents=True)
+        (wt_git / "commondir").write_text("../..\n", encoding="utf-8")
+        (common / "info").mkdir()
+        (common / "info" / "exclude").write_bytes(b"# \xff\xfe odd\n")
+        work = pathlib.Path(td) / "wt"
+        work.mkdir()
+        (work / ".git").write_text(f"gitdir: {wt_git.as_posix()}\n", encoding="utf-8")
+        assert pythia.exclude_local_settings(work) == common / "info" / "exclude"
+        body = (common / "info" / "exclude").read_bytes()
+        assert body.startswith(b"# \xff\xfe odd\n")              # theirs, intact
+        assert body.count(b".claude/settings.local.json") == 1
+        assert pythia.exclude_local_settings(work) is None       # once
+        sub = pathlib.Path(td) / "sub"                           # a submodule
+        sub_git = pathlib.Path(td) / "modules" / "sub"
+        sub_git.mkdir(parents=True)
+        sub.mkdir()
+        (sub / ".git").write_text("gitdir: ../modules/sub\n", encoding="utf-8")
+        assert pythia.exclude_local_settings(sub) == sub_git / "info" / "exclude"
+
+
 def test_portable_launcher_spells_every_shared_entry_the_same_way():
     with tempfile.TemporaryDirectory() as td:
         pythia.install_claude_hooks(td, launcher="python3 -m pythia")
@@ -1392,6 +1519,14 @@ def test_local_mcp_is_registered_through_the_claude_cli_only():
         assert [c[0][:4] for c in calls] == [
             ["/x/claude", "mcp", "remove", "--scope"],
             ["/x/claude", "mcp", "add", "--scope"]]
+        # the new add fails: the old entry is put back, not lost
+        calls.clear()
+        def add_fails(argv, **kw):
+            calls.append((argv, kw.get("cwd")))
+            return _Ran(1 if argv[2] == "add" and "/v/bin/python" in argv else 0)
+        assert pythia.register_local_mcp(td, launcher, which=claude,
+                                         run=add_fails, home=home)[0] == "failed"
+        assert calls[-1][0][2] == "add" and "/old/venv/bin/python" in calls[-1][0]
         calls.clear()
         action, shown = pythia.register_local_mcp(
             td, launcher, which=lambda n: None, run=run, home=home)

@@ -3738,6 +3738,18 @@ def _hook_mark(command):
     return next((m for m in HOOK_MARKS if m in str(command)), None)
 
 
+def _pythia_mark(command):
+    """The mark, when what runs it is a pythia launcher (`... -m pythia`,
+    `pythia`, a pythia.py path) — `hook post-tool` alone is two words any
+    tool may use, and another tool's hook is not ours to count or respell."""
+    cmd = str(command)
+    mark = _hook_mark(cmd)
+    if not mark:
+        return None
+    prefix = cmd[:cmd.index(mark)].strip()
+    return mark if re.search(r"(^|[\s/\\\"'])pythia(\.py)?[\"']?$", prefix) else None
+
+
 def local_interpreter(obj):
     """The hook/MCP entry as this machine can run it. The shipped spelling is
     `python`, which every Windows install has and many Linux/macOS ones do
@@ -3766,9 +3778,61 @@ PORTABLE_LAUNCHER = "python -m pythia"
 _INTERPRETER_RE = re.compile(r"^(python[\d.]*|py)(\.exe)?$", re.I)
 
 
-def in_virtualenv():
-    return (sys.prefix != getattr(sys, "base_prefix", sys.prefix)
-            or hasattr(sys, "real_prefix"))
+def in_virtualenv(prefix=None, base=None, env=None):
+    """Does pythia run from an environment that `python` reaches only while
+    it is activated — a venv, pipx, uv, or any conda environment (conda's
+    own envs look like a base install, so conda-meta gives them away)?"""
+    real = prefix is None
+    prefix = sys.prefix if prefix is None else prefix
+    base = getattr(sys, "base_prefix", sys.prefix) if base is None else base
+    env = os.environ if env is None else env
+    norm = lambda p: os.path.normcase(os.path.abspath(p))       # noqa: E731
+    conda = (pathlib.Path(prefix) / "conda-meta").is_dir() or bool(
+        env.get("CONDA_PREFIX") and norm(env["CONDA_PREFIX"]) == norm(prefix))
+    return bool(prefix != base or conda or (real and hasattr(sys, "real_prefix")))
+
+
+def path_lookup(name, path=None, pathext=None):
+    """The file a bare command name runs from PATH alone. Windows would try
+    the running interpreter's directory and the current directory first —
+    where a repository can drop a python.exe — so absolute PATH entries only,
+    and the caller runs the path this returns."""
+    path = os.environ.get("PATH", "") if path is None else path
+    exts = [""]
+    if os.name == "nt":
+        pe = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD") \
+            if pathext is None else pathext
+        exts = ([""] if os.path.splitext(name)[1] else []) + \
+            [e for e in pe.split(";") if e]
+    for d in path.split(os.pathsep):
+        if not d or not _is_abs_path(d):
+            continue
+        for e in exts:
+            f = os.path.join(d, name + e)
+            if os.path.isfile(f) and os.access(f, os.X_OK):
+                return f
+    return None
+
+
+def _is_abs_path(p):
+    """Absolute on any OS, judged by spelling: /x, C:/x, C:\\x, //host/x."""
+    return bool(re.match(r"^([A-Za-z]:[/\\]|[/\\])", p))
+
+
+def git_tracks(root, rel):
+    """Is `rel` committed in the repository holding `root`? A tracked
+    .claude/settings.local.json is repository content, not this machine's."""
+    import subprocess
+    git = path_lookup("git")
+    if not git:
+        return False
+    try:
+        r = subprocess.run([git, "-C", str(root), "ls-files", "--error-unmatch",
+                            "--", rel], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
 
 
 def launcher_argv(launcher):
@@ -3796,8 +3860,13 @@ def plain_launcher(launcher):
         return None
     if not argv or not _INTERPRETER_RE.match(re.split(r"[/\\]", argv[0])[-1]):
         return None
+    # a path is absolute or it is not run: a relative one resolves against
+    # whatever directory the run happens in — the repository's, often
+    if re.search(r"[/\\]", argv[0]) and not _is_abs_path(argv[0]):
+        return None
     if argv[1:] == ["-m", "pythia"] or (
-            len(argv) == 2 and re.search(r"(^|[/\\])pythia\.py$", argv[1])):
+            len(argv) == 2 and _is_abs_path(argv[1])
+            and re.search(r"[/\\]pythia\.py$", argv[1])):
         return argv
     return None
 
@@ -3810,6 +3879,11 @@ def launcher_starts(launcher, timeout=20):
     import tempfile
     try:
         argv = launcher_argv(launcher)
+        if argv and not re.search(r"[/\\]", argv[0]):
+            found = path_lookup(argv[0])
+            if not found:
+                return False, f"`{argv[0]}` not found on PATH"
+            argv = [found] + argv[1:]
         with tempfile.TemporaryDirectory() as empty:
             # pythia writes UTF-8 whatever the console; strict cp1252 would
             # turn a Vietnamese line of help into a false "cannot start"
@@ -3834,9 +3908,8 @@ def choose_launcher(venv=None, which=None, starts=None, executable=None,
     files the team shares. Anything else is this machine's own: the absolute
     interpreter (or, for a clone, the interpreter plus this script), and `why`
     says what ruled the portable spelling out."""
-    import shutil
     venv = in_virtualenv() if venv is None else venv
-    which = which or shutil.which
+    which = which or path_lookup
     starts = starts or (lambda launcher: launcher_starts(launcher)[0])
     exe = pathlib.Path(executable or sys.executable)
     script = script or pathlib.Path(__file__).resolve().as_posix()
@@ -3918,10 +3991,15 @@ def register_local_mcp(project_root, launcher, which=None, run=None, home=None):
         return "manual", shown
     opts = dict(cwd=str(project_root), stdin=subprocess.DEVNULL,
                 capture_output=True, text=True, timeout=60)
+    old = [str(w) for w in [have.get("command")] + list(have.get("args") or [])] \
+        if have is not None else None
     try:
-        if have is not None:
+        if old:
             run([claude, "mcp", "remove", "--scope", "local", "pythia"], **opts)
         r = run([claude, "mcp", "add", "--scope", "local", "pythia", "--", *want],
+                **opts)
+        if r.returncode != 0 and old:       # the old entry, not nothing
+            run([claude, "mcp", "add", "--scope", "local", "pythia", "--", *old],
                 **opts)
     except (OSError, subprocess.SubprocessError):
         return "failed", shown
@@ -3936,20 +4014,15 @@ def launcher_health(launcher, cwd=None, which=None, env=None, starts=None,
     name is resolved on this PATH and run; a path (an interpreter's, or a
     pythia.py's) is run only from a machine's own files — in a shared file it
     is reported, never executed."""
-    import shutil
-    which = which or shutil.which
+    which = which or path_lookup
     env = os.environ if env is None else env
     starts = starts or launcher_starts
     argv = plain_launcher(launcher)
     if argv is None:
         return ("warn", f"`{launcher}` is not a plain launcher (an interpreter "
-                "plus -m pythia, or a pythia.py path) — doctor does not run it")
+                "plus -m pythia, or an absolute pythia.py path) — doctor does "
+                "not run it")
     bare = not re.search(r"[/\\]", argv[0])
-    resolved = which(argv[0]) if bare else argv[0]
-    if bare and not resolved:
-        return ("fail", f"`{argv[0]}` is not on PATH, so `{launcher}` cannot "
-                "start — the guard and the approval doors it serves are off; "
-                f"re-run `{invocation()} install`")
     if shared and not (bare and argv[1:] == ["-m", "pythia"]):
         # a path in a shared file is the repository's to choose — the
         # interpreter's or the pythia.py it is pointed at — so it is named,
@@ -3958,12 +4031,17 @@ def launcher_health(launcher, cwd=None, which=None, env=None, starts=None,
                 "team shares — teammates' hooks will not find it, and doctor "
                 f"does not run it; `{invocation()} install` keeps a machine's "
                 "own launcher in .claude/settings.local.json")
+    resolved = which(argv[0]) if bare else argv[0]
+    if bare and not resolved:
+        return ("fail", f"`{argv[0]}` is not on PATH, so `{launcher}` cannot "
+                "start — the guard and the approval doors it serves are off; "
+                f"re-run `{invocation()} install`")
     ok, why = starts(launcher)
     if not ok:
         return ("fail", f"`{launcher}` cannot start pythia here ({why}) — the "
                 "guard and the approval doors it serves are off; re-run "
                 f"`{invocation()} install`, which picks an interpreter that can")
-    venv = env.get("VIRTUAL_ENV")
+    venv = env.get("VIRTUAL_ENV") or env.get("CONDA_PREFIX")
     if bare and venv and os.path.normcase(os.path.abspath(resolved)).startswith(
             os.path.normcase(os.path.abspath(venv)) + os.sep):
         return ("warn", f"`{argv[0]}` finds pythia only while the virtual "
@@ -3978,21 +4056,45 @@ def exclude_local_settings(project_root):
     interpreter path. Appended to .git/info/exclude (local, never shared) when
     neither that nor .gitignore names it. Returns the file written, or None."""
     root = pathlib.Path(project_root)
-    git = root / ".git"
-    if not git.is_dir():
+    common = git_common_dir(root)
+    if common is None:
         return None
     line = ".claude/settings.local.json"
-    exclude = git / "info" / "exclude"
+    exclude = common / "info" / "exclude"
     for f in (root / ".gitignore", exclude):
         if f.is_file() and any(ln.strip().lstrip("/") == line for ln in
                                f.read_text(encoding="utf-8", errors="replace")
                                .splitlines()):
             return None
-    old = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    data = exclude.read_bytes() if exclude.is_file() else b""
     exclude.parent.mkdir(parents=True, exist_ok=True)
-    exclude.write_text(old + ("" if not old or old.endswith("\n") else "\n")
-                       + line + "\n", encoding="utf-8")
+    with open(exclude, "ab") as f:          # their bytes stay theirs
+        f.write((b"\n" if data and not data.endswith(b"\n") else b"")
+                + line.encode("utf-8") + b"\n")
     return exclude
+
+
+def git_common_dir(root):
+    """The directory holding info/exclude: .git itself, or — in a worktree or
+    a submodule, where .git is a file — the gitdir it names (a worktree's
+    commondir). None outside git."""
+    git = pathlib.Path(root) / ".git"
+    if git.is_dir():
+        return git
+    if not git.is_file():
+        return None
+    m = re.match(r"gitdir:\s*(.+)", git.read_text(encoding="utf-8",
+                                                  errors="replace").strip())
+    if not m:
+        return None
+    norm = lambda base, p: pathlib.Path(os.path.normpath(       # noqa: E731
+        p if _is_abs_path(str(p)) else pathlib.Path(base) / p))
+    gitdir = norm(root, m.group(1).strip())
+    cd = gitdir / "commondir"
+    if cd.is_file():
+        return norm(gitdir, cd.read_text(encoding="utf-8",
+                                         errors="replace").strip())
+    return gitdir
 
 
 def merge_hooks(hooks, wanted, launcher=None, respell=False):
@@ -4012,16 +4114,16 @@ def merge_hooks(hooks, wanted, launcher=None, respell=False):
                 if not isinstance(h, dict):
                     continue
                 for old, new in LEGACY_HOOK_COMMANDS.items():
-                    if old in str(h.get("command", "")):
+                    if _pythia_mark(h.get("command", "")) == old:
                         h["command"] = h["command"].replace(old, new)
                         upgraded = True
                 cmd = str(h.get("command", ""))
-                mark = _hook_mark(cmd)
+                mark = _pythia_mark(cmd)
                 if respell and launcher and mark and \
                         cmd[:cmd.index(mark)].strip() != launcher:
                     h["command"] = f"{launcher} {cmd[cmd.index(mark):]}"
                     upgraded = True
-        have = {(e.get("matcher"), _hook_mark(h.get("command", "")))
+        have = {(e.get("matcher"), _pythia_mark(h.get("command", "")))
                 for e in present if isinstance(e, dict)
                 for h in e.get("hooks", []) if isinstance(h, dict)}
         added = False
@@ -4346,8 +4448,16 @@ def report_local_launcher(project_root, launcher, why):
     print(f"\nThis machine needs its own launcher: {why}.")
     print(f"Claude Code's hooks and MCP approver start pythia with {launcher},"
           "\nwritten to this machine's files only.")
-    path, added = install_claude_hooks(root, launcher=launcher, local=True)
-    if added is None:
+    if git_tracks(root, ".claude/settings.local.json"):
+        path, added = root / ".claude" / "settings.local.json", "tracked"
+    else:
+        path, added = install_claude_hooks(root, launcher=launcher, local=True)
+    if added == "tracked":
+        print(f"! {path} is tracked by git, so the team shares it: this "
+              "machine's interpreter is not written there. Untrack it (`git rm "
+              "--cached .claude/settings.local.json`) and re-run "
+              f"{invocation()} install.")
+    elif added is None:
         print(f"! {path} is not valid JSON, so it was left untouched. Fix it "
               f"and re-run {invocation()} install.")
     elif added:
@@ -6882,8 +6992,10 @@ def ask_question_breakers(project_root, home=None, plugin_limit=400):
 def launch_checks(root, home, settings, local_settings):
     """One row per launcher the harness files start pythia with: can it?
     A hook that cannot start fails open, so this is a fail, not a warning."""
+    tracked = bool(local_settings.get("hooks")) and git_tracks(
+        root, ".claude/settings.local.json")
     sources = [(".claude/settings.json", settings.get("hooks"), True),
-               (".claude/settings.local.json", local_settings.get("hooks"), False),
+               (".claude/settings.local.json", local_settings.get("hooks"), tracked),
                ("~/.claude/settings.json",
                 (_read_json(home / ".claude" / "settings.json") or {}).get("hooks"),
                 False),
