@@ -29,7 +29,9 @@ THE LEASE IS THE DEVELOPER'S. ITS LIMITS ARE NOT YOURS TO STRETCH.
 - Destructive statements — `DROP`, `TRUNCATE`, `ALTER ... DROP`, renames,
   `SET UNUSED`, `REVOKE`, `UPDATE`/`DELETE` without `WHERE` — unless the
   card said "DESTRUCTIVE statements INCLUDED".
-- Groups the card did not name; a file with lint **errors**.
+- Groups the card did not name; a file with lint **errors**; GRANT ... TO
+  PUBLIC, ANY privileges or grant options; DML touching more than 1,000
+  rows — those are shown to the developer first.
 - Anything after it pauses: other objects went INVALID, or five failed
   writes in a row. Or after the clock, the budget, or `autopilot off`.
 

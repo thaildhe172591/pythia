@@ -30,12 +30,13 @@ A RELEASE RUNS IN ORDER, AS PREVIEWED, AND STOPS AT THE FIRST BROKEN STEP
   `DEFINE`, …) run nothing on the database: they are skipped and listed.
 - `@file` / `@@file` includes are **refused** — list the files instead;
   deploy never runs a path nobody looked at.
-- Anonymous `BEGIN ... END;` blocks are refused, as in `apply`: wrap the
-  logic in a named procedure.
-- Files run in the order given. A directory runs in name order when every
-  file is numbered (`01_tables.sql`, `02_...`), otherwise by what each file
-  creates: sequences, tables, ALTERs, indexes, comments, types, views,
-  package specs, procedures and functions, bodies, triggers, grants, data.
+- Refused, never skipped: anonymous `BEGIN ... END;` blocks (as in `apply`),
+  `EXEC` / `HOST` / `CONNECT`, and `ALTER SESSION` — it would silently change
+  how every later statement runs, which no preview can show.
+- Files run in the order given. A directory runs in natural name order when
+  every file is numbered (`1_`, `02_`, `10_`, Flyway's `V3__`), otherwise by
+  what each file creates — tables, indexes, comments, types, views, specs,
+  procedures, bodies, triggers, grants, data. The preview says which.
 
 ## The Workflow
 
@@ -56,8 +57,9 @@ A RELEASE RUNS IN ORDER, AS PREVIEWED, AND STOPS AT THE FIRST BROKEN STEP
    journal entry. Read the exit code, unpiped: `0` all landed · `1` refused
    (nothing after it ran) · `3` written but broken (stopped there).
 6. **Report** every statement's result. On a stop: what landed stays landed
-   (DDL commits itself); the output lists the undo commands newest first,
-   and which landed statements have no undo. Fixing forward or restoring is
+   (DDL commits itself); the rest of the approval is withdrawn; the output
+   lists the undo commands newest first, which landed statements have no
+   undo, and the `--from N` to resume with. Fixing forward or restoring is
    the developer's call.
 
 Under an autopilot lease (`pythia-autopilot`) that covers **every**
@@ -67,12 +69,12 @@ one and why.
 
 ## Re-running after a stop
 
-The statements before the stop are in the database. `CREATE OR REPLACE`
-units re-apply harmlessly; `CREATE TABLE`, `ALTER TABLE ADD` and data
-inserts do not (ORA-00955, ORA-01430, duplicates). So: fix the failing file,
-then deploy **only what has not run** — the remaining files, or a trimmed
-copy — and preview again. Never re-run the whole release on top of half of
-it.
+The statements before the stop are in the database; `CREATE TABLE`,
+`ALTER TABLE ADD` and inserts cannot run twice. Fix the failing statement,
+then `pythia deploy <files> --from <N>` — a fresh preview and a fresh
+approval for the rest. A backfill that needs a column added earlier in the
+same release cannot be measured before the DDL exists: deploy the DDL, then
+the data part with `--from`.
 
 ## Red Flags — STOP if you catch yourself thinking
 

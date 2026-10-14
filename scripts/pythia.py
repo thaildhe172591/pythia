@@ -112,6 +112,10 @@ QUERY_BINDS = {
 # --- pure helpers (covered by tests/test_phase1.py) --------------------------
 
 def is_readonly_sql(stmt):
+    # WITH FUNCTION / WITH PROCEDURE (12c) is PL/SQL inside a query — it can
+    # run an autonomous transaction past SET TRANSACTION READ ONLY
+    if re.match(r"^\s*with\s+(function|procedure)\b", stmt or "", re.I):
+        return False
     return bool(READONLY.match(stmt))
 
 
@@ -775,7 +779,9 @@ def classify(sql):
     s = skip_leading_noise(sql)
     if re.match(r"^alter\s+session\b", s, re.I):
         return "session"                      # before the generic ALTER below
-    if PLSQL_SOURCE_RE.match(s):
+    # match the header with comments blanked: CREATE OR REPLACE /* x */ VIEW
+    # is a view with a snapshot, not structural DDL without one
+    if PLSQL_SOURCE_RE.match(mask_sql(s)):
         return "plsql_source"
     if re.match(r"^(insert|update|delete|merge)\b", s, re.I):
         return "data_dml"
@@ -795,11 +801,12 @@ def parse_object(sql):
     identity drives the snapshot — getting it wrong would snapshot the wrong
     object and silently destroy the only undo, hence the strict match."""
     s = skip_leading_noise(sql)
-    m = PLSQL_SOURCE_RE.match(s)
+    masked = mask_sql(s)                      # same length: indexes carry over
+    m = PLSQL_SOURCE_RE.match(masked)
     if not m:
         sys.exit("Cannot parse the object type from this CREATE statement.")
     otype = " ".join(m.group(1).upper().split())
-    rest = s[m.end():]
+    rest = masked[m.end():]
     ident = r'(?:"([^"]+)"|([A-Za-z][\w$#]*))'
     m2 = re.match(r"\s*" + ident + r"(?:\s*\.\s*" + ident + r")?", rest)
     if not m2:
@@ -990,8 +997,8 @@ def render_row_set(row_set, en=False, indent="  "):
                                   "the whole of what you are approving",
                                   "yellow", en))
     if row_set["sample"]:
-        out.append(indent + "\t".join(row_set["columns"]))
-        out.extend(indent + "\t".join(r) for r in row_set["sample"])
+        out.append(indent + "\t".join(map(str, row_set["columns"])))
+        out.extend(indent + "\t".join(map(str, r)) for r in row_set["sample"])
         if row_set["truncated"]:
             out.append(f"{indent}-- truncated at {len(row_set['sample'])} of "
                        f"{n} rows")
@@ -1168,12 +1175,24 @@ def grants_root(root):
     return pathlib.Path(root) / CONFIG_DIR / "grants"
 
 
+TOKEN_RE = re.compile(r"[0-9a-z]{6,10}")
+
+
+def valid_token(token):
+    """Tokens name files: anything but 6-10 lowercase letters and digits is
+    refused, so `../autopilot/lease` or an empty string can never read as an
+    approval. (pythia prints hex: 6 a preview, 8 a lease, 10 a deploy.)"""
+    return bool(TOKEN_RE.fullmatch(str(token or "")))
+
+
 def grant_path(root, token):
+    if not valid_token(token):
+        raise ValueError(f"not a pythia token: {token!r}")
     return grants_root(root) / f"{token}.json"
 
 
 def mint_grant(root, token, conn_name, now=None, revalidate=None,
-               approver="console", session=None):
+               approver="console", session=None, batch=None):
     """Record one developer approval. Single use, short-lived, bound to the
     connection the preview ran on. `revalidate` is the row-set fingerprint the
     human was shown — audit data, not a second gate: the enforcement is the
@@ -1190,7 +1209,9 @@ def mint_grant(root, token, conn_name, now=None, revalidate=None,
            "used_at": None,
            "revalidate": revalidate or None,
            "approver": approver,
-           "session": session or None}
+           "session": session or None,
+           # a member of an approved deploy: valid only inside that deploy
+           "batch": batch or None}
     d = grants_root(root)
     d.mkdir(parents=True, exist_ok=True)
     grant_path(root, token).write_text(json.dumps(rec, indent=2) + "\n",
@@ -1201,6 +1222,8 @@ def mint_grant(root, token, conn_name, now=None, revalidate=None,
 def read_grant(root, token):
     """The grant on file, or None. A corrupt or half-written file is not an
     approval — it reads as absent, and absent refuses."""
+    if not valid_token(token):
+        return None
     p = grant_path(root, token)
     if not p.is_file():
         return None
@@ -1387,8 +1410,10 @@ def write_journal_entry(root, obj_type, name, before, after, meta, now=None,
     this off: DDL commits itself, so this directory is the only undo there is."""
     import datetime
     now = now or datetime.datetime.now()
+    # quoted identifiers can hold '/', ':' or '..' — a directory name must not
+    safe = re.sub(r"[^A-Za-z0-9_$#-]", "_", str(name))[:100] or "_"
     eid = (now.strftime("%Y-%m-%dT%H-%M-%S")
-           + f"_{name}_{obj_type.replace(' ', '-')}")
+           + f"_{safe}_{obj_type.replace(' ', '-')}")
     d = journal_root(root) / eid
     n = 1
     while d.exists():          # apply + restore can land in the same second;
@@ -2263,6 +2288,11 @@ def run_apply(conn, schema, ns, file_text, origin=None):
             row_set = measure_row_set(conn, probe[1], probe[2])
     token = apply_token(otype, name, file_text,
                         db_source + fingerprint_text(row_set))
+    cap = int((lease or {}).get("max_rows") or LEASE_DML_MAX_ROWS)
+    if auto_ok and row_set and row_set["count"] > cap:
+        auto_ok, auto_why = False, (f"{row_set['count']} rows — more than the "
+                                    f"lease's {cap}; a set this size is shown "
+                                    "to the developer first")
     if ns.yes and not human_at_the_keyboard():
         sys.exit(HEADLESS_YES_MSG)
     if ns.confirm and ns.confirm != token:
@@ -2275,7 +2305,16 @@ def run_apply(conn, schema, ns, file_text, origin=None):
     if ns.confirm == token:
         grant = read_grant(ns.project_root, token)
         status = grant_status(grant, ns.conn_name)
-        if status == "ok":
+        if status == "ok" and (grant or {}).get("batch") and \
+                (grant or {}).get("batch") != getattr(ns, "batch", None):
+            # approved as statement N of a release, not on its own
+            if not auto_ok:
+                sys.exit(f"That approval belongs to deploy {grant['batch']}: it "
+                         "covers this statement only as part of that release, "
+                         "in its order.\nRun the release:\n  "
+                         f"{invocation()} deploy <files> --confirm {grant['batch']}")
+            grant, via = None, "autopilot"
+        elif status == "ok":
             via = "grant"
         elif auto_ok:
             grant, via = None, "autopilot"
@@ -2461,12 +2500,13 @@ def run_apply(conn, schema, ns, file_text, origin=None):
 
     # 5. VERIFY
     err_rows = []
-    invalid_after = invalid_before
     if group == "plsql_source":
         _, err_rows = run_query(conn, load_query("compile-errors.sql"),
                                 {"s": schema, "n": name})
-        _, inv_rows = run_query(conn, load_query("invalid-objects.sql"), {"s": schema})
-        invalid_after = [(r[0], r[1]) for r in inv_rows]
+    # every persistent write is checked for collateral damage: an ALTER TABLE
+    # or a REVOKE invalidates dependents just as surely as a package spec
+    _, inv_rows = run_query(conn, load_query("invalid-objects.sql"), {"s": schema})
+    invalid_after = [(r[0], r[1]) for r in inv_rows]
     broke = newly_invalid(invalid_before, invalid_after)
     meta.update(applied=True, invalid_after=invalid_after, newly_invalid=broke,
                 compile_errors=[list(r) for r in err_rows])
@@ -2517,6 +2557,9 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                 for r in own_errors:
                     print(paint(f"    {r[3]}:{r[4]} {r[5]} {str(r[6]).strip()}",
                                 "red", en))
+            elif group != "plsql_source":
+                print(paint(f"\n  Applied the {group} statement — but other "
+                            "objects are INVALID now:", "red", en))
             else:
                 print(paint(f"\n  Applied {name} ({otype}) — it compiled, but "
                             "broke other objects:", "red", en))
@@ -2785,6 +2828,10 @@ def cmd_approve(conn, schema, ns):
         return hook_approve(ns)
     tokens = [ns.token] if isinstance(ns.token, str) else list(ns.token or [])
     tokens = [str(t).strip().lower() for t in tokens]
+    bad = [t for t in tokens if not valid_token(t)]
+    if bad:
+        sys.exit(f"Not a pythia token: {bad[0]!r} — tokens are the 6, 8 or 10 "
+                 "hex digits printed by apply, autopilot request or deploy.")
     card_only = getattr(ns, "card", False)
     if not tokens:
         sys.exit(f"Usage: {invocation()} approve <token> [<token> ...]\n"
@@ -4123,9 +4170,13 @@ Q_CLOSE = {"[": "]", "{": "}", "(": ")", "<": ">"}
 # lines SQL*Plus executes itself — never SQL, so never sent to the database
 SQLPLUS_DIRECTIVE_RE = re.compile(
     r"^\s*(set|prompt|spool|rem|remark|show|whenever|exit|quit|define|"
-    r"undefine|col|column|ttitle|btitle|break|compute|pause|accept|host|"
-    r"clear|timing|var|variable|print|exec|execute|connect|conn|disconnect)"
-    r"(\s|$)", re.I)
+    r"undefine|col|column|ttitle|btitle|break|compute|pause|accept|"
+    r"clear|timing|var|variable|print)(\s|$)", re.I)
+# ...and the ones that DO something: EXEC runs an anonymous block, HOST an OS
+# command, CONNECT another session. Skipping them would report a release as
+# done that never ran its migration — so they are refused.
+SQLPLUS_REFUSED_RE = re.compile(
+    r"^\s*(exec|execute|host|connect|conn|disconnect|!|\$)(\s|$)", re.I)
 SQLPLUS_INCLUDE_RE = re.compile(r"^\s*(@@?|start\s)", re.I)
 
 # a PL/SQL unit enters SQL*Plus's block buffer and ends only at a lone "/";
@@ -4276,6 +4327,12 @@ def split_script(text):
                 sys.exit(f"line {no}: {line.strip()!r} includes another "
                          "script. deploy does not follow includes — list the "
                          "files in the order to run them instead.")
+            if SQLPLUS_REFUSED_RE.match(line):
+                sys.exit(f"line {no}: {line.strip()[:60]!r} is a SQL*Plus "
+                         "command that runs something (EXEC = an anonymous "
+                         "block, HOST = the OS, CONNECT = another session). "
+                         "The write path refuses it: make it a named "
+                         "procedure the developer calls, or run it by hand.")
             if SQLPLUS_DIRECTIVE_RE.match(line):
                 skipped.append({"line": no, "text": line.strip(),
                                 "why": "SQL*Plus directive — runs nothing on "
@@ -4394,6 +4451,14 @@ def destructive_reason(sql, group):
     m = mask_sql(skip_leading_noise(sql)).lower()
     m = " ".join(m.split())
     if group == "structural":
+        if m.startswith("create or replace "):
+            return ("CREATE OR REPLACE silently overwrites an existing "
+                    "definition, and this kind of object has no snapshot")
+        if re.match(r"alter sequence\b.*\brestart\b", m):
+            return "restarting a sequence can hand out keys already in use"
+        if m.startswith(("alter user ", "create user ", "alter role ",
+                         "create role ", "alter profile ")):
+            return "account and role changes reach every session that uses them"
         if m.startswith("drop "):
             purge = " purge" in m
             return ("DROP removes the object and everything in it"
@@ -4412,8 +4477,25 @@ def destructive_reason(sql, group):
     if group == "data_dml":
         if re.match(r"(delete|update)\b", m) and not re.search(r"\bwhere\b", m):
             return "no WHERE clause — it touches every row in the table"
-    if group == "grants" and m.startswith("revoke "):
-        return "REVOKE can break other users' and programs' access"
+        # a predicate that is always true is the same as none
+        if re.match(r"(delete|update)\b", m) and re.search(
+                r"\bwhere\s+(\(?\s*)?(1\s*=\s*1|0\s*=\s*0|1\s*<>\s*0|true)\b", m):
+            return "its WHERE clause is always true — it touches every row"
+        if m.startswith("truncate"):
+            return "TRUNCATE deletes every row and cannot be rolled back"
+    if group == "grants":
+        if m.startswith("revoke "):
+            return "REVOKE can break other users' and programs' access"
+        # security-relevant grants are not a style question: no lint setting
+        # (which an agent may edit) can let a lease land them
+        if re.search(r"\bto\s+public\b", m):
+            return "GRANT ... TO PUBLIC gives every account in the database access"
+        head = m.split(" on ")[0] if " on " in m else m
+        if re.search(r"\bany\b", head) or re.search(r"\bwith\s+(grant|admin)\s+option\b", m):
+            return ("ANY privileges or a grant option reach beyond this "
+                    "schema or let the grantee pass the privilege on")
+        if re.match(r"grant\s+(dba|resource|connect|sysdba|sysoper)\b", m):
+            return "granting a powerful role widens an account for good"
     return None
 
 
@@ -4896,6 +4978,7 @@ LEASE_HOURS_MAX = 24
 LEASE_WRITES_DEFAULT = 200
 LEASE_WRITES_MAX = 2000
 LEASE_FAILS_TO_PAUSE = 5
+LEASE_DML_MAX_ROWS = 1000      # a bigger row set is shown to a person first
 PROTECTED_ENVS = {"prod", "production", "prd", "live"}
 
 GROUP_UNDO = {
@@ -4980,6 +5063,10 @@ def new_lease_request(root, conn_name, conn_entry, groups=None, hours=None,
     the request is a card waiting for the developer's Approve."""
     import datetime
     import secrets
+    if conn_name == "env":
+        sys.exit("Refused: autopilot needs a named connection from "
+                 f"{CONFIG_NAME}, where it can be marked protected — "
+                 "PYTHIA_USER/PYTHIA_PASSWORD/PYTHIA_DSN credentials cannot be.")
     if connection_protected(conn_entry):
         sys.exit(f"Refused: connection {conn_name!r} is marked protected in "
                  f"{CONFIG_NAME}. Autopilot never covers it — every write "
@@ -5025,9 +5112,11 @@ def lease_card(req, root):
     lines.append("Every write still snapshots, journals and verifies; lint "
                  "errors are not landed; breaking other objects pauses it.")
     if req.get("note"):
-        lines.append(f"Task: {req['note']}")
+        lines.append(f"Task, as the agent described it: {req['note']}")
+    # no invocation() here: the agent prints this card with one spelling and
+    # the hook re-renders it with another, and the two must match verbatim
     lines.append(f"Requested {str(req['requested_at']).replace('T', ' ')}. "
-                 f"Revoke any time: {invocation()} autopilot off")
+                 "Revoke any time: pythia autopilot off")
     return lines
 
 
@@ -5068,6 +5157,16 @@ def lease_line(lease, now=None):
     return base
 
 
+def connection_entry(root, conn_name):
+    """The connections.json entry for a name, or None — read fresh, so a
+    connection marked protected after a lease began stops being covered."""
+    cfg = _read_json(pathlib.Path(root) / CONFIG_DIR / CONFIG_NAME) or {}
+    for k, v in cfg.items():
+        if k.upper() == str(conn_name or "").upper() and isinstance(v, dict):
+            return v
+    return None
+
+
 def lease_names_group(root, conn_name, group, now=None):
     """Whether an active lease on this connection names the group. That is
     the developer's override of a `deny` policy for the group — what the
@@ -5076,6 +5175,7 @@ def lease_names_group(root, conn_name, group, now=None):
     lease = read_lease(root)
     return (lease_status(lease, now) == "active"
             and str(lease.get("conn", "")).upper() == str(conn_name or "").upper()
+            and not connection_protected(connection_entry(root, conn_name))
             and group in lease.get("groups", []))
 
 
@@ -5095,6 +5195,9 @@ def autopilot_check(root, conn_name, group, text, now=None):
     if str(lease.get("conn", "")).upper() != str(conn_name or "").upper():
         return False, lease, (f"autopilot covers connection {lease.get('conn')}, "
                               f"not {conn_name}")
+    if connection_protected(connection_entry(root, conn_name)):
+        return False, lease, (f"connection {conn_name} is marked protected — "
+                              "autopilot never covers it")
     if group not in lease.get("groups", []):
         return False, lease, f"autopilot does not cover {group} statements"
     d = destructive_reason(text, group)
@@ -5181,7 +5284,7 @@ def batch_file(root, token):
     return deploys_root(root) / f"{token}.json"
 
 
-def write_batch(root, conn_name, schema, files, members, now=None):
+def write_batch(root, conn_name, schema, files, members, now=None, start=1):
     import datetime
     import hashlib
     now = now or datetime.datetime.now()
@@ -5190,30 +5293,50 @@ def write_batch(root, conn_name, schema, files, members, now=None):
     token = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:10]
     batch = {"kind": "batch", "token": token, "conn": conn_name or "",
              "schema": schema, "files": list(files), "members": members,
-             "created_at": _iso(now), "applied": False}
+             "from": int(start or 1), "created_at": _iso(now),
+             "applied": False}
     _write_json(batch_file(root, token), batch)
     return batch
 
 
 def batch_card(batch):
+    """The card for a whole release: every statement as it will run — in
+    full for every group without a snapshot, with its row set for DML —
+    because what is approved has to be what was seen, one statement or
+    forty."""
     n = len(batch["members"])
     lines = [f"Approving a deploy of {n} statement{'s' if n != 1 else ''} on "
              f"{batch.get('schema') or '?'}, in this order:"]
     for m in batch["members"]:
-        what = (f"{m['object']} ({m['type']})" if m.get("object") not in
-                (None, "STATEMENT") else m.get("first_line", "?"))
-        changed = (f" — {m['changed']} lines changed"
-                   if m.get("changed") is not None and m["group"] == "plsql_source"
-                   else "")
-        lines.append(f"  {m['n']:>2}. [{m['group']}] {what}{changed}")
+        if m["group"] == "plsql_source":
+            changed = (" — new object" if m.get("created") else
+                       f" — {m['changed']} lines changed"
+                       if m.get("changed") is not None else "")
+            lines.append(f"  {m['n']:>2}. [{m['group']}] {m.get('object')} "
+                         f"({m.get('type')}){changed}")
+            if m.get("summary"):
+                lines.append(f"      {m['summary'].lstrip('- ')}")
+        else:
+            lines.append(f"  {m['n']:>2}. [{m['group']}]")
+            lines += [f"      {ln}" for ln in
+                      str(m.get("statement") or "").strip().splitlines()]
+            if m.get("row_set"):
+                lines += render_row_set(m["row_set"], False, indent="      ")
         if m.get("destructive"):
-            lines.append(f"      ! DESTRUCTIVE: {m['destructive']}")
+            lines.append(f"      ! DESTRUCTIVE: {m['destructive']}.")
+        if m.get("lint_errors"):
+            lines.append(f"      ! {m['lint_errors']} lint error(s) — see the preview")
     undo = sorted({m["group"] for m in batch["members"]}
-                  - {"plsql_source", "comments", "session"})
+                  - {"plsql_source", "comments"})
     if undo:
         lines.append(f"No snapshot can undo {', '.join(undo)} after commit; "
                      "plsql_source and comments are restorable per entry.")
-    lines.append("It stops at the first refusal or broken result.")
+    lines.append("It stops at the first refusal or broken result, and an "
+                 "approval left unused by a stop is withdrawn.")
+    start = int(batch.get("from") or 1)
+    if start > 1:
+        lines.append(f"Resumes the files at statement {start}; the statements "
+                     "before it are not part of this approval.")
     lines.append(f"Previewed {str(batch['created_at']).replace('T', ' ')} on "
                  f"connection {batch.get('conn') or '?'}.")
     return lines
@@ -5224,6 +5347,8 @@ def batch_card(batch):
 def find_approvable(root, token):
     """(kind, entry, meta) for anything a person can approve by its token: a
     preview (6 hex), an autopilot lease request (8), a deploy batch (10)."""
+    if not valid_token(token):
+        return None, None, None
     entry, meta = find_preview_by_token(root, token)
     if meta:
         return "preview", entry, meta
@@ -5254,14 +5379,11 @@ def grant_approval(root, token, meta, approver, session=None):
                 "(no --confirm needed while it lasts).")
     if kind == "batch":
         for m in meta["members"]:
-            row_set = None
-            try:
-                row_set = read_journal_entry(root, m["entry"])["meta"].get("row_set")
-            except SystemExit:
-                pass
+            if not m.get("token") or not m.get("entry"):
+                continue
             mint_grant(root, m["token"], meta.get("conn") or "",
-                       revalidate=fingerprint_text(row_set), approver=approver,
-                       session=session)
+                       revalidate=fingerprint_text(m.get("row_set")),
+                       approver=approver, session=session, batch=token)
         mint_grant(root, token, meta.get("conn") or "", approver=approver,
                    session=session)
         return (f"deploy approved — {len(meta['members'])} statements, single "
@@ -5428,21 +5550,39 @@ def deploy_rank(text):
             "session": 0}.get(group, 120)
 
 
+def natural_key(name):
+    """'2_x' before '10_x': numbers compare as numbers."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
+
+
+NUMBERED_RE = re.compile(r"^[A-Za-z]{0,2}_{0,2}\d")     # 01_x, V3__x, R2_x
+
+
 def collect_deploy(paths):
-    """(files, statements, skipped) for deploy/lint: directories expand to
-    their *.sql files — in name order when every file is numbered (the
-    author's order), else by what the file creates; files listed explicitly
-    keep the order given."""
-    files = []
+    """(files, statements, skipped, notes) for deploy: a directory expands to
+    its .sql files (not recursive) — in natural name order when every file
+    is numbered (01_, 1_, V3__: the author's order), else by what each file
+    creates; files listed explicitly keep the order given. `notes` says which
+    order each directory got, because a silent reordering is a surprise."""
+    files, notes = [], []
     for raw in paths:
         p = pathlib.Path(raw)
         if p.is_dir():
-            sub = sorted(x for x in p.glob("*.sql") if x.is_file())
-            if not all(re.match(r"\d", x.name) for x in sub):
+            sub = sorted((x for x in p.iterdir()
+                          if x.is_file() and x.suffix.lower() == ".sql"),
+                         key=lambda f: natural_key(f.name))
+            if sub and all(NUMBERED_RE.match(x.name) for x in sub):
+                notes.append(f"{p}: by file name (numbered)")
+            else:
                 def first_rank(f):
                     st, _ = split_script(f.read_text(encoding="utf-8-sig"))
-                    return (deploy_rank(st[0]["text"]) if st else 999, f.name)
+                    return (deploy_rank(st[0]["text"]) if st else 999,
+                            natural_key(f.name))
                 sub.sort(key=first_rank)
+                if sub:
+                    notes.append(f"{p}: by what each file creates (tables, "
+                                 "specs, bodies, triggers, grants, data) — "
+                                 "number the files to fix the order yourself")
             files.extend(sub)
         elif p.is_file():
             files.append(p)
@@ -5453,11 +5593,11 @@ def collect_deploy(paths):
     statements, skipped = [], []
     for f in files:
         st, sk = split_script(f.read_text(encoding="utf-8-sig"))
-        for s in st:
-            statements.append({"file": str(f), "line": s["line"],
-                               "text": s["text"], "group": classify(s["text"])})
+        for x in st:
+            statements.append({"file": str(f), "line": x["line"],
+                               "text": x["text"], "group": classify(x["text"])})
         skipped.extend({"file": str(f), **x} for x in sk)
-    return files, statements, skipped
+    return files, statements, skipped, notes
 
 
 def _first_line(text):
@@ -5466,14 +5606,16 @@ def _first_line(text):
     return line if len(line) <= 70 else line[:67] + "..."
 
 
-def _run_member(conn, schema, ns, st, confirm=None, preview=False):
-    """One statement through run_apply, captured: (code, refusal, docs)."""
+def _run_member(conn, schema, ns, st, confirm=None, preview=False, batch=None):
+    """One statement through run_apply, captured: (code, refusal, docs). A
+    driver error escaping run_apply's own handling becomes a refusal here, so
+    a release never loses its summary after earlier statements landed."""
     import contextlib
     import copy
     import io
     sub = copy.copy(ns)
     sub.file, sub.json, sub.confirm = st["file"], True, confirm
-    sub.yes, sub.preview = False, preview
+    sub.yes, sub.preview, sub.batch = False, preview, batch
     buf = io.StringIO()
     err = None
     try:
@@ -5482,6 +5624,8 @@ def _run_member(conn, schema, ns, st, confirm=None, preview=False):
     except SystemExit as e:
         code, err = (e.code if isinstance(e.code, int) else 1), (
             None if isinstance(e.code, int) else str(e))
+    except Exception as e:                # noqa: BLE001 — reported, not lost
+        code, err = 1, f"{type(e).__name__}: {e}"
     docs = []
     for ln in buf.getvalue().splitlines():
         if ln.strip().startswith("{"):
@@ -5492,6 +5636,18 @@ def _run_member(conn, schema, ns, st, confirm=None, preview=False):
     return code, err, docs
 
 
+def _withdraw(root, batch, from_index):
+    """A stopped deploy leaves no approval behind: the batch token is spent
+    and every member grant not used yet is deleted."""
+    for m in batch["members"][from_index:]:
+        if m.get("token") and valid_token(m["token"]):
+            try:
+                grant_path(root, m["token"]).unlink()
+            except OSError:
+                pass
+    spend_grant(root, batch["token"])
+
+
 def cmd_deploy(conn, schema, ns):
     """Run a release — one or more scripts, many statements — through the same
     six steps apply runs, in order, stopping at the first refusal or broken
@@ -5499,24 +5655,31 @@ def cmd_deploy(conn, schema, ns):
     autopilot lease that covers every statement lands it directly."""
     root = ns.project_root
     en = getattr(ns, "color", False)
-    files, statements, skipped = collect_deploy(ns.paths)
+    files, statements, skipped, notes = collect_deploy(ns.paths)
+    start = max(1, int(getattr(ns, "from_n", 1) or 1))
+    if start > len(statements):
+        sys.exit(f"--from {start}: the scripts hold {len(statements)} statements.")
+    statements = statements[start - 1:]
     if not statements:
         sys.exit("Nothing to deploy: the scripts hold no statements.")
-    bad = [s for s in statements if s["group"] in (None, "anonymous")]
+    bad = [s for s in statements if s["group"] in (None, "anonymous", "session")]
     if bad:
-        lines = [f"  {s['file']}:{s['line']}: {_first_line(s['text'])}"
-                 for s in bad[:10]]
+        lines = [f"  {s['file']}:{s['line']} [{s['group'] or 'unrecognised'}] "
+                 f"{_first_line(s['text'])}" for s in bad[:10]]
         sys.exit("Refused before anything ran — these statements cannot go "
-                 "through the write path (anonymous blocks and unrecognised "
-                 "statements are refused, as in apply):\n" + "\n".join(lines))
+                 "through the write path. Anonymous blocks and unrecognised "
+                 "statements are refused as in apply; ALTER SESSION is refused "
+                 "in a release because it would silently change how every "
+                 "later statement runs, which no preview can show:\n"
+                 + "\n".join(lines))
     eff = load_policy(root)
     lease = read_lease(root)
+    conv = load_conventions(root)
     covered = []
     for s in statements:
         ok, _, why = autopilot_check(root, ns.conn_name, s["group"], s["text"])
         if ok:
-            errs = [f for f in lint_findings(s["text"], s["group"],
-                                             load_conventions(root))
+            errs = [f for f in lint_findings(s["text"], s["group"], conv)
                     if f["severity"] == "error"]
             ok, why = (False, f"{len(errs)} lint error(s)") if errs else (ok, why)
         covered.append((ok, why))
@@ -5539,7 +5702,9 @@ def cmd_deploy(conn, schema, ns):
     if ns.confirm or auto_all:
         batch = None
         if ns.confirm:
-            batch = _read_json(batch_file(root, str(ns.confirm).strip().lower()))
+            tok = str(ns.confirm).strip().lower()
+            batch = (_read_json(batch_file(root, tok))
+                     if re.fullmatch(r"[0-9a-f]{10}", tok) else None)
             if not batch:
                 sys.exit(f"No deploy preview carries token {ns.confirm!r}. "
                          f"Preview first:\n  {invocation()} deploy "
@@ -5547,13 +5712,23 @@ def cmd_deploy(conn, schema, ns):
             if batch.get("applied"):
                 sys.exit(f"Deploy {batch['token']} already ran — one approval, "
                          "one run. Preview again for a fresh token.")
-            if [str(f) for f in files] != batch["files"]:
-                sys.exit("The approved deploy listed different files:\n  "
-                         + " ".join(batch["files"])
-                         + "\nPreview again with the files you mean to run.")
-            if len(batch["members"]) != len(statements):
-                sys.exit("The scripts changed since that preview (the "
-                         "statement count moved). Preview again.")
+            if [str(f) for f in files] != batch["files"] or \
+                    int(batch.get("from") or 1) != start:
+                sys.exit("The approved deploy listed different files or started "
+                         "elsewhere:\n  " + " ".join(batch["files"])
+                         + f" (from statement {batch.get('from') or 1})\n"
+                         "Preview again with the files you mean to run.")
+            # every statement exactly as previewed, checked BEFORE the first
+            # one runs — a change found at statement 5 would be found after
+            # statements 1-4 had already landed
+            moved = [i + start for i, (m, st) in enumerate(
+                zip(batch["members"], statements))
+                if m.get("sha") != source_sha(st["text"])]
+            if len(batch["members"]) != len(statements) or moved:
+                sys.exit("The scripts changed since that preview"
+                         + (f" (statement {moved[0]} first)" if moved else
+                            " (the statement count moved)")
+                         + ". Nothing ran. Preview again.")
             g = read_grant(root, batch["token"])
             status = grant_status(g, ns.conn_name)
             if status != "ok":
@@ -5563,12 +5738,12 @@ def cmd_deploy(conn, schema, ns):
         results, code, stop = [], 0, None
         for i, st in enumerate(statements):
             member = batch["members"][i] if batch else None
-            tok = member["token"] if member else None
-            c, err, docs = _run_member(conn, schema, ns, st, confirm=tok or None)
+            c, err, docs = _run_member(
+                conn, schema, ns, st, confirm=(member or {}).get("token") or None,
+                batch=(batch or {}).get("token"))
             last = docs[-1] if docs else {}
-            applied = bool(last.get("applied")) or (st["group"] == "session"
-                                                    and c == 0 and not err)
-            res = {"n": i + 1, "file": st["file"], "line": st["line"],
+            applied = bool(last.get("applied"))
+            res = {"n": start + i, "file": st["file"], "line": st["line"],
                    "group": st["group"],
                    "object": last.get("object") or (docs[0].get("object") if docs else None),
                    "exit": c if not err else 1, "refusal": err,
@@ -5581,12 +5756,15 @@ def cmd_deploy(conn, schema, ns):
                     or "not applied (no approval covered it)"
             results.append(res)
             if res["exit"]:
-                code, stop = res["exit"], i + 1
+                code, stop = res["exit"], start + i
                 break
-        if batch and stop is None:
-            batch["applied"] = True
-            _write_json(batch_file(root, batch["token"]), batch)
-            spend_grant(root, batch["token"])
+        if batch:
+            if stop is None:
+                batch["applied"] = True
+                _write_json(batch_file(root, batch["token"]), batch)
+                spend_grant(root, batch["token"])
+            else:
+                _withdraw(root, batch, len(results))
         if ns.json:
             print(json.dumps({"ok": stop is None,
                               "mode": "autopilot" if auto_all else "confirm",
@@ -5601,8 +5779,9 @@ def cmd_deploy(conn, schema, ns):
                 tag = (paint("ok", "green", en) if not r["exit"] else
                        paint("BROKEN (exit 3)", "red", en) if r["exit"] == 3
                        else paint("REFUSED", "red", en))
+                text = statements[r["n"] - start]["text"]
                 print(f"  {r['n']:>3}. {tag:<10} [{r['group']}] "
-                      f"{r['object'] or _first_line(statements[r['n'] - 1]['text'])}"
+                      f"{r['object'] if r['object'] not in (None, 'STATEMENT') else _first_line(text)}"
                       f"   {r['file']}:{r['line']}")
                 if r["refusal"]:
                     for ln in str(r["refusal"]).splitlines()[:6]:
@@ -5614,15 +5793,18 @@ def cmd_deploy(conn, schema, ns):
                     print(paint(f"         now INVALID: {n2} ({t2})", "red", en))
             if stop is not None:
                 print(paint(f"\n  Stopped at statement {stop}; "
-                            f"{len(statements) - len(results)} not run.",
-                            "red", en))
+                            f"{len(statements) - len(results)} not run. The "
+                            "rest of this approval is withdrawn.", "red", en))
+                print(f"  After fixing it, resume with a fresh preview:\n    "
+                      + paint(f"{invocation()} deploy {' '.join(ns.paths)} "
+                              f"--from {stop}", "cyan", en))
             undo = [r["restore"] for r in results if r.get("restore") and r["applied"]]
             if undo:
                 print("\n  To undo what landed, newest first:")
                 for u in reversed(undo):
                     print("    " + paint(u, "cyan", en))
             nolift = [r for r in results if r["applied"] and r["group"]
-                      not in ("plsql_source", "comments", "session")]
+                      not in ("plsql_source", "comments")]
             if nolift:
                 print(paint(f"  {len(nolift)} applied statement(s) "
                             "(structural/data/grants) have no undo.",
@@ -5634,68 +5816,66 @@ def cmd_deploy(conn, schema, ns):
     # preview: every statement previewed, then one card for the whole set
     members, previews = [], []
     for i, st in enumerate(statements):
-        if st["group"] == "session":
-            members.append({"n": i + 1, "file": st["file"], "line": st["line"],
-                            "group": "session", "object": None, "type": None,
-                            "token": "", "entry": None, "changed": None,
-                            "destructive": None,
-                            "first_line": _first_line(st["text"])})
-            previews.append({})
-            continue
         c, err, docs = _run_member(conn, schema, ns, st, preview=True)
         if err or c:
+            hint = ""
+            if st["group"] == "data_dml" and any(
+                    x["group"] == "structural" for x in statements[:i]):
+                hint = ("\nIt probably reads a table an earlier statement of "
+                        "this release creates or changes, which has not run "
+                        "yet. Deploy the DDL first, then this part with "
+                        f"--from {start + i}.")
             sys.exit(f"Preview stopped at {st['file']}:{st['line']} — nothing "
-                     f"was written:\n{err or 'exit ' + str(c)}")
+                     f"was written:\n{err or 'exit ' + str(c)}{hint}")
         d = docs[0] if docs else {}
-        members.append({"n": i + 1, "file": st["file"], "line": st["line"],
+        members.append({"n": start + i, "file": st["file"], "line": st["line"],
                         "group": st["group"], "object": d.get("object"),
                         "type": d.get("type"), "token": d.get("token"),
                         "entry": d.get("journal"),
                         "changed": d.get("changed_lines"),
+                        "created": d.get("created"),
+                        "summary": d.get("summary"),
                         "destructive": d.get("destructive"),
+                        "row_set": d.get("row_set"),
+                        "lint_errors": sum(1 for f in d.get("lint") or []
+                                           if f["severity"] == "error"),
+                        "statement": (None if st["group"] == "plsql_source"
+                                      else skip_leading_noise(st["text"])),
+                        "sha": source_sha(st["text"]),
                         "first_line": _first_line(st["text"])})
         previews.append(d)
     batch = write_batch(root, ns.conn_name, schema, [str(f) for f in files],
-                        members)
+                        members, start=start)
     if ns.json:
         print(json.dumps({"ok": True, "mode": "preview", "batch": batch["token"],
                           "members": members, "previews": previews,
-                          "skipped": skipped}))
+                          "skipped": skipped, "order": notes}))
         return
-    print(f"\n  {paint('deploy preview', 'bold', en)} — {len(members)} "
-          f"statements from {len(files)} file(s), in this order:")
+    print(f"\n  {paint('deploy preview', 'bold', en)} — nothing was written. "
+          f"{len(members)} statements from {len(files)} file(s).")
+    for n in notes:
+        print(f"  order: {n}")
+    print()
+    for ln in batch_card(batch):
+        print(f"  {paint(ln, 'yellow', en) if 'DESTRUCTIVE' in ln else ln}")
     for m, d in zip(members, previews):
-        what = (f"{m['object']} ({m['type']})"
-                if m.get("object") not in (None, "STATEMENT") else m["first_line"])
-        head = ""
-        if m["group"] == "plsql_source":
-            head = ("new object" if d.get("created") else
-                    f"{m['changed']} lines changed")
-        print(f"  {m['n']:>3}. [{m['group']}] {what}"
-              f"{' — ' + head if head else ''}   {m['file']}:{m['line']}")
-        if d.get("summary"):
-            print(f"       {d['summary'].lstrip('- ')}")
-        if m.get("destructive"):
-            print(paint(f"       ! DESTRUCTIVE: {m['destructive']}.", "red", en))
-        if d.get("drift"):
-            print(paint(f"       ! {d['drift'].splitlines()[0]}", "yellow", en))
         lint = d.get("lint") or []
         if lint:
-            print(f"       lint: {lint_summary(lint)}")
-            for ln in render_findings(lint, en=en, limit=3):
-                print(f"         {ln}")
-        if m["entry"] and m["group"] in ("plsql_source", "comments"):
+            print(f"\n  {m['n']}. lint: {lint_summary(lint)}")
+            for ln in render_findings(lint, label=f"{m['file']}", en=en, limit=5):
+                print(f"    {ln}")
+        if d.get("drift"):
+            print(paint(f"\n  {m['n']}. ! {d['drift'].splitlines()[0]}",
+                        "yellow", en))
+        if m["entry"] and m["group"] == "plsql_source":
             e = read_journal_entry(root, m["entry"])
-            base = (create_prefix(e["after"]) + e["before"]) if (
-                m["group"] == "plsql_source" and e["before"].strip()) else ""
-            if m["group"] == "comments":
-                base = e["restore"] if e["before"] else ""
-            diff, _ = render_diff(base, e["after"])
-            dl = diff.splitlines()
+            base = (create_prefix(e["after"]) + e["before"]) if e["before"].strip() else ""
+            dl = render_diff(base, e["after"])[0].splitlines()
+            print(f"\n  {m['n']}. diff {m['object']}:")
             for ln in dl[:40]:
-                print(f"       {paint_diff_line(ln, en)}")
+                print(f"    {paint_diff_line(ln, en)}")
             if len(dl) > 40:
-                print(f"       -- truncated: {len(dl) - 40} more diff lines; "
+                print(f"    -- truncated: {len(dl) - 40} more diff lines; "
                       f"{invocation()} journal diff {m['entry']}")
     for sk in skipped:
         print(paint(f"  skipped {sk['file']}:{sk['line']} {sk['text']!r} — "
@@ -5706,9 +5886,10 @@ def cmd_deploy(conn, schema, ns):
             print(paint(f"\n  ! autopilot does not cover {len(nc)} of these — "
                         f"first: statement {nc[0][0]['n']}: {nc[0][1]}",
                         "yellow", en))
+    from_arg = f" --from {start}" if start > 1 else ""
     print_doors(batch["token"], en,
-                then=f"{invocation()} deploy {' '.join(ns.paths)} --confirm "
-                     f"{batch['token']}")
+                then=f"{invocation()} deploy {' '.join(ns.paths)}{from_arg} "
+                     f"--confirm {batch['token']}")
 
 
 # --- commands: lint -------------------------------------------------------------
@@ -5892,76 +6073,93 @@ WRITE_SQL_RE = re.compile(
     r"grant\s+\w+|revoke\s+\w+|comment\s+on)\b", re.I)
 
 
-def parse_pythia_command(command):
+def _is_real_pythia(path_token):
+    """Whether a path token names THIS pythia — the module running the hook —
+    and not a file an agent wrote that happens to be called pythia.py."""
+    try:
+        return pathlib.Path(path_token).resolve() == pathlib.Path(__file__).resolve()
+    except (OSError, ValueError):
+        return False
+
+
+def parse_pythia_command(command, cwd=None):
     """The argv after the invocation for ONE plain pythia command — no
-    operators, no substitutions, no newlines — else None. Allowing a command
-    means allowing all of it, so anything a shell could turn into a second
-    command is refused here and left to the client's own prompt."""
+    operators, no substitutions, no newlines, no comments — else None.
+    Allowing a command means allowing all of it, so anything a shell could
+    turn into a second command is refused here and left to the client's own
+    prompt. So is any executable that might not be the real pythia: a bare
+    `pythia` from PATH, an interpreter by name with `-m pythia` (and no
+    pythia.py in the working directory to shadow it), or a path to the very
+    file running this hook."""
     import shlex
-    if not command or any(ch in command for ch in "\n\r`") or re.search(
+    if not command or any(ch in command for ch in "\n\r`#") or re.search(
             r"\$\(|\$\{|<\(|>\(", command):
-        return None
+        return None                       # '#' too: bash and shlex disagree on it
     try:
         lex = shlex.shlex(command, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
+        lex.commenters = ""
         toks = list(lex)
     except ValueError:
         return None
     if not toks or any(t and all(c in "();<>|&" for c in t) for t in toks):
         return None
-    exe = re.sub(r"\.exe$", "", re.split(r"[/\\]", toks[0])[-1].lower())
-    if exe == "pythia":
+    first = toks[0]
+    exe = re.sub(r"\.exe$", "", first.lower())
+    if exe == "pythia":                   # by name only: PATH decides, not the agent
         return toks[1:]
     if re.fullmatch(r"python(\d+(\.\d+)?)?|py", exe):
         if toks[1:3] == ["-m", "pythia"]:
+            base = pathlib.Path(cwd or os.getcwd())
+            if (base / "pythia.py").exists() or (base / "pythia").is_dir():
+                return None               # python -m would import that one
             return toks[3:]
-        if len(toks) > 1 and re.split(r"[/\\]", toks[1])[-1] == "pythia.py":
+        if len(toks) > 1 and _is_real_pythia(
+                pathlib.Path(cwd or os.getcwd()) / toks[1]):
             return toks[2:]
     return None
 
 
-def _flag(argv, name):
-    for i, a in enumerate(argv):
-        if a == name and i + 1 < len(argv):
-            return argv[i + 1]
-        if a.startswith(name + "="):
-            return a.split("=", 1)[1]
-    return None
-
-
 def classify_pythia_argv(argv):
-    """read | preview | write | approve-hook | other."""
-    if not argv:
-        return "other"
-    sub, rest = argv[0], argv[1:]
-    positional = [a for a in rest if not a.startswith("-")]
-    if "--yes" in rest:
-        return "other"
-    if sub in PYTHIA_READS:
-        return "read"
-    if sub == "conventions":
-        return "other" if "--init" in rest else "read"
-    if sub == "policy":
-        return "read" if not positional or positional[0] == "show" else "other"
-    if sub == "journal":
-        act = positional[0] if positional else "list"
-        if act in ("list", "show", "diff", "export"):
-            return "read"
-        if act == "restore":
-            return "write" if _flag(rest, "--confirm") else "preview"
-        return "other"
+    """read | preview | write | approve-hook | other — decided by parsing argv
+    with the CLI's own parser, so an option value can never pass for a
+    subcommand action and an abbreviation never hides a flag. Returns
+    (kind, namespace|None)."""
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()), \
+                contextlib.redirect_stdout(io.StringIO()):
+            ns = build_parser().parse_args(argv)
+    except SystemExit:
+        return "other", None
+    sub = ns.command
+    if getattr(ns, "yes", False):
+        return "other", ns
     if sub == "approve":
-        if "--hook" in rest:
-            return "approve-hook"
-        return "read" if "--card" in rest else "other"
+        if ns.hook:
+            return "approve-hook", ns
+        return ("read" if ns.card else "other"), ns
+    if sub in PYTHIA_READS:
+        return "read", ns
+    if sub == "conventions":
+        return ("other" if ns.init else "read"), ns
+    if sub == "policy":
+        return ("read" if ns.action == "show" else "other"), ns
+    if sub == "journal":
+        if ns.action in ("list", "show", "diff", "export"):
+            return "read", ns
+        if ns.action == "restore":
+            return ("write" if ns.confirm else "preview"), ns
+        return "other", ns
     if sub == "autopilot":
-        act = positional[0] if positional else "status"
-        return "read" if act in ("status", "report", "request", "off") else "other"
+        return ("read" if ns.action in ("status", "report", "request", "off")
+                else "other"), ns
     if sub in ("apply", "deploy"):
-        return "write" if _flag(rest, "--confirm") else "preview"
+        return ("write" if ns.confirm else "preview"), ns
     if sub == "skill":
-        return "read" if positional[:1] == ["lint"] else "other"
-    return "other"
+        return ("read" if ns.action == "lint" else "other"), ns
+    return "other", ns
 
 
 def _hook_out(event, decision=None, reason=None, context=None):
@@ -6020,16 +6218,16 @@ def _pre_tool_decision(payload, now=None):
                              "approve --hook is the client's door: it reads a "
                              "payload Claude Code wrote. Piping one in by hand "
                              "would forge the developer's approval.")
-        argv = parse_pythia_command(cmd)
+        argv = parse_pythia_command(cmd, cwd)
         if argv is None or not settings.get("auto_allow_reads", True):
             return None
-        kind = classify_pythia_argv(argv)
+        kind, pns = classify_pythia_argv(argv)
         if kind == "read":
             return _hook_out("PreToolUse", "allow",
                              "pythia read-only command — it cannot write")
         if mode == "plan" or kind not in ("preview", "write"):
             return None
-        conn_name = _flag(argv[1:], "--conn")
+        conn_name = getattr(pns, "conn", None)
         if not conn_name:
             try:
                 cfg, r2 = find_config(cwd, os.environ)
@@ -6045,9 +6243,11 @@ def _pre_tool_decision(payload, now=None):
                                  "applies only what the developer's autopilot "
                                  "lease covers; apply re-checks the scope"
                                  if lease_ok else "writes nothing to the database"))
-        token = str(_flag(argv[1:], "--confirm") or "").strip().lower()
+        token = str(getattr(pns, "confirm", "") or "").strip().lower()
         g = read_grant(root, token) if token else None
-        if g and grant_status(g, conn_name or g.get("conn"), now) == "ok":
+        # a grant bound to a deploy batch opens only that deploy
+        bound_ok = not (g or {}).get("batch") or pns.command == "deploy"
+        if g and bound_ok and grant_status(g, conn_name or g.get("conn"), now) == "ok":
             return _hook_out("PreToolUse", "allow",
                              f"the developer approved {token} "
                              f"({g.get('approver')}); apply re-verifies it")
@@ -6558,9 +6758,13 @@ def build_parser():
         return c
 
     p = argparse.ArgumentParser(
-        prog="pythia", description=__doc__,
+        prog="pythia", description=__doc__, allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
+    # no prefix matching: `--ho` must never reach --hook, nor `--ye` --yes —
+    # a hook that reads the full spelling would otherwise miss the flag
+    _add = sub.add_parser
+    sub.add_parser = lambda *a, **kw: _add(*a, allow_abbrev=False, **kw)
     sub.add_parser("check", parents=[common()],
                    help="connectivity + object counts for the schema")
     s = sub.add_parser("ls", parents=[common()], help="find objects by name pattern")
@@ -6643,6 +6847,8 @@ def build_parser():
     s.add_argument("--depth", type=int, default=3)
     s.add_argument("--preview", action="store_true",
                    help="preview only, even under an active autopilot lease")
+    s.add_argument("--from", type=int, default=1, dest="from_n", metavar="N",
+                   help="start at statement N (resume a stopped deploy)")
     s = sub.add_parser("autopilot", parents=[common()],
                        help="delegate a session: one approval lets apply land "
                             "covered statements until it ends")

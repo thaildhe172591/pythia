@@ -85,6 +85,23 @@ earlier.
   `-write`, `-review`, `-conventions`, `-setup` and `-skill-author` know
   them. `pythia skill new` / `skill lint` let a team grow its own skills to
   the pack's contract.
+- **Hardened after an adversarial review of this release, before it
+  shipped.** The PreToolUse hook no longer trusts shlex's idea of a comment
+  (`pythia guide#;touch x` had read as one read command), classifies with the
+  CLI's own parser, and allows only the real pythia executable; the CLI
+  accepts no abbreviated flags. A deploy card shows every statement in full
+  with its row set; member approvals are bound to their deploy and withdrawn
+  when it stops; every statement is checked before the first runs; `ALTER
+  SESSION`, `EXEC`, `HOST` and `CONNECT` are refused in releases; numbered
+  directories sort naturally (and `V3__` counts as numbered); `--from N`
+  resumes. INVALID dependents are checked after every write, not only
+  PL/SQL. Security-relevant grants and always-true WHERE clauses are
+  destructive by code, not by an editable lint rule; autopilot DML above
+  1,000 rows goes to a person; protected is re-read on every write. Tokens
+  are validated before they name a file; the lease card no longer embeds the
+  invocation (the chat door had rejected a real Approve); quoted identifiers
+  can no longer escape the journal; `WITH FUNCTION` queries are not
+  read-only.
 - `prepare_statement` no longer reads a `;` inside a literal as a second
   statement (`set note = 'a; b'` was refused).
 - `pythia.__version__` exists; the MCP server reports it.

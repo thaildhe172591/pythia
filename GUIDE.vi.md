@@ -592,9 +592,11 @@ pythia deploy release/ --confirm 3f9a01c2b7  # sau khi dev đã duyệt token đ
 
 Script được tách theo kiểu SQL*Plus: `;` kết thúc câu SQL, `/` đứng riêng một
 dòng kết thúc khối PL/SQL, tôn trọng literal và comment; lệnh SQL*Plus (SET,
-PROMPT…) được bỏ qua và liệt kê; `@include` và block ẩn danh bị từ chối. Thư
-mục có đánh số chạy theo tên; không đánh số thì theo loại object (bảng trước
-code, spec trước body, trigger và grant sau cùng). Policy từ chối ngay trước
+PROMPT…) được bỏ qua và liệt kê; `@include`, `EXEC`/`HOST`/`CONNECT`,
+`ALTER SESSION` và block ẩn danh bị từ chối. Thư mục có đánh số (`1_`, `02_`,
+`V3__`) chạy theo thứ tự số tự nhiên; không đánh số thì theo loại object
+(bảng trước code, spec trước body, trigger và grant sau cùng). Thẻ duyệt hiện
+đầy đủ từng câu lệnh; `--from N` chạy tiếp sau khi dừng, với lần duyệt mới. Policy từ chối ngay trước
 khi chạy bất cứ gì. Mỗi câu lệnh có snapshot, journal, verify riêng; dừng ở
 lần từ chối hoặc exit 3 đầu tiên và in danh sách hoàn tác, mới nhất trước.
 

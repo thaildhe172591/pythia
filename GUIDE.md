@@ -623,9 +623,12 @@ pythia deploy release/ --confirm 3f9a01c2b7  # after the developer approved that
 
 Scripts split the SQL*Plus way: `;` ends SQL, a lone `/` ends a PL/SQL unit,
 literals and comments are respected, SQL*Plus directives are skipped and
-listed, `@includes` and anonymous blocks are refused. A numbered directory
-runs in name order; an unnumbered one by what each file creates (tables
-before code, specs before bodies, triggers and grants last). Policy refusals
+listed; `@includes`, `EXEC`/`HOST`/`CONNECT`, `ALTER SESSION` and anonymous
+blocks are refused. A numbered directory (`1_`, `02_`, `V3__`) runs in
+natural name order; an unnumbered one by what each file creates (tables
+before code, specs before bodies, triggers and grants last). The card shows
+every statement in full; `--from N` resumes after a stop, with a fresh
+approval. Policy refusals
 arrive before anything runs. Each statement gets its own snapshot, journal
 entry and verify; the run stops at the first refusal or exit 3 and prints the
 undo list, newest first.

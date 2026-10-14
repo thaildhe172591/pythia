@@ -84,9 +84,17 @@ may do without asking; it widens nothing else:
   UNUSED, REVOKE, UPDATE/DELETE without WHERE — stay one-approval-at-a-time
   unless the developer asked for them by name, and the card says they
   cannot be undone;
-- a file with lint errors is not landed;
-- objects that were VALID going INVALID, or five failed writes in a row,
-  pause it until the developer looks;
+- a file with lint errors is not landed, and the security-relevant checks
+  (GRANT ... TO PUBLIC, ANY privileges, grant options, powerful roles,
+  always-true WHERE clauses) are hard-coded as destructive, so no lint
+  setting — `conventions.json` is a file agents are told to edit — can let a
+  lease land them;
+- a DML statement touching more than 1,000 rows is shown to a person first;
+- objects that were VALID going INVALID after any write — PL/SQL, DDL or
+  grants — or five failed writes in a row, pause it until the developer
+  looks;
+- a connection marked protected after the lease began stops being covered
+  at once; environment-variable credentials can never be leased;
 - every write still snapshots, journals and verifies, and `autopilot
   report` lists each one with its undo.
 
@@ -95,11 +103,24 @@ only while it is active — the card says so next to the group. That is the
 point of approving a card rather than editing a file: the developer reads
 the consequence at the moment they grant it.
 
+A deploy approval covers the release as a whole and nothing else: its card
+shows every statement in full (with its row set for DML), each statement's
+approval is bound to that deploy and refused on its own, every statement is
+checked against the preview before the first one runs, and a stop withdraws
+whatever the approval had not used yet.
+
 ### The hooks are seatbelts, not a sandbox (0.15.0)
 
 The PreToolUse hook allows pythia's read-only commands only as one plain
-invocation — no `;`, `&&`, pipes, redirections, `$(...)` or backticks — so an
-allowed command cannot carry a second one. It allows a write only when a
+invocation — no `;`, `&&`, pipes, redirections, `$(...)`, backticks or `#`
+(bash and Python's shlex disagree on where a comment starts, which a review
+showed can smuggle a second command) — so an allowed command cannot carry a
+second one. It classifies the command with the CLI's own parser, so an
+option value never passes for a subcommand, and the CLI accepts no
+abbreviated flags (`--ho` is an error, not `--hook`). It allows only a bare
+`pythia`, an interpreter by name with `-m pythia` (and no `pythia.py` in the
+working directory to shadow it), or a path to the very file running the
+hook — not a script an agent wrote and named pythia. It allows a write only when a
 live grant or lease already exists, which `apply` re-verifies itself. Its
 deny on sqlplus/SQLcl writes is pattern matching: a determined agent can
 phrase a command it does not recognise. The account's Oracle grants remain

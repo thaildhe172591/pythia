@@ -191,6 +191,90 @@ def test_destructive_reason_names_what_cannot_come_back():
              "structural") is None             # a literal is not a keyword
 
 
+def test_destructive_covers_what_review_found_missing():
+    d = pythia.destructive_reason
+    assert d("delete from t_order where 1 = 1", "data_dml")
+    assert d("update t set x = 1 where (1=1)", "data_dml")
+    assert d("create or replace synonym s for other.x", "structural")
+    assert d("alter sequence s_order restart start with 1", "structural")
+    assert d("alter user app account lock", "structural")
+    assert d("grant select on t to public", "grants")
+    assert d("grant select any table to app_ro", "grants")
+    assert d("grant select on t to app_ro with grant option", "grants")
+    assert d("grant dba to app", "grants")
+    assert d("grant select on t to app_ro", "grants") is None
+    # a comment inside the header does not turn a view into structural DDL
+    assert pythia.classify("CREATE OR REPLACE /* c */ VIEW v AS SELECT 1 x "
+                           "FROM dual") == "plsql_source"
+    assert pythia.parse_object("create or replace /* c */ view v as select 1 "
+                               "from dual")[:2] == ("VIEW", "V")
+
+
+def test_lint_settings_cannot_open_security_relevant_grants():
+    """conventions.json is a file the agent is told to edit. Turning a lint
+    rule off must not let a lease land GRANT ... TO PUBLIC."""
+    with tempfile.TemporaryDirectory() as td:
+        lease(td, groups=("grants",))
+        ok, _, why = pythia.autopilot_check(td, "DEV", "grants",
+                                            "grant select on t to public")
+        assert not ok and "PUBLIC" in why
+
+
+def test_a_big_row_set_waits_for_a_person_even_under_a_lease():
+    with tempfile.TemporaryDirectory() as td:
+        lease(td, groups=("data_dml",))
+        conn = FakeConn(p3.dml_script(count=5000), rowcount=5000)
+        _, out = quiet(pythia.run_apply, conn, "APP", p3.dml_ns(td), p3.DML_FILE)
+        assert p3.wrote_dml(conn) == [] and "5000 rows" in out
+        conn = FakeConn(p3.dml_script(count=2), rowcount=2)
+        code, _ = quiet(pythia.run_apply, conn, "APP", p3.dml_ns(td), p3.DML_FILE)
+        assert code == 0 and p3.wrote_dml(conn) and conn.commits == 1
+
+
+def test_a_lease_stops_covering_a_connection_marked_protected_later():
+    with tempfile.TemporaryDirectory() as td:
+        lease(td)
+        d = pathlib.Path(td) / ".pythia"
+        (d / "connections.json").write_text(json.dumps(
+            {"DEV": {"user": "a", "protected": True}}), encoding="utf-8")
+        ok, _, why = pythia.autopilot_check(td, "DEV", "plsql_source", p3.NEW_FILE)
+        assert not ok and "protected" in why
+        expect_exit(lambda: pythia.new_lease_request(td, "env", {}), "named connection")
+
+
+def test_structural_writes_are_checked_for_broken_dependents():
+    """Found in review: only plsql_source compared INVALID before and after,
+    so an ALTER TABLE that broke dependents reported exit 0 and the lease
+    never paused."""
+    with tempfile.TemporaryDirectory() as td:
+        lease(td, groups=("structural",))
+        conn = FakeConn(base_script(invalid_after=[("X_ALREADY_BROKEN", "PROCEDURE"),
+                                                   ("P_USES_ORDER", "PROCEDURE")]))
+        code, out = quiet(pythia.run_apply, conn, "APP", apply_ns(td, file="a.sql"),
+                          "alter table t_order modify (note varchar2(50 char))\n")
+        assert code == 3 and "INVALID" in out
+        assert pythia.lease_status(pythia.read_lease(td)) == "paused"
+
+
+def test_quoted_identifiers_cannot_escape_the_journal():
+    with tempfile.TemporaryDirectory() as td:
+        eid = pythia.write_journal_entry(td, "COMMENT", 'T_ORDER.a/../../x:y', "", "",
+                                         {})
+        assert "/" not in eid and ":" not in eid
+        assert (pythia.journal_root(td) / eid / "meta.json").is_file()
+
+
+def test_the_lease_card_is_the_same_whoever_renders_it():
+    """Found in review: the card embedded invocation(), which differs between
+    the agent's `approve --card` and the hook's `python -m pythia`, so a real
+    Approve was thrown away as a paraphrase."""
+    with tempfile.TemporaryDirectory() as td:
+        req = pythia.new_lease_request(td, "DEV", {}, note="build it")
+        text = "\n".join(pythia.lease_card(req, td))
+        assert pythia.invocation() not in text
+        assert "as the agent described it" in text
+
+
 def test_a_destructive_statement_is_flagged_in_preview_and_card():
     with tempfile.TemporaryDirectory() as td:
         policy(td, structural="confirm")
@@ -627,7 +711,7 @@ def test_the_mcp_tool_demands_a_prompt_on_every_call():
 
 def deploy_ns(td, paths, **kw):
     ns = apply_ns(td, paths=[str(p) for p in paths], command="deploy",
-                  color=False, preview=False)
+                  color=False, preview=False, from_n=1)
     for k, v in kw.items():
         setattr(ns, k, v)
     return ns
@@ -725,6 +809,120 @@ def test_deploy_stops_at_the_first_broken_statement():
         assert not [x for x, _ in conn.executed if "p_after" in x.lower()]
 
 
+def approved_batch(td, f, conn=None):
+    _, out = quiet(pythia.cmd_deploy, conn or deploy_conn(), "APP",
+                   deploy_ns(td, [f], json=True))
+    batch = json.loads(out)["batch"]
+    _, meta, _ = pythia.approval_card(td, batch)
+    pythia.grant_approval(td, batch, meta, "console")
+    return batch
+
+
+def test_the_deploy_card_shows_every_statement_in_full():
+    """Found in review: the card printed 70 characters of each statement —
+    `grant select on t_order` while the statement went on `to public`."""
+    with tempfile.TemporaryDirectory() as td:
+        policy(td, structural="confirm", data_dml="confirm", grants="confirm")
+        f = pathlib.Path(td) / "rel.sql"
+        f.write_text("grant select\n  on t_order\n  to app_ro;\n"
+                     "delete from t_order\n -- tidy\n where status = 'DRAFT';\n",
+                     encoding="utf-8")
+        s = p3.dml_script(count=2)
+        _, out = quiet(pythia.cmd_deploy, FakeConn(s), "APP",
+                       deploy_ns(td, [f], json=True))
+        _, _, body = pythia.approval_card(td, json.loads(out)["batch"])
+        text = "\n".join(body)
+        assert "to app_ro" in text and "where status = 'DRAFT'" in text
+        assert "2 rows in t_order" in text                # the row set itself
+
+
+def test_member_approvals_live_only_inside_their_deploy():
+    """Found in review: approving a batch minted ordinary grants for every
+    member; after a stop they could still be used one by one."""
+    with tempfile.TemporaryDirectory() as td:
+        policy(td, structural="confirm")
+        f = pathlib.Path(td) / "rel.sql"
+        f.write_text(RELEASE + "drop table t_old;\n", encoding="utf-8")
+        batch = approved_batch(td, f)
+        meta = pythia._read_json(pythia.batch_file(td, batch))
+        drop = meta["members"][-1]
+        assert pythia.read_grant(td, drop["token"])["batch"] == batch
+        # used on its own, the member approval is refused
+        conn = deploy_conn()
+        expect_exit(lambda: quiet(pythia.run_apply, conn, "APP",
+                                  apply_ns(td, file="x.sql", confirm=drop["token"]),
+                                  "drop table t_old"), "belongs to deploy")
+        assert not executed_ddl(conn, "drop")
+        assert decision(pre(td, f"pythia apply x.sql --confirm {drop['token']}")) is None
+        # a deploy that stops withdraws everything it did not use
+        err = [("PKG_ORDER", "PACKAGE BODY", 1, 2, 3, "ERROR", "PLS-00103: x")]
+        s = base_script(errors=err)
+        s["from all_col_comments"] = ([("COMMENTS",)], [])
+        try:
+            quiet(pythia.cmd_deploy, FakeConn(s), "APP",
+                  deploy_ns(td, [f], json=True, confirm=batch))
+            raise AssertionError("expected exit 3")
+        except SystemExit as e:
+            assert e.code == 3
+        assert pythia.read_grant(td, drop["token"]) is None
+        assert pythia.grant_status(pythia.read_grant(td, batch), "DEV") == "spent"
+
+
+def test_a_changed_script_is_caught_before_anything_runs():
+    with tempfile.TemporaryDirectory() as td:
+        policy(td, structural="confirm")
+        f = pathlib.Path(td) / "rel.sql"
+        f.write_text(RELEASE, encoding="utf-8")
+        batch = approved_batch(td, f)
+        f.write_text(RELEASE.replace("'Key'", "'Changed'"), encoding="utf-8")
+        conn = deploy_conn()
+        expect_exit(lambda: quiet(pythia.cmd_deploy, conn, "APP",
+                                  deploy_ns(td, [f], confirm=batch)),
+                    "changed since that preview", "statement 3", "nothing ran")
+        assert not executed_ddl(conn, "create")
+
+
+def test_deploy_refuses_session_changes_and_sqlplus_commands():
+    with tempfile.TemporaryDirectory() as td:
+        f = pathlib.Path(td) / "rel.sql"
+        f.write_text("alter session set edition = ora$base;\n"
+                     "create or replace procedure p as begin null; end;\n/\n",
+                     encoding="utf-8")
+        expect_exit(lambda: quiet(pythia.cmd_deploy, deploy_conn(), "APP",
+                                  deploy_ns(td, [f])), "ALTER SESSION")
+        for cmd in ("exec pkg_migrate.run;", "host rm -rf /", "connect sys/x"):
+            expect_exit(lambda: pythia.split_script(cmd + "\n"), "refuses")
+
+
+def test_deploy_resumes_from_a_statement():
+    with tempfile.TemporaryDirectory() as td:
+        policy(td, structural="confirm")
+        f = pathlib.Path(td) / "rel.sql"
+        f.write_text(RELEASE, encoding="utf-8")
+        _, out = quiet(pythia.cmd_deploy, deploy_conn(), "APP",
+                       deploy_ns(td, [f], json=True, from_n=4))
+        doc = json.loads(out)
+        assert [m["n"] for m in doc["members"]] == [4]
+        _, meta, body = pythia.approval_card(td, doc["batch"])
+        assert any("statement 4" in ln for ln in body)
+        pythia.grant_approval(td, doc["batch"], meta, "console")
+        expect_exit(lambda: quiet(pythia.cmd_deploy, deploy_conn(), "APP",
+                                  deploy_ns(td, [f], confirm=doc["batch"])),
+                    "started elsewhere")
+        conn = deploy_conn()
+        _, out = quiet(pythia.cmd_deploy, conn, "APP",
+                       deploy_ns(td, [f], json=True, confirm=doc["batch"], from_n=4))
+        assert json.loads(out)["ok"]
+        assert not executed_ddl(conn, "create table")
+
+
+def test_inline_plsql_in_a_query_is_not_read_only():
+    assert not pythia.is_readonly_sql(
+        "with function f return number is pragma autonomous_transaction; "
+        "begin execute immediate 'drop table t'; return 1; end; select f from dual")
+    assert pythia.is_readonly_sql("with x as (select 1 from dual) select * from x")
+
+
 def test_deploy_refuses_up_front_what_the_policy_denies():
     with tempfile.TemporaryDirectory() as td:
         f = pathlib.Path(td) / "rel.sql"
@@ -748,14 +946,32 @@ def test_a_directory_deploys_in_dependency_order_unless_numbered():
                                        encoding="utf-8")
         (d / "c_spec.sql").write_text("create or replace package pkg as end;\n/\n",
                                       encoding="utf-8")
-        files, _, _ = pythia.collect_deploy([d])
+        files, _, _, notes = pythia.collect_deploy([d])
+        assert "by what each file creates" in notes[0]
         assert [f.name for f in files] == ["b_table.sql", "c_spec.sql", "a_body.sql"]
         n = pathlib.Path(td) / "n"
         n.mkdir()
         for name in ("02_body.sql", "01_table.sql"):
             (n / name).write_text("select 1 from dual;\n", encoding="utf-8")
-        files, _, _ = pythia.collect_deploy([n])
+        files, _, _, _ = pythia.collect_deploy([n])
         assert [f.name for f in files] == ["01_table.sql", "02_body.sql"]
+        # natural order: 2 before 10; Flyway-style V-numbers count as numbered;
+        # .SQL counts as .sql
+        f2 = pathlib.Path(td) / "f"
+        f2.mkdir()
+        for name in ("10_drop.sql", "2_table.sql", "1_seq.SQL"):
+            (f2 / name).write_text("select 1 from dual;\n", encoding="utf-8")
+        files, _, _, _ = pythia.collect_deploy([f2])
+        assert [f.name for f in files] == ["1_seq.SQL", "2_table.sql", "10_drop.sql"]
+        f3 = pathlib.Path(td) / "flyway"
+        f3.mkdir()
+        (f3 / "V3__drop_x.sql").write_text("alter table t drop column x;\n",
+                                           encoding="utf-8")
+        (f3 / "V2__backfill.sql").write_text("update t set y = 1 where id = 1;\n",
+                                             encoding="utf-8")
+        files, _, _, notes = pythia.collect_deploy([f3])
+        assert [f.name for f in files] == ["V2__backfill.sql", "V3__drop_x.sql"]
+        assert "numbered" in notes[0]
 
 
 # --- hooks ----------------------------------------------------------------------------
@@ -774,7 +990,8 @@ def test_pre_tool_lets_reads_through_and_nothing_chained():
     with tempfile.TemporaryDirectory() as td:
         assert decision(pre(td, "pythia ls PKG_%")) == "allow"
         assert decision(pre(td, 'python -m pythia sql "select a||b from t"')) == "allow"
-        assert decision(pre(td, "python3 scripts/pythia.py impact T_ORDER")) == "allow"
+        real = pathlib.Path(pythia.__file__).resolve()
+        assert decision(pre(td, f"python3 {real} impact T_ORDER")) == "allow"
         assert decision(pre(td, "pythia apply f.sql")) == "allow"     # preview
         for cmd in ("pythia ls x && rm -rf /", "pythia ls x; rm y",
                     "pythia ls $(rm -rf ~)", "pythia ls `id`",
@@ -782,6 +999,40 @@ def test_pre_tool_lets_reads_through_and_nothing_chained():
                     "pythia apply f.sql --yes", "pythia conventions --init",
                     "pythia autopilot on", "echo hi"):
             assert decision(pre(td, cmd)) is None, cmd
+
+
+def test_pre_tool_cannot_be_talked_into_a_second_command():
+    """Found in review: shlex treats '#' mid-word as a comment and bash does
+    not, so `pythia guide#;touch x` read as one read command; argparse
+    abbreviations let `--ye` and `--ho` hide --yes and --hook; option values
+    passed for subcommand actions. Every one of these must be left to the
+    client's own prompt — never allowed."""
+    with tempfile.TemporaryDirectory() as td:
+        for cmd in ("pythia guide#;touch /tmp/pwned", "pythia ls x#|sh",
+                    "pythia ls x#&& rm -rf ~",
+                    "pythia guide#;echo e | pythia approve --ho",
+                    "pythia policy --conn show set data_dml allow",
+                    "pythia journal --conn list prune",
+                    "pythia apply f.sql --ye", "pythia apply f.sql --conf abc123",
+                    "/tmp/x/pythia ls T", "python /tmp/elsewhere/pythia.py ls T",
+                    "PYTHIA_CI=1 pythia apply f.sql --yes"):
+            assert decision(pre(td, cmd)) is None, cmd
+        # python -m pythia with a pythia.py in the working directory imports THAT
+        (pathlib.Path(td) / "pythia.py").write_text("print('not pythia')\n",
+                                                    encoding="utf-8")
+        assert decision(pre(td, "python -m pythia ls T")) is None
+    expect_exit(lambda: pythia.build_parser().parse_args(["apply", "f", "--ye"]))
+    expect_exit(lambda: pythia.build_parser().parse_args(["approve", "--ho"]))
+
+
+def test_tokens_that_are_not_tokens_name_nothing():
+    with tempfile.TemporaryDirectory() as td:
+        lease(td)
+        assert pythia.read_grant(td, "../autopilot/lease") is None
+        assert pythia.find_approvable(td, "") == (None, None, None)
+        pythia.write_journal_entry(td, "PROCEDURE", "P", "x", "x",
+                                   {"snapshot": True})       # no token key
+        expect_exit(lambda: pythia.approval_card(td, ""), "no pending")
 
 
 def test_pre_tool_denies_writes_around_the_gate():
