@@ -3117,14 +3117,42 @@ def agents_md_block():
             f"{AGENTS_END}")
 
 
-def merge_agents_md(path):
-    """Write the pythia block into an AGENTS.md. The file is the developer's,
-    shared with every AGENTS.md-reading agent, so only the delimited block is
-    ours: present -> replaced in place, absent -> appended below their text,
-    everything else byte-identical. Returns (path, action) where action is
-    'created' | 'updated' | 'unchanged'."""
+def claude_md_block():
+    """The pythia section for CLAUDE.md — the file Claude Code itself loads
+    every session, whether or not the hooks are wired, trusted or restarted.
+    Same BRIEF_GUIDE as AGENTS.md and the SessionStart hook (one source, no
+    drift), plus what only Claude needs: its approval doors in order, and the
+    standing rules an agent breaks most when nothing reminds it."""
+    return (f"{AGENTS_BEGIN}\n"
+            "## pythia — developing PL/SQL on Oracle\n\n"
+            f"{BRIEF_GUIDE.rstrip()}\n\n"
+            "APPROVAL ON CLAUDE CODE: first door is the `pythia_approve` tool "
+            "(MCP server `pythia`, registered in .mcp.json) — it prompts in "
+            "every permission mode but dontAsk and shows pythia's own card. "
+            "Not connected? Ask an AskUserQuestion whose text is exactly the "
+            "output of `pythia approve --card <token>`, options Approve / "
+            "Reject, never with pre-filled answers; if the hook says no answer "
+            "came back, do not ask the same way again — use the tool, or relay "
+            "`pythia approve <token>` for the developer's terminal. Then run "
+            "the command the approval names yourself.\n\n"
+            "STANDING RULES: writes only through `pythia apply` / `pythia "
+            "deploy` (never sqlplus, never SQLcl run-sql); `pythia impact` "
+            "before any change; `pythia lint` before any apply; never open "
+            ".pythia/connections.json (`pythia connections`); exit 3 is "
+            "written-but-broken, never done; under an autopilot lease report "
+            "every write (`pythia autopilot report`), and a paused lease means "
+            "stop and show the developer. Full contract: `pythia guide`; the "
+            "skills (`using-pythia` routes) carry the workflows.\n"
+            f"{AGENTS_END}")
+
+
+def merge_marked_block(path, block):
+    """Write a pythia block into a developer's instruction file. The file is
+    theirs, shared with every agent that reads it, so only the delimited
+    block is ours: present -> replaced in place, absent -> appended below
+    their text, everything else byte-identical. Returns (path, action) where
+    action is 'created' | 'updated' | 'unchanged'."""
     path = pathlib.Path(path)
-    block = agents_md_block()
     old = path.read_text(encoding="utf-8") if path.is_file() else None
     if old is None:
         new, action = block + "\n", "created"
@@ -3140,6 +3168,16 @@ def merge_agents_md(path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(new, encoding="utf-8")
     return path, action
+
+
+def merge_agents_md(path):
+    """The pythia block in an AGENTS.md (Codex and AGENTS.md agents)."""
+    return merge_marked_block(path, agents_md_block())
+
+
+def merge_claude_md(path):
+    """The pythia block in a CLAUDE.md (Claude Code)."""
+    return merge_marked_block(path, claude_md_block())
 
 
 OPERATING_GUIDE = """\
@@ -4048,6 +4086,18 @@ def report_claude_hooks(base_dir, ns, events=None):
         print(f"\nClaude Code hooks already in {path}.")
 
 
+def report_claude_md(project_root):
+    """Project scope: write the harness into <project>/CLAUDE.md, the file
+    Claude Code loads every session — so the rules hold even with --no-hooks,
+    before a restart, or while the hooks are untrusted. Not on -g: a global
+    CLAUDE.md would put pythia into every session on the machine."""
+    path, action = merge_claude_md(pathlib.Path(project_root) / "CLAUDE.md")
+    verb = {"created": "Wrote the pythia harness into",
+            "updated": "Updated the pythia block in",
+            "unchanged": "pythia harness already current in"}[action]
+    print(f"\n{verb} {path} (Claude Code loads it every session).")
+
+
 def report_codex_agents_md(project_root):
     """Project scope: write the harness into <project>/AGENTS.md, the file
     Codex loads every session. Not done on -g — a global AGENTS.md is noise in
@@ -4143,6 +4193,7 @@ def cmd_install(conn, schema, ns):
         else:
             clean_legacy_skills(ns.project_root)
     report_claude_hooks(ns.project_root, ns)
+    report_claude_md(ns.project_root)
     report_codex_agents_md(ns.project_root)
     report_codex_hooks(ns.project_root, ns)
     report_codex_mcp(ns.project_root, ns)
@@ -6342,7 +6393,16 @@ def cmd_hook(conn, schema, ns):
             if isinstance(payload, dict) and payload.get("cwd"):
                 _, r2 = find_config(pathlib.Path(payload["cwd"]), {})
                 root = r2 or root
-            print(BRIEF_GUIDE.rstrip())
+            md = pathlib.Path(root) / "CLAUDE.md"
+            loaded = md.is_file() and AGENTS_BEGIN in md.read_text(
+                encoding="utf-8", errors="replace")
+            if loaded:
+                # Claude Code already loaded the guide from CLAUDE.md: the
+                # hook adds what a static file cannot — the live state
+                print("PYTHIA HARNESS ACTIVE - the rules are in CLAUDE.md "
+                      "(pythia block); `pythia guide` prints the full contract.")
+            else:
+                print(BRIEF_GUIDE.rstrip())
             print("STATE  " + "\n       ".join(session_state_lines(root)))
             return
         out = (pre_tool_decision(payload) if event == "pre-tool"
@@ -6494,6 +6554,13 @@ def harness_checks(project_root, home=None):
         out.append(("fail", "AskUserQuestion",
                     f"{what} — {where}. The question returns empty and approval "
                     "never arrives; remove it, or approve with pythia_approve"))
+    cmd_md = root / "CLAUDE.md"
+    has_block = cmd_md.is_file() and AGENTS_BEGIN in cmd_md.read_text(
+        encoding="utf-8", errors="replace")
+    out.append(("ok" if has_block else "warn", "claude.md",
+                "CLAUDE.md carries the pythia block" if has_block else
+                f"no pythia block in CLAUDE.md — the rules then reach Claude "
+                f"only through the hooks; {invocation()} install adds it"))
     agents = root / "AGENTS.md"
     out.append(("ok" if agents.is_file() and AGENTS_BEGIN in agents.read_text(
         encoding="utf-8") else "info", "codex",

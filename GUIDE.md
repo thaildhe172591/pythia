@@ -529,7 +529,10 @@ the question return empty, which is the failure `pythia doctor` hunts for.
 the chat approval door from §5 — it refuses answers pre-filled in the tool
 input and says so when no answer arrived. `PostToolUse` on Bash runs
 `hook post-tool`: the exit-code verdict next to an apply result. Install also
-registers the MCP approver in `.mcp.json` and enables it. The plugin (`hooks/hooks.json`)
+registers the MCP approver in `.mcp.json` and enables it, and writes the
+harness into the project's `CLAUDE.md` (a marker-delimited block, like
+AGENTS.md for Codex): Claude Code loads that file every session, hooks or
+not, and with it present the SessionStart hook prints only the live state. The plugin (`hooks/hooks.json`)
 installs both, and so does `pythia install`: it merges the `hooks` block and
 the `deny` rule into `.claude/settings.json`, leaves every other key alone,
 adds nothing on a second run, and `--no-hooks` skips the step. `install -g`
