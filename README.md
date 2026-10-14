@@ -125,7 +125,7 @@ Or the same thing piecewise:
 
 ```bash
 pip install pythia-plsql   # the CLI (thin driver — no Oracle Instant Client needed)
-python -m pythia install   # skills + .pythia/ scaffold + Claude Code hooks + Codex AGENTS.md/MCP approver
+python -m pythia install   # skills + .pythia/ scaffold + Claude Code CLAUDE.md/hooks + Codex AGENTS.md/MCP approver
 pythia check               # fill in connections.json first, then verify
 ```
 
@@ -176,6 +176,12 @@ each agent needs you to finish by hand.
      on Bash it puts the verdict rules (exit 3 is broken) next to the result;
    - a `deny` rule so the agent cannot forge a grant, and the MCP server
      enabled.
+
+   It also writes the harness into **`CLAUDE.md`** — the file Claude Code
+   itself loads every session — in a marker-delimited block, leaving your own
+   text untouched. The rules hold even with `--no-hooks`, before a restart,
+   or while the hooks are untrusted; when the block is there, the
+   SessionStart hook adds only the live state instead of repeating the guide.
 
    Skills land in `.claude/skills` (or `~/.claude/skills` with `-g`).
 2. **Restart the Claude Code session** so the hooks and the MCP server load.

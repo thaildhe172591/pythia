@@ -193,6 +193,12 @@ agent buộc bạn tự làm.
      thì nhắc luật đọc kết quả (exit 3 là hỏng) ngay cạnh kết quả;
    - luật `deny` để agent không giả được grant, và bật MCP server.
 
+   Nó còn ghi harness vào **`CLAUDE.md`** — file mà chính Claude Code nạp ở
+   mọi phiên — trong một khối có đánh dấu, không đụng nội dung của bạn. Nhờ
+   vậy luật vẫn có hiệu lực cả khi cài `--no-hooks`, trước khi khởi động lại,
+   hay khi hook chưa được trust; khi đã có khối này, hook SessionStart chỉ bổ
+   sung trạng thái sống chứ không lặp lại guide.
+
    Skills vào `.claude/skills` (hoặc `~/.claude/skills` khi `-g`).
 2. **Khởi động lại phiên Claude Code** để hook và MCP server nạp.
 3. **Chạy `pythia doctor`.** Nó xác nhận mọi thứ đã nối, và chỉ đích danh

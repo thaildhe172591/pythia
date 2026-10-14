@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.1 — 2026-10-14
+
+- **`pythia install` writes the harness into `CLAUDE.md`.** Claude Code
+  loads CLAUDE.md every session; until now it got pythia's rules only from
+  the SessionStart hook, which does nothing with `--no-hooks`, before a
+  restart, or while the hooks are untrusted. A marker-delimited block —
+  the same brief guide as AGENTS.md, plus Claude's approval doors in order
+  and the standing rules agents break most — is merged in, the developer's
+  own text untouched, a re-run replacing it in place. With the block present
+  the SessionStart hook prints only the live state instead of the guide a
+  second time; `pythia doctor` reports whether it is there. Project scope
+  only: a global CLAUDE.md would put pythia into every session.
+- The repository has a `CLAUDE.md` of its own for sessions working on pythia
+  itself: it imports AGENTS.md and adds the contributor checklist.
+
 ## 0.15.0 — 2026-10-14
 
 Four requests from the field, one release: approval that works in every

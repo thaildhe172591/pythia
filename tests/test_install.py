@@ -4,6 +4,7 @@ no network, no npx needed.
 
 Run: python tests/test_install.py
 """
+import io
 import json
 import os
 import pathlib
@@ -425,6 +426,79 @@ def test_merge_agents_md_preserves_the_developers_text():
         assert pythia.AGENTS_BEGIN in body and pythia.BRIEF_GUIDE.rstrip() in body
         pythia.merge_agents_md(path)                             # a stale block
         assert path.read_text(encoding="utf-8").count(pythia.AGENTS_BEGIN) == 1
+
+
+# --- Claude Code: CLAUDE.md, the file Claude Code itself always loads ---------
+
+def test_claude_md_block_carries_the_harness_for_claude_not_codex():
+    """Claude Code loads CLAUDE.md every session, hooks or not. The block holds
+    the same brief guide as AGENTS.md and the session hook — one source — but
+    names Claude's approval doors, never Codex's."""
+    block = pythia.claude_md_block()
+    assert block.startswith(pythia.AGENTS_BEGIN) and block.endswith(pythia.AGENTS_END)
+    assert pythia.BRIEF_GUIDE.rstrip() in block
+    assert "pythia_approve" in block and "AskUserQuestion" in block
+    assert "APPROVAL ON CODEX" not in block
+    for rule in ("pythia apply", "pythia deploy", "autopilot", "impact",
+                 "connections.json"):
+        assert rule in block, rule
+
+
+def test_merge_claude_md_keeps_the_developers_text_and_is_idempotent():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "CLAUDE.md"
+        assert pythia.merge_claude_md(path) == (path, "created")
+        assert pythia.merge_claude_md(path) == (path, "unchanged")
+        path.write_text("# Our project\n\nUse tabs.\n", encoding="utf-8")
+        assert pythia.merge_claude_md(path)[1] == "updated"
+        body = path.read_text(encoding="utf-8")
+        assert body.startswith("# Our project\n\nUse tabs.\n")
+        assert body.count(pythia.AGENTS_BEGIN) == 1
+        pythia.merge_claude_md(path)                       # a second run
+        assert path.read_text(encoding="utf-8").count(pythia.AGENTS_BEGIN) == 1
+
+
+def test_cmd_install_writes_claude_md_in_the_project_scope():
+    import argparse
+    import contextlib
+    old = os.environ.get("PATH")
+    os.environ["PATH"] = ""                    # no npx: bundled path, offline
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ns = argparse.Namespace(project_root=td, glob=False, source=None,
+                                    color=False, json=False, no_hooks=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                pythia.cmd_install(None, None, ns)
+            md = pathlib.Path(td) / "CLAUDE.md"
+            assert md.is_file()                 # even with --no-hooks
+            assert pythia.AGENTS_BEGIN in md.read_text(encoding="utf-8")
+    finally:
+        if old is not None:
+            os.environ["PATH"] = old
+
+
+def test_session_start_does_not_repeat_what_claude_md_already_loaded():
+    """With the pythia block in CLAUDE.md the session hook would inject the
+    same guide twice; it prints the live state and a pointer instead."""
+    import argparse
+    import contextlib
+    with tempfile.TemporaryDirectory() as td:
+        def run():
+            old = sys.stdin
+            sys.stdin = io.StringIO("")
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf):
+                    pythia.cmd_hook(None, None, argparse.Namespace(
+                        event="session-start", project_root=td))
+            finally:
+                sys.stdin = old
+            return buf.getvalue()
+        first_line = pythia.BRIEF_GUIDE.splitlines()[2]   # the ROUTE line
+        assert first_line in run()
+        pythia.merge_claude_md(pathlib.Path(td) / "CLAUDE.md")
+        out = run()
+        assert first_line not in out and "CLAUDE.md" in out and "STATE" in out
 
 
 # --- Codex: session-start hook (TP3) -----------------------------------------

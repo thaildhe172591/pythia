@@ -511,7 +511,10 @@ rỗng, đúng lỗi mà `pythia doctor` đi tìm. `PostToolUse` trên `AskUserQ
 chạy `python -m pythia approve --hook`: cửa duyệt trong chat ở §5 — từ chối
 câu trả lời điền sẵn và nói rõ khi không có câu trả lời nào về.
 `PostToolUse` trên Bash chạy `hook post-tool`: nhắc luật đọc exit code ngay
-cạnh kết quả apply. Kèm theo là luật `deny` cho `Bash(pythia approve
+cạnh kết quả apply. Install còn ghi harness vào `CLAUDE.md` của dự án (khối
+có đánh dấu, giống AGENTS.md cho Codex): Claude Code nạp file này ở mọi
+phiên dù có hook hay không, và khi đã có nó thì hook SessionStart chỉ in
+trạng thái sống. Kèm theo là luật `deny` cho `Bash(pythia approve
 --hook*)` — hook phải chạy trên payload do Claude Code ghi, agent tự bơm
 payload từ Bash là giả mạo phê duyệt. Sau `pip install --upgrade`, chạy lại
 `python -m pythia install`; `npx pythia-plsql` làm cả hai. Plugin cài qua
