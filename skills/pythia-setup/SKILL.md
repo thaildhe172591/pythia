@@ -110,11 +110,12 @@ team and every agent session works from the same rules.
 MCP approver in `.mcp.json` (the approval door that prompts in every
 permission mode but `dontAsk`) and the Codex equivalents. After a restart:
 
-- `pythia doctor` — every hook wired, the approval door registered, and
-  every setting known to make `AskUserQuestion` return empty (an allow rule
-  or a skill's `allowed-tools` naming it, a PreToolUse hook with an empty or
-  `*` matcher, `dontAsk`). Each `fail` line is a reason approvals never
-  arrive; relay it with the file it names.
+- `pythia doctor` — every hook wired and able to start pythia (a hook that
+  cannot import it fails open: the guard is off), the approval door
+  registered, and every setting known to make `AskUserQuestion` return empty
+  (an allow rule or a skill's `allowed-tools` naming it, a PreToolUse hook
+  with an empty or `*` matcher, `dontAsk`). Each `fail` line is a reason the
+  guard or the approvals do not work; relay it with the file it names.
 - `pythia doctor --db` — version, character set, PL/Scope and compiler
   warnings coverage, INVALID objects, utPLSQL.
 - Mark production-like connections `"protected": true` (or `"env": "prod"`)

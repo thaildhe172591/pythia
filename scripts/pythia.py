@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.1"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.2"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -542,10 +542,14 @@ def find_config(cwd, env):
     return None, None
 
 
+_MODE_WARNED = set()
+
+
 def _load_config(path):
     if os.name == "posix":
         mode = path.stat().st_mode & 0o777
-        if mode & 0o077:
+        if mode & 0o077 and str(path) not in _MODE_WARNED:
+            _MODE_WARNED.add(str(path))
             print(f"-- warning: {path} is readable by other users "
                   f"(mode {mode:o}); chmod 600 recommended", file=sys.stderr)
     try:
@@ -3127,7 +3131,7 @@ def claude_md_block():
             "## pythia — developing PL/SQL on Oracle\n\n"
             f"{BRIEF_GUIDE.rstrip()}\n\n"
             "APPROVAL ON CLAUDE CODE: first door is the `pythia_approve` tool "
-            "(MCP server `pythia`, registered in .mcp.json) — it prompts in "
+            "(MCP server `pythia`, registered by `pythia install`) — it prompts in "
             "every permission mode but dontAsk and shows pythia's own card. "
             "Not connected? Ask an AskUserQuestion whose text is exactly the "
             "output of `pythia approve --card <token>`, options Approve / "
@@ -3135,6 +3139,13 @@ def claude_md_block():
             "came back, do not ask the same way again — use the tool, or relay "
             "`pythia approve <token>` for the developer's terminal. Then run "
             "the command the approval names yourself.\n\n"
+            "HOOKS NOT RUNNING? pythia's SessionStart hook prints a `STATE` line "
+            "(connections, autopilot, approval door). No STATE line this session, "
+            "or no `pythia_approve` tool (MCP server `pythia` failed to "
+            "connect): pythia's hooks cannot start on this machine, so the "
+            "sqlplus guard and the AskUserQuestion door are off. Say so to the "
+            "developer before any write and ask them to run `pythia doctor`; "
+            "every rule here still binds.\n\n"
             "STANDING RULES: writes only through `pythia apply` / `pythia "
             "deploy` (never sqlplus, never SQLcl run-sql); `pythia impact` "
             "before any change; `pythia lint` before any apply; never open "
@@ -3151,7 +3162,8 @@ def merge_marked_block(path, block):
     theirs, shared with every agent that reads it, so only the delimited
     block is ours: present -> replaced in place, absent -> appended below
     their text, everything else byte-identical. Returns (path, action) where
-    action is 'created' | 'updated' | 'unchanged'."""
+    action is 'created' | 'added' (joined their file) | 'updated' (a block
+    replaced) | 'unchanged'."""
     path = pathlib.Path(path)
     old = path.read_text(encoding="utf-8") if path.is_file() else None
     if old is None:
@@ -3163,7 +3175,7 @@ def merge_marked_block(path, block):
         action = "unchanged" if new == old else "updated"
     else:
         tail = "" if old.endswith("\n\n") else "\n" if old.endswith("\n") else "\n\n"
-        new, action = old + tail + block + "\n", "updated"
+        new, action = old + tail + block + "\n", "added"
     if new != old:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(new, encoding="utf-8")
@@ -3576,7 +3588,10 @@ def scaffold_config(root):
     if path.is_file():
         return path, False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(CONNECTIONS_TEMPLATE, encoding="utf-8")
+    # it is where the passwords go: owner-only from the first byte
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(CONNECTIONS_TEMPLATE)
     return path, True
 
 
@@ -3739,21 +3754,273 @@ def local_interpreter(obj):
     return out
 
 
-def merge_hooks(hooks, wanted):
+# --- the launcher: how Claude Code's hooks and the MCP approver start pythia ---
+#
+# A hook that cannot start fails open: Claude Code treats any exit but 2 as a
+# non-blocking error, so the sqlplus guard lets the write through and the MCP
+# door never connects (field test 0.15.1: pythia in a venv, Claude Code started
+# where `python` was the system interpreter). So the launcher is chosen by what
+# really starts pythia, and a machine-specific one never enters a shared file.
+
+PORTABLE_LAUNCHER = "python -m pythia"
+_INTERPRETER_RE = re.compile(r"^(python[\d.]*|py)(\.exe)?$", re.I)
+
+
+def in_virtualenv():
+    return (sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+            or hasattr(sys, "real_prefix"))
+
+
+def launcher_argv(launcher):
+    """The launcher's words, quotes removed. Shared and machine-specific
+    spellings alike are written with forward slashes (as_posix), so one split
+    serves every OS."""
+    import shlex
+    words = shlex.split(launcher, posix=False)
+    return [w[1:-1] if len(w) > 1 and w[0] == w[-1] and w[0] in "\"'" else w
+            for w in words]
+
+
+def launcher_text(argv):
+    """argv back to a launcher: a path is quoted, a bare name is not."""
+    return " ".join(f'"{w}"' if re.search(r"[/\\\s]", w) else w for w in argv)
+
+
+def plain_launcher(launcher):
+    """argv when the launcher is exactly an interpreter plus `-m pythia` or a
+    pythia.py path, else None. doctor runs nothing else: hook commands in a
+    project's settings are repository content."""
+    try:
+        argv = launcher_argv(launcher)
+    except ValueError:
+        return None
+    if not argv or not _INTERPRETER_RE.match(re.split(r"[/\\]", argv[0])[-1]):
+        return None
+    if argv[1:] == ["-m", "pythia"] or (
+            len(argv) == 2 and re.search(r"(^|[/\\])pythia\.py$", argv[1])):
+        return argv
+    return None
+
+
+def launcher_starts(launcher, timeout=20):
+    """(True, "") when the launcher starts pythia, else (False, why). Runs
+    `<launcher> --help` with no shell, in an empty directory, so a pythia.py
+    lying in the current directory is never what answers."""
+    import subprocess
+    import tempfile
+    try:
+        argv = launcher_argv(launcher)
+        with tempfile.TemporaryDirectory() as empty:
+            # pythia writes UTF-8 whatever the console; strict cp1252 would
+            # turn a Vietnamese line of help into a false "cannot start"
+            r = subprocess.run(argv + ["--help"], cwd=empty,
+                               stdin=subprocess.DEVNULL, capture_output=True,
+                               encoding="utf-8", errors="replace",
+                               timeout=timeout)
+    except FileNotFoundError:
+        return False, f"{launcher_argv(launcher)[0]} not found"
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        return False, str(e)
+    if r.returncode == 0:
+        return True, ""
+    tail = [ln for ln in (r.stderr or r.stdout or "").splitlines() if ln.strip()]
+    return False, tail[-1].strip() if tail else f"exit {r.returncode}"
+
+
+def choose_launcher(venv=None, which=None, starts=None, executable=None,
+                    script=None):
+    """(launcher, portable, why). Portable — a bare `python` / `python3` that
+    really imports pythia, outside a virtual environment — goes into the
+    files the team shares. Anything else is this machine's own: the absolute
+    interpreter (or, for a clone, the interpreter plus this script), and `why`
+    says what ruled the portable spelling out."""
+    import shutil
+    venv = in_virtualenv() if venv is None else venv
+    which = which or shutil.which
+    starts = starts or (lambda launcher: launcher_starts(launcher)[0])
+    exe = pathlib.Path(executable or sys.executable)
+    script = script or pathlib.Path(__file__).resolve().as_posix()
+    if venv:
+        why = (f"pythia runs from the virtual environment {exe.parent.parent.as_posix()}"
+               " — `python` finds it only while that environment is active, "
+               "and Claude Code started from a desktop app or IDE does not "
+               "activate it")
+    else:
+        names = list(dict.fromkeys(["python", "python3", exe.stem or "python3"]))
+        for name in names:
+            if which(name) and starts(f"{name} -m pythia"):
+                return f"{name} -m pythia", True, ""
+        found = which("python")
+        why = (f"`python` on PATH ({found}) cannot import pythia" if found else
+               "no `python` on PATH can import pythia")
+    absolute = f'"{exe.as_posix()}" -m pythia'
+    if starts(absolute):
+        return absolute, False, why
+    return f'"{exe.as_posix()}" "{script}"', False, why
+
+
+def with_launcher(obj, launcher):
+    """A hook entry with its `python -m pythia` spelled as `launcher`."""
+    text = json.dumps(obj).replace('"python -m pythia ',
+                                   '"' + json.dumps(launcher)[1:-1] + " ")
+    return json.loads(text)
+
+
+def mcp_entry(launcher):
+    argv = launcher_argv(launcher)
+    return {"command": argv[0], "args": argv[1:] + ["mcp"]}
+
+
+def mcp_launcher(entry):
+    """The launcher an MCP server entry starts pythia with, or None."""
+    if not isinstance(entry, dict):
+        return None
+    args = [str(a) for a in entry.get("args") or []]
+    if not args or args[-1] != "mcp":
+        return None
+    return launcher_text([str(entry.get("command", ""))] + args[:-1])
+
+
+def local_mcp_entry(project_root, home=None):
+    """Claude Code's local-scope `pythia` server for this project (it lives
+    in ~/.claude.json, keyed by the project path), or None. Read only."""
+    path = pathlib.Path(home or pathlib.Path.home()) / ".claude.json"
+    projects = (_read_json(path) or {}).get("projects")
+    if not isinstance(projects, dict):
+        return None
+    root = pathlib.Path(project_root)
+    for key in dict.fromkeys([str(root), str(root.resolve()), root.as_posix(),
+                              root.resolve().as_posix()]):
+        servers = (projects.get(key) or {}).get("mcpServers") or {}
+        if isinstance(servers, dict) and "pythia" in servers:
+            return servers["pythia"]
+    return None
+
+
+def register_local_mcp(project_root, launcher, which=None, run=None, home=None):
+    """Register the MCP approver in Claude Code's local scope — this machine,
+    this project, never the shared .mcp.json; a local entry overrides the
+    project's. `claude mcp add --scope local` is the supported way in.
+    Returns (action, command): added | updated | present | manual | failed;
+    on manual and failed the developer runs `command` themselves."""
+    import shutil
+    import subprocess
+    which = which or shutil.which
+    run = run or subprocess.run
+    want = launcher_argv(launcher) + ["mcp"]
+    shown = "claude mcp add --scope local pythia -- " + " ".join(
+        f'"{w}"' if re.search(r"\s", w) else w for w in want)
+    have = local_mcp_entry(project_root, home)
+    if have is not None and [have.get("command")] + list(have.get("args") or []) == want:
+        return "present", shown
+    claude = which("claude")
+    if not claude:
+        return "manual", shown
+    opts = dict(cwd=str(project_root), stdin=subprocess.DEVNULL,
+                capture_output=True, text=True, timeout=60)
+    try:
+        if have is not None:
+            run([claude, "mcp", "remove", "--scope", "local", "pythia"], **opts)
+        r = run([claude, "mcp", "add", "--scope", "local", "pythia", "--", *want],
+                **opts)
+    except (OSError, subprocess.SubprocessError):
+        return "failed", shown
+    if r.returncode != 0:
+        return "failed", shown
+    return ("updated" if have is not None else "added"), shown
+
+
+def launcher_health(launcher, cwd=None, which=None, env=None, starts=None,
+                    shared=False):
+    """(status, message) for one launcher found in the harness files. A bare
+    name is resolved on this PATH and run; a path (an interpreter's, or a
+    pythia.py's) is run only from a machine's own files — in a shared file it
+    is reported, never executed."""
+    import shutil
+    which = which or shutil.which
+    env = os.environ if env is None else env
+    starts = starts or launcher_starts
+    argv = plain_launcher(launcher)
+    if argv is None:
+        return ("warn", f"`{launcher}` is not a plain launcher (an interpreter "
+                "plus -m pythia, or a pythia.py path) — doctor does not run it")
+    bare = not re.search(r"[/\\]", argv[0])
+    resolved = which(argv[0]) if bare else argv[0]
+    if bare and not resolved:
+        return ("fail", f"`{argv[0]}` is not on PATH, so `{launcher}` cannot "
+                "start — the guard and the approval doors it serves are off; "
+                f"re-run `{invocation()} install`")
+    if shared and not (bare and argv[1:] == ["-m", "pythia"]):
+        # a path in a shared file is the repository's to choose — the
+        # interpreter's or the pythia.py it is pointed at — so it is named,
+        # never run
+        return ("warn", f"`{launcher}` is a path on one machine, in a file the "
+                "team shares — teammates' hooks will not find it, and doctor "
+                f"does not run it; `{invocation()} install` keeps a machine's "
+                "own launcher in .claude/settings.local.json")
+    ok, why = starts(launcher)
+    if not ok:
+        return ("fail", f"`{launcher}` cannot start pythia here ({why}) — the "
+                "guard and the approval doors it serves are off; re-run "
+                f"`{invocation()} install`, which picks an interpreter that can")
+    venv = env.get("VIRTUAL_ENV")
+    if bare and venv and os.path.normcase(os.path.abspath(resolved)).startswith(
+            os.path.normcase(os.path.abspath(venv)) + os.sep):
+        return ("warn", f"`{argv[0]}` finds pythia only while the virtual "
+                f"environment {venv} is active — Claude Code started from a "
+                f"desktop app or IDE will not; re-run `{invocation()} install`, "
+                "which pins this interpreter in .claude/settings.local.json")
+    return "ok", f"`{launcher}` starts pythia"
+
+
+def exclude_local_settings(project_root):
+    """Keep .claude/settings.local.json out of git: it holds this machine's
+    interpreter path. Appended to .git/info/exclude (local, never shared) when
+    neither that nor .gitignore names it. Returns the file written, or None."""
+    root = pathlib.Path(project_root)
+    git = root / ".git"
+    if not git.is_dir():
+        return None
+    line = ".claude/settings.local.json"
+    exclude = git / "info" / "exclude"
+    for f in (root / ".gitignore", exclude):
+        if f.is_file() and any(ln.strip().lstrip("/") == line for ln in
+                               f.read_text(encoding="utf-8", errors="replace")
+                               .splitlines()):
+            return None
+    old = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text(old + ("" if not old or old.endswith("\n") else "\n")
+                       + line + "\n", encoding="utf-8")
+    return exclude
+
+
+def merge_hooks(hooks, wanted, launcher=None, respell=False):
     """Merge wanted {event: [entries]} into a hooks object in place. An entry
     counts as present when an existing entry with the same matcher runs the
     same pythia subcommand, in any spelling. Legacy commands are rewritten in
-    place. Returns the event names changed."""
+    place. New entries are spelled with `launcher` when given; `respell`
+    (this machine's own file) also rewrites the launcher of pythia entries
+    already there — a moved venv leaves a path that no longer starts. Returns
+    the event names changed."""
     changed = []
     for event, entries in wanted.items():
         present = hooks.setdefault(event, [])
         upgraded = False
         for e in present:
             for h in e.get("hooks", []) if isinstance(e, dict) else []:
+                if not isinstance(h, dict):
+                    continue
                 for old, new in LEGACY_HOOK_COMMANDS.items():
                     if old in str(h.get("command", "")):
                         h["command"] = h["command"].replace(old, new)
                         upgraded = True
+                cmd = str(h.get("command", ""))
+                mark = _hook_mark(cmd)
+                if respell and launcher and mark and \
+                        cmd[:cmd.index(mark)].strip() != launcher:
+                    h["command"] = f"{launcher} {cmd[cmd.index(mark):]}"
+                    upgraded = True
         have = {(e.get("matcher"), _hook_mark(h.get("command", "")))
                 for e in present if isinstance(e, dict)
                 for h in e.get("hooks", []) if isinstance(h, dict)}
@@ -3761,7 +4028,8 @@ def merge_hooks(hooks, wanted):
         for entry in entries:
             key = (entry.get("matcher"), _hook_mark(entry["hooks"][0]["command"]))
             if key not in have:
-                present.append(local_interpreter(entry))           # a copy
+                present.append(with_launcher(entry, launcher) if launcher
+                               else local_interpreter(entry))      # a copy
                 have.add(key)
                 added = True
         if added or upgraded:
@@ -4002,7 +4270,8 @@ def merge_codex_mcp_config(path):
     return path, action
 
 
-def install_claude_hooks(base_dir, events=None, trust_mcp=False):
+def install_claude_hooks(base_dir, events=None, trust_mcp=False,
+                         launcher=None, local=False, respell=False):
     """Merge pythia's hooks and the deny rule into <base>/.claude/settings.json
     — the project's, or the home directory's for -g. The file is Claude
     Code's, so every other key survives and a pythia hook already there in
@@ -4013,19 +4282,25 @@ def install_claude_hooks(base_dir, events=None, trust_mcp=False):
     the session guide would be noise outside Oracle work. `trust_mcp` also
     enables the project's pythia MCP server (install registered it; asking
     the developer to trust their own install a second time is a prompt that
-    carries no decision)."""
-    path = pathlib.Path(base_dir) / ".claude" / "settings.json"
+    carries no decision). `launcher` spells the commands; `local` writes
+    .claude/settings.local.json instead — this machine's file, for a launcher
+    that is a path on this machine. In this machine's files (`local`, or
+    `respell` for ~/.claude) pythia's existing entries take the launcher too."""
+    name = "settings.local.json" if local else "settings.json"
+    path = pathlib.Path(base_dir) / ".claude" / name
     try:
         s = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         hooks = s.setdefault("hooks", {})
         deny = s.setdefault("permissions", {}).setdefault("deny", [])
         wanted = {e: CLAUDE_HOOKS[e] for e in (events or CLAUDE_HOOKS)}
-        added = [f"hooks.{e}" for e in merge_hooks(hooks, wanted)]
-        missing = [d for d in CLAUDE_DENY if d not in deny]
+        added = [f"hooks.{e}" for e in
+                 merge_hooks(hooks, wanted, launcher, respell=respell or local)]
+        spelled = [f"Bash({launcher} approve --hook*)"] if launcher else []
+        missing = [d for d in dict.fromkeys(CLAUDE_DENY + spelled) if d not in deny]
         if missing:
             deny.extend(missing)
             added.append("permissions.deny")
-        if trust_mcp:
+        if trust_mcp and not local:
             enabled = s.setdefault("enabledMcpjsonServers", [])
             if "pythia" not in enabled:
                 enabled.append("pythia")
@@ -4039,18 +4314,21 @@ def install_claude_hooks(base_dir, events=None, trust_mcp=False):
     return path, added
 
 
-def install_claude_mcp(project_root):
+def install_claude_mcp(project_root, launcher=None):
     """Register the write-free MCP approver in the project's .mcp.json, where
     Claude Code reads project MCP servers. Merge-only: other servers survive,
     an existing pythia entry is the developer's and stays, a file that will
-    not parse is left alone. Returns (path, 'created'|'added'|'present'|None)."""
+    not parse is left alone. The file is shared: `launcher` is a portable one
+    (register_local_mcp takes a machine's own). Returns (path,
+    'created'|'added'|'present'|None)."""
     path = pathlib.Path(project_root) / ".mcp.json"
     try:
         s = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         servers = s.setdefault("mcpServers", {})
         if "pythia" in servers:
             return path, "present"
-        servers["pythia"] = local_interpreter(MCP_SERVER_ENTRY)
+        servers["pythia"] = (mcp_entry(launcher) if launcher
+                             else local_interpreter(MCP_SERVER_ENTRY))
     except (ValueError, TypeError, AttributeError):
         return path, None
     action = "added" if path.is_file() else "created"
@@ -4059,21 +4337,82 @@ def install_claude_mcp(project_root):
     return path, action
 
 
+def report_local_launcher(project_root, launcher, why):
+    """Project scope, when no portable spelling starts pythia on this machine:
+    the hooks go to .claude/settings.local.json and the MCP approver to
+    Claude Code's local scope — never into the files the team shares, where
+    this machine's path would break every teammate's hooks."""
+    root = pathlib.Path(project_root)
+    print(f"\nThis machine needs its own launcher: {why}.")
+    print(f"Claude Code's hooks and MCP approver start pythia with {launcher},"
+          "\nwritten to this machine's files only.")
+    path, added = install_claude_hooks(root, launcher=launcher, local=True)
+    if added is None:
+        print(f"! {path} is not valid JSON, so it was left untouched. Fix it "
+              f"and re-run {invocation()} install.")
+    elif added:
+        print(f"Wired Claude Code hooks into {path}: {', '.join(added)}.")
+        print("Restart the Claude Code session for them to load.")
+    else:
+        print(f"Claude Code hooks already in {path}.")
+    ex = exclude_local_settings(root)
+    if ex:
+        print(f"Kept it out of git: .claude/settings.local.json added to {ex}.")
+    action, shown = register_local_mcp(root, launcher)
+    if action in ("added", "updated"):
+        print("Registered the pythia approver (MCP) in Claude Code's local "
+              "scope for this project — the approval door that prompts in "
+              "every permission mode.")
+    elif action == "present":
+        print("pythia approver (MCP) already registered in Claude Code's local "
+              "scope.")
+    else:
+        why_not = ("the `claude` CLI is not on PATH" if action == "manual"
+                   else "`claude mcp add` failed")
+        print(f"! The MCP approver is not registered: {why_not}. Run this once "
+              f"in the project:\n  {shown}")
+    shared = _read_json(root / ".claude" / "settings.json") or {}
+    marks = [_hook_mark(h.get("command", "")) for ev in
+             (shared.get("hooks") or {}).values() if isinstance(ev, list)
+             for e in ev if isinstance(e, dict)
+             for h in e.get("hooks", []) if isinstance(h, dict)]
+    if any(marks):
+        print("! .claude/settings.json also carries pythia hooks. Teammates may "
+              "rely on them; on this machine they run too, and each one that "
+              "cannot start shows a hook error. Keep them for the team or "
+              "remove them — pythia leaves shared files alone.")
+
+
+def launcher_for(ns):
+    """choose_launcher() once per install run: it starts interpreters."""
+    if getattr(ns, "_launcher", None) is None:
+        ns._launcher = choose_launcher()
+    return ns._launcher
+
+
 def report_claude_hooks(base_dir, ns, events=None):
     """install's last step, in both scopes: wire the hooks and say what
     happened. --no-hooks leaves Claude Code's file alone."""
     if getattr(ns, "no_hooks", False):
         return
     project = events is None
+    launcher, portable, why = launcher_for(ns)
+    if project and not portable:
+        return report_local_launcher(base_dir, launcher, why)
+    if not portable:                 # -g: ~/.claude is this machine's already
+        print(f"\nThis machine needs its own launcher: {why}.\nThe hooks in "
+              f"{pathlib.Path(base_dir) / '.claude' / 'settings.json'} start "
+              f"pythia with {launcher}.")
     if project:
-        mpath, maction = install_claude_mcp(base_dir)
+        mpath, maction = install_claude_mcp(base_dir, launcher=launcher)
         if maction in ("created", "added"):
             print(f"\nRegistered the pythia approver (MCP) in {mpath} — the "
                   "approval door that prompts in every permission mode.")
         elif maction is None:
             print(f"\n! {mpath} is not valid JSON, so the MCP approver was not "
                   "registered; AskUserQuestion and the console still work.")
-    path, added = install_claude_hooks(base_dir, events, trust_mcp=project)
+    path, added = install_claude_hooks(base_dir, events, trust_mcp=project,
+                                       launcher=launcher, respell=not project)
     if added is None:
         print(f"\n! {path} is not valid JSON, so it was left untouched. Fix "
               f"it and re-run {invocation()} install, or paste the hooks "
@@ -4093,6 +4432,7 @@ def report_claude_md(project_root):
     CLAUDE.md would put pythia into every session on the machine."""
     path, action = merge_claude_md(pathlib.Path(project_root) / "CLAUDE.md")
     verb = {"created": "Wrote the pythia harness into",
+            "added": "Added the pythia block to",
             "updated": "Updated the pythia block in",
             "unchanged": "pythia harness already current in"}[action]
     print(f"\n{verb} {path} (Claude Code loads it every session).")
@@ -4104,6 +4444,7 @@ def report_codex_agents_md(project_root):
     every non-Oracle session, as the Claude guide is per-project."""
     path, action = merge_agents_md(pathlib.Path(project_root) / "AGENTS.md")
     verb = {"created": "Wrote the pythia harness into",
+            "added": "Added the pythia block to",
             "updated": "Updated the pythia block in",
             "unchanged": "pythia harness already current in"}[action]
     print(f"\n{verb} {path} (Codex and other AGENTS.md agents load it each session).")
@@ -4142,6 +4483,12 @@ def report_codex_mcp(project_root, ns):
               "yourself:\n" + CODEX_MCP_BLOCK)
     else:
         print(f"\npythia MCP approver already registered in {cfg_path}.")
+    launcher, portable, why = launcher_for(ns)
+    if not portable:
+        print(f"! Codex: .codex/ starts pythia with `python -m pythia`, which "
+              f"cannot start it on this machine ({why}). The .codex/ files are "
+              f"shared and stay portable; point your own ~/.codex/config.toml "
+              f"[mcp_servers.pythia] at {launcher} instead.")
     # The one bypass of the elicitation is Codex auto-approving it under the
     # danger-full-access sandbox. pythia does not write requirements.toml to
     # forbid that — it is enterprise-managed config, and the schema is
@@ -4911,10 +5258,30 @@ def lint_findings(text, group, conv=None):
     return out
 
 
-def lint_script(text, conv=None):
+def script_comment_targets(text):
+    """(TABLE, COLUMN) pairs a script comments on — COLUMN is "" for the
+    table itself. What a whole release set contributes to comment-missing."""
+    out = set()
+    try:
+        stmts, _ = split_script(text)
+    except SystemExit:
+        return out
+    for st in stmts:
+        if classify(st["text"]) == "comments":
+            try:
+                _, _, t, c = parse_comment_target(st["text"])
+                out.add((t.upper(), (c or "").upper()))
+            except SystemExit:
+                pass
+    return out
+
+
+def lint_script(text, conv=None, set_comments=None):
     """Lint a whole file: every statement, plus the rules only a whole script
     can answer (a new table's columns all commented, FKs indexed). Returns
-    findings as dicts sorted by line: rule, severity, line, message."""
+    findings as dicts sorted by line: rule, severity, line, message.
+    `set_comments`: the COMMENT ON targets of every file linted with this one
+    — a release keeps its comments in their own file."""
     cfg = lint_config(conv)
     stmts, skipped = split_script(text)
     out = []
@@ -4962,10 +5329,12 @@ def lint_script(text, conv=None):
         for pm in re.finditer(r"(PRIMARY\s+KEY|UNIQUE)\s*\(([^)]*)\)", masked):
             if made and made[0] == "TABLE":
                 indexed.append((made[1], [c.strip().strip('"') for c in pm.group(2).split(",")]))
+    where = "in this script" if set_comments is None else "in the files linted"
+    comments |= set_comments or set()
     for t, (ln, cols) in tables.items():
         missing = [c for c in cols if (t, c) not in comments]
         if (t, "") not in comments:
-            out.append(("comment-missing", ln, f"table {t} has no COMMENT ON TABLE in this script"))
+            out.append(("comment-missing", ln, f"table {t} has no COMMENT ON TABLE {where}"))
         if missing:
             out.append(("comment-missing", ln,
                         f"columns of {t} without COMMENT ON COLUMN: {', '.join(missing)}"))
@@ -5959,7 +6328,14 @@ def cmd_lint(conn, schema, ns):
     for p in paths:
         if not p.is_file():
             sys.exit(f"No such file: {p}")
-        f = lint_script(p.read_text(encoding="utf-8-sig"), conv)
+    texts = {p: p.read_text(encoding="utf-8-sig") for p in paths}
+    in_set = None
+    if len(paths) > 1:
+        in_set = set()
+        for text in texts.values():
+            in_set |= script_comment_targets(text)
+    for p in paths:
+        f = lint_script(texts[p], conv, in_set)
         report[str(p)] = f
         errors += sum(1 for x in f if x["severity"] == "error")
     if ns.json:
@@ -6503,6 +6879,33 @@ def ask_question_breakers(project_root, home=None, plugin_limit=400):
     return found
 
 
+def launch_checks(root, home, settings, local_settings):
+    """One row per launcher the harness files start pythia with: can it?
+    A hook that cannot start fails open, so this is a fail, not a warning."""
+    sources = [(".claude/settings.json", settings.get("hooks"), True),
+               (".claude/settings.local.json", local_settings.get("hooks"), False),
+               ("~/.claude/settings.json",
+                (_read_json(home / ".claude" / "settings.json") or {}).get("hooks"),
+                False),
+               (".codex/hooks.json",
+                (_read_json(root / ".codex" / "hooks.json") or {}).get("hooks"),
+                True)]
+    out = []
+    for where, hooks, shared in sources:
+        launchers = []
+        for ev in (hooks or {}).values() if isinstance(hooks, dict) else []:
+            for e in ev if isinstance(ev, list) else []:
+                for h in (e.get("hooks") or []) if isinstance(e, dict) else []:
+                    cmd = str(h.get("command", "")) if isinstance(h, dict) else ""
+                    mark = _hook_mark(cmd)
+                    if mark:
+                        launchers.append(cmd[:cmd.index(mark)].strip())
+        for launcher in dict.fromkeys(launchers):
+            st, msg = launcher_health(launcher, shared=shared)
+            out.append((st, "hook launch", f"{where}: {msg}"))
+    return out
+
+
 def harness_checks(project_root, home=None):
     """[(status, area, message)] — status ok | warn | fail | info."""
     import importlib.util
@@ -6528,7 +6931,8 @@ def harness_checks(project_root, home=None):
         out.append(("warn", "connections", f"no {CONFIG_DIR}/{CONFIG_NAME} — "
                                            f"{invocation()} install"))
     s = _read_json(root / ".claude" / "settings.json") or {}
-    cmds = json.dumps(s.get("hooks") or {})
+    sl = _read_json(root / ".claude" / "settings.local.json") or {}
+    cmds = json.dumps(s.get("hooks") or {}) + json.dumps(sl.get("hooks") or {})
     for mark, what in (("hook session-start", "SessionStart guide + state"),
                        ("hook pre-tool", "PreToolUse guard (reads, approved writes, bypass block)"),
                        ("approve --hook", "PostToolUse AskUserQuestion approval"),
@@ -6539,13 +6943,25 @@ def harness_checks(project_root, home=None):
                     f"{what}: " + ("wired" if mark in cmds else
                                    "legacy guide hook — re-run install" if legacy
                                    else f"missing — {invocation()} install")))
+    home_dir = pathlib.Path(home or pathlib.Path.home())
+    out.extend(launch_checks(root, home_dir, s, sl))
     mcp = _read_json(root / ".mcp.json") or {}
-    if "pythia" in (mcp.get("mcpServers") or {}):
+    local = local_mcp_entry(root, home_dir)
+    if local is not None:
+        st, msg = launcher_health(mcp_launcher(local) or str(local.get("command")))
+        out.append((st, "approval door", "pythia_approve MCP tool registered in "
+                    f"Claude Code's local scope (overrides .mcp.json) — {msg}"))
+    elif "pythia" in (mcp.get("mcpServers") or {}):
         trusted = ("pythia" in (s.get("enabledMcpjsonServers") or [])
                    or s.get("enableAllProjectMcpServers"))
-        out.append(("ok", "approval door", "pythia_approve MCP tool registered in "
+        entry = mcp["mcpServers"]["pythia"]
+        st, msg = launcher_health(mcp_launcher(entry) or str(
+            (entry or {}).get("command") if isinstance(entry, dict) else entry),
+            shared=True)
+        out.append((st, "approval door", "pythia_approve MCP tool registered in "
                     ".mcp.json" + ("" if trusted else
-                                   " (approve the server once in /mcp)")))
+                                   " (approve the server once in /mcp)")
+                    + ("" if st == "ok" else f", but {msg}")))
     else:
         out.append(("warn", "approval door", "pythia MCP approver not in .mcp.json "
                     "— the AskUserQuestion card and the console remain; "
@@ -6650,8 +7066,8 @@ def cmd_doctor(conn, schema, ns):
         print(f"  {paint(f'{s:<4}', color[s], en)} {a:<15} {m}")
     bad = sum(1 for s, _, _ in rows if s == "fail")
     if bad:
-        print(paint(f"\n  {bad} problem(s) will stop approvals from working.",
-                    "red", en))
+        print(paint(f"\n  {bad} problem(s) will stop approvals or the guard "
+                    "from working.", "red", en))
     if conn is None:
         print(f"\n  Database environment: {invocation()} doctor --db")
 

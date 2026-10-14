@@ -535,7 +535,20 @@ AGENTS.md for Codex): Claude Code loads that file every session, hooks or
 not, and with it present the SessionStart hook prints only the live state. The plugin (`hooks/hooks.json`)
 installs both, and so does `pythia install`: it merges the `hooks` block and
 the `deny` rule into `.claude/settings.json`, leaves every other key alone,
-adds nothing on a second run, and `--no-hooks` skips the step. `install -g`
+adds nothing on a second run, and `--no-hooks` skips the step. The commands
+start pythia with a launcher install picks by what really runs: a hook that
+cannot start fails open (Claude Code treats its error as non-blocking, so the
+guard lets sqlplus through), and `python -m pythia` only works where `python`
+imports pythia. Outside a virtual environment, with a `python` (or `python3`)
+that imports it, that bare spelling goes into the shared files. Otherwise —
+a venv, pipx, a `python` that is another interpreter — the hooks go to
+`.claude/settings.local.json` with the absolute interpreter (added to
+`.git/info/exclude`), the MCP approver to Claude Code's local scope via
+`claude mcp add --scope local` (printed for you to run when the `claude` CLI
+is not on PATH), and the shared `.claude/settings.json` and `.mcp.json` are
+left alone; install names any pythia hooks already in the shared file, since
+those run too. `pythia doctor` starts every launcher it finds and fails the
+ones that cannot import pythia. `install -g`
 writes only the approve hook and the deny rule into `~/.claude/settings.json`
 — that file applies to every project on the machine, and the session guide
 would be noise outside Oracle work. After `pip install --upgrade`,

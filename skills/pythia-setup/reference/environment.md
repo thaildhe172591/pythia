@@ -89,4 +89,8 @@ through an autopilot lease started there (`pythia autopilot on`).
 
 After `pythia install`: restart the session, run `pythia doctor`, and fix
 every `fail` line — each one is a setting that will stop approvals from
-arriving.
+arriving. A `fail` on **hook launch** means a hook's interpreter cannot import
+pythia, so the guard is off: common when pythia lives in a venv or pipx and
+Claude Code starts from a desktop app or IDE. Re-run `pythia install` — it pins
+that machine's interpreter in `.claude/settings.local.json` and Claude Code's
+local MCP scope, never in the shared files.

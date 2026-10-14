@@ -1160,14 +1160,17 @@ def test_doctor_finds_what_breaks_askuserquestion():
 
 def test_doctor_reports_the_wiring_after_install():
     with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
-        pythia.install_claude_mcp(td)
-        pythia.install_claude_hooks(td, trust_mcp=True)
+        pythia.install_claude_mcp(td, launcher=_good_launcher())
+        pythia.install_claude_hooks(td, trust_mcp=True, launcher=_good_launcher())
         rows = pythia.harness_checks(td, home)
         msgs = {(s, a): m for s, a, m in rows}
         assert all(s != "fail" for s, _, _ in rows), rows
         hooks = [m for (s, a), m in msgs.items() if a == "claude hooks"]
         assert all("wired" in m for m in hooks) and len(hooks) >= 1
-        assert any(a == "approval door" and s == "ok" for s, a, _ in rows)
+        # registered; the launcher is this machine's path in the shared
+        # .mcp.json, which doctor names (warn) but never runs
+        assert any(a == "approval door" and s == "warn" and "registered" in m
+                   and "shares" in m for s, a, m in rows), rows
 
 
 def test_install_registers_the_mcp_approver_once_and_keeps_other_servers():
@@ -1239,6 +1242,347 @@ def test_new_commands_are_in_the_parser_and_the_guide():
     for cmd in ("autopilot", "deploy", "lint", "explain", "stats", "comments",
                 "doctor", "hook", "skill"):
         assert cmd in pythia.COMMANDS and cmd in pythia.OPERATING_GUIDE
+
+
+# --- launcher: the interpreter the hooks and the MCP approver start -------------
+#
+# Field test 0.15.1: pythia installed in a venv, Claude Code started where
+# `python` was the system interpreter. `python -m pythia hook pre-tool` died
+# with "No module named pythia" — a non-blocking hook error, so the sqlplus
+# guard let the write through; the MCP approver never connected; doctor said
+# ok. The launcher is now chosen by what really starts pythia, and checked.
+
+def _launch(**kw):
+    base = dict(venv=False, which=lambda n: f"/usr/bin/{n}",
+                executable="/usr/bin/python3", script="/s/pythia.py")
+    base.update(kw)
+    return pythia.choose_launcher(**base)
+
+
+def test_launcher_is_portable_only_when_that_spelling_really_starts_pythia():
+    assert _launch(starts=lambda l: True)[:2] == ("python -m pythia", True)
+    # `python` is on PATH but it is another interpreter, without pythia
+    assert _launch(starts=lambda l: l == "python3 -m pythia")[:2] == (
+        "python3 -m pythia", True)
+    # no bare name imports it: the absolute interpreter, never shared
+    l, portable, why = _launch(starts=lambda l: l.startswith('"'))
+    assert (l, portable) == ('"/usr/bin/python3" -m pythia', False) and why
+    # not importable at all — a clone run as scripts/pythia.py: the script
+    l, portable, _ = _launch(starts=lambda l: l.endswith('pythia.py"'))
+    assert (l, portable) == ('"/usr/bin/python3" "/s/pythia.py"', False)
+    # a name that is not on PATH is never probed, let alone chosen
+    l, portable, _ = _launch(which=lambda n: None, starts=lambda l: True)
+    assert (l, portable) == ('"/usr/bin/python3" -m pythia', False)
+
+
+def test_launcher_in_a_virtualenv_is_absolute_even_when_python_finds_it_now():
+    """`python -m pythia` works in the activated venv the developer installs
+    from, and not in the desktop app or IDE that starts Claude Code later."""
+    l, portable, why = _launch(venv=True, which=lambda n: f"/v/bin/{n}",
+                               executable="/v/bin/python",
+                               starts=lambda l: True)
+    assert (l, portable) == ('"/v/bin/python" -m pythia', False)
+    assert "virtual environment" in why
+
+
+def test_absolute_launcher_goes_to_settings_local_never_the_shared_file():
+    launcher = '"/v/bin/python" -m pythia'
+    with tempfile.TemporaryDirectory() as td:
+        local = pathlib.Path(td) / ".claude" / "settings.local.json"
+        local.parent.mkdir()
+        local.write_text(json.dumps({"env": {"A": "1"},
+                                     "permissions": {"allow": ["Bash(ls)"]}}),
+                         encoding="utf-8")
+        path, added = pythia.install_claude_hooks(td, launcher=launcher,
+                                                  local=True)
+        assert path == local and added
+        assert not (pathlib.Path(td) / ".claude" / "settings.json").exists()
+        s = json.loads(local.read_text(encoding="utf-8"))
+        assert s["env"] == {"A": "1"}                       # theirs, kept
+        assert s["permissions"]["allow"] == ["Bash(ls)"]
+        cmds = [h["command"] for ev in s["hooks"].values()
+                for e in ev for h in e["hooks"]]
+        assert cmds and all(c.startswith(launcher + " ") for c in cmds), cmds
+        assert {pythia._hook_mark(c) for c in cmds} == {
+            "hook session-start", "hook pre-tool", "approve --hook",
+            "hook post-tool"}
+        assert f"Bash({launcher} approve --hook*)" in s["permissions"]["deny"]
+        assert set(pythia.CLAUDE_DENY) <= set(s["permissions"]["deny"])
+        assert "enabledMcpjsonServers" not in s    # a local server needs no trust
+        assert pythia.install_claude_hooks(td, launcher=launcher,
+                                           local=True) == (path, [])
+
+
+def test_a_moved_interpreter_is_respelled_in_this_machines_files_only():
+    """A venv recreated elsewhere leaves the old path in the hooks: present by
+    what they run, dead by how they start it. In this machine's own files the
+    pythia entries are respelled; in the shared file they are the team's."""
+    old, new = '"/old/bin/python" -m pythia', '"/new/bin/python" -m pythia'
+    with tempfile.TemporaryDirectory() as td:
+        pythia.install_claude_hooks(td, launcher=old, local=True)
+        path, added = pythia.install_claude_hooks(td, launcher=new, local=True)
+        assert added
+        s = json.loads(path.read_text(encoding="utf-8"))
+        cmds = [h["command"] for ev in s["hooks"].values()
+                for e in ev for h in e["hooks"]]
+        assert cmds and all(c.startswith(new + " ") for c in cmds), cmds
+        assert len(cmds) == 5                                   # not doubled
+    with tempfile.TemporaryDirectory() as td:                   # shared: kept
+        pythia.install_claude_hooks(td, launcher="python3 -m pythia")
+        path, _ = pythia.install_claude_hooks(td, launcher="python -m pythia")
+        cmds = json.dumps(json.loads(path.read_text(encoding="utf-8"))["hooks"])
+        assert "python3 -m pythia" in cmds and '"python -m pythia' not in cmds
+
+
+def test_portable_launcher_spells_every_shared_entry_the_same_way():
+    with tempfile.TemporaryDirectory() as td:
+        pythia.install_claude_hooks(td, launcher="python3 -m pythia")
+        s = json.loads((pathlib.Path(td) / ".claude" / "settings.json")
+                       .read_text(encoding="utf-8"))
+        cmds = [h["command"] for ev in s["hooks"].values()
+                for e in ev for h in e["hooks"]]
+        assert cmds and all(c.startswith("python3 -m pythia ") for c in cmds)
+        pythia.install_claude_mcp(td, launcher="python3 -m pythia")
+        m = json.loads((pathlib.Path(td) / ".mcp.json").read_text(encoding="utf-8"))
+        assert m["mcpServers"]["pythia"] == {"command": "python3",
+                                             "args": ["-m", "pythia", "mcp"]}
+
+
+class _Ran:
+    def __init__(self, rc=0, out=""):
+        self.returncode, self.stdout, self.stderr = rc, out, ""
+
+
+def test_local_mcp_is_registered_through_the_claude_cli_only():
+    """A machine-specific MCP command must not land in the shared .mcp.json.
+    Claude Code's local scope holds it; `claude mcp add --scope local` is the
+    supported way in, and a local entry overrides the project's."""
+    launcher = '"/v/bin/python" -m pythia'
+    want = ["/v/bin/python", "-m", "pythia", "mcp"]
+    calls = []
+
+    def run(argv, **kw):
+        calls.append((argv, kw.get("cwd")))
+        return _Ran(0)
+
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        claude = lambda n: "/x/claude" if n == "claude" else None   # noqa: E731
+        action, shown = pythia.register_local_mcp(td, launcher, which=claude,
+                                                  run=run, home=home)
+        assert action == "added"
+        assert calls == [(["/x/claude", "mcp", "add", "--scope", "local",
+                           "pythia", "--", *want], str(td))]
+        assert not (pathlib.Path(td) / ".mcp.json").exists()
+
+        def state(cmd):
+            key = str(pathlib.Path(td).resolve())
+            (pathlib.Path(home) / ".claude.json").write_text(json.dumps(
+                {"projects": {key: {"mcpServers": {"pythia": {
+                    "type": "stdio", "command": cmd,
+                    "args": ["-m", "pythia", "mcp"]}}}}}), encoding="utf-8")
+
+        state("/v/bin/python")                       # already there, same
+        calls.clear()
+        assert pythia.register_local_mcp(td, launcher, which=claude, run=run,
+                                         home=home)[0] == "present"
+        assert calls == []
+        state("/old/venv/bin/python")                # stale: venv moved
+        assert pythia.register_local_mcp(td, launcher, which=claude, run=run,
+                                         home=home)[0] == "updated"
+        assert [c[0][:4] for c in calls] == [
+            ["/x/claude", "mcp", "remove", "--scope"],
+            ["/x/claude", "mcp", "add", "--scope"]]
+        calls.clear()
+        action, shown = pythia.register_local_mcp(
+            td, launcher, which=lambda n: None, run=run, home=home)
+        assert action == "manual" and calls == []
+        assert ("claude mcp add --scope local pythia -- /v/bin/python -m "
+                "pythia mcp") in shown
+        failing = lambda argv, **kw: _Ran(1, "boom")          # noqa: E731
+        os.remove(pathlib.Path(home) / ".claude.json")
+        assert pythia.register_local_mcp(td, launcher, which=claude,
+                                         run=failing, home=home)[0] == "failed"
+
+
+def _good_launcher():
+    """A launcher that starts pythia in any test run: this interpreter and
+    this very script (CI does not pip-install the package)."""
+    exe = pathlib.Path(sys.executable).as_posix()
+    return f'"{exe}" "{pathlib.Path(pythia.__file__).resolve().as_posix()}"'
+
+
+def test_doctor_fails_a_launcher_that_cannot_start_pythia():
+    bad = '"/nonexistent/bin/python" -m pythia'
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_hooks(td, launcher=bad, local=True)
+        rows = pythia.harness_checks(td, home)
+        fails = [m for s, a, m in rows if s == "fail" and a == "hook launch"]
+        assert fails and "/nonexistent/bin/python" in fails[0], rows
+        # the hooks are found in settings.local.json: wired, but cannot start
+        assert all("wired" in m for s, a, m in rows if a == "claude hooks"), rows
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_hooks(td, launcher=_good_launcher(), local=True)
+        rows = pythia.harness_checks(td, home)
+        launch = [(s, m) for s, a, m in rows if a == "hook launch"]
+        assert launch and all(s == "ok" for s, _ in launch), launch
+
+
+def test_doctor_checks_the_local_mcp_entry_too():
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        key = str(pathlib.Path(td).resolve())
+        (pathlib.Path(home) / ".claude.json").write_text(json.dumps(
+            {"projects": {key: {"mcpServers": {"pythia": {
+                "type": "stdio", "command": "/nonexistent/bin/python",
+                "args": ["-m", "pythia", "mcp"]}}}}}), encoding="utf-8")
+        rows = pythia.harness_checks(td, home)
+        assert any(s == "fail" and a == "approval door" and "local" in m
+                   for s, a, m in rows), rows
+
+
+def test_doctor_never_runs_a_hook_command_it_did_not_recognise():
+    """settings.json is repository content. doctor starts a hook's interpreter
+    to prove it imports pythia only when the command is exactly an interpreter
+    plus `-m pythia` or a pythia.py path — and never through a shell."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        canary = pathlib.Path(td) / "pwned"
+        tricks = [f"touch {canary.as_posix()} && python -m pythia hook pre-tool",
+                  f"python -c 'open(\"{canary.as_posix()}\",\"w\")' -m pythia hook pre-tool",
+                  f"$(touch {canary.as_posix()}) -m pythia hook post-tool",
+                  f"sh {canary.as_posix()}.sh -m pythia approve --hook"]
+        path = pathlib.Path(td) / ".claude" / "settings.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps({"hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command", "command": c}]}
+            for c in tricks]}}), encoding="utf-8")
+        rows = pythia.harness_checks(td, home)
+        assert not canary.exists()
+        odd = [m for s, a, m in rows if a == "hook launch" and s == "warn"]
+        assert len(odd) == len(tricks) and all("not a plain" in m for m in odd), rows
+
+
+def test_doctor_never_runs_a_script_path_from_a_shared_file():
+    """A bare interpreter is the developer's; the pythia.py it is pointed at
+    by a shared file is the repository's. Only `<bare> -m pythia` is run from
+    a shared file."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        canary = pathlib.Path(td) / "pwned"
+        evil = pathlib.Path(td) / "tools" / "pythia.py"
+        evil.parent.mkdir()
+        evil.write_text(f"open({str(canary)!r}, 'w').close()\n", encoding="utf-8")
+        exe = pathlib.Path(sys.executable).name
+        for where in ((".claude", "settings.json"), (".codex", "hooks.json")):
+            path = pathlib.Path(td).joinpath(*where)
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(json.dumps({"hooks": {"PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command":
+                    f'{exe} "{evil.as_posix()}" hook pre-tool'}]}]}}),
+                encoding="utf-8")
+        (pathlib.Path(td) / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "pythia": {"command": exe, "args": [evil.as_posix(), "mcp"]}}}),
+            encoding="utf-8")
+        rows = pythia.harness_checks(td, home)
+        assert not canary.exists(), rows
+        named = [m for s, a, m in rows if s == "warn" and "shares" in m]
+        assert len(named) == 3, rows
+
+
+def test_doctor_warns_a_bare_launcher_that_lives_in_the_active_virtualenv():
+    ok = lambda l, cwd=None: (True, "")                       # noqa: E731
+    with tempfile.TemporaryDirectory() as venv:
+        st, msg = pythia.launcher_health(
+            "python -m pythia", cwd=venv, which=lambda n: f"{venv}/bin/{n}",
+            env={"VIRTUAL_ENV": venv}, starts=ok)
+        assert st == "warn" and "virtual environment" in msg
+        st, _ = pythia.launcher_health(
+            "python -m pythia", cwd=venv, which=lambda n: "/usr/bin/python",
+            env={"VIRTUAL_ENV": venv}, starts=ok)
+        assert st == "ok"
+
+
+def test_pre_tool_denies_approve_hook_in_any_launcher_spelling():
+    with tempfile.TemporaryDirectory() as td:
+        for cmd in ('"/v/bin/python" -m pythia approve --hook',
+                    "/v/bin/python /s/pythia.py approve --hook",
+                    "python3 -m pythia approve --hook"):
+            assert decision(pre(td, cmd)) == "deny", cmd
+
+
+def test_claude_md_says_what_a_session_without_pythia_hooks_means():
+    """If the hooks cannot start, only CLAUDE.md is left to say so."""
+    block = pythia.claude_md_block()
+    assert "STATE" in block and "pythia doctor" in block
+    assert "guard" in block and "pythia_approve" in block
+
+
+def test_cmd_install_puts_a_machine_specific_launcher_in_local_files_only():
+    import argparse
+    launcher = '"/v/bin/python" -m pythia'
+    old = (pythia.choose_launcher, pythia.register_local_mcp,
+           os.environ.get("PATH"))
+    reg = []
+    pythia.choose_launcher = lambda **kw: (
+        launcher, False, "pythia runs from the virtual environment /v")
+    pythia.register_local_mcp = lambda root, l, **kw: (
+        reg.append(l) or ("added", "claude mcp add --scope local pythia -- x"))
+    os.environ["PATH"] = ""                  # no npx: bundled skills, offline
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            base = pathlib.Path(td)
+            (base / ".git" / "info").mkdir(parents=True)
+            (base / ".claude").mkdir()
+            (base / ".claude" / "settings.json").write_text(json.dumps(
+                {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+                    {"type": "command",
+                     "command": "python -m pythia hook pre-tool"}]}]}}),
+                encoding="utf-8")
+            shared_before = (base / ".claude" / "settings.json").read_text(
+                encoding="utf-8")
+            ns = argparse.Namespace(project_root=td, glob=False, source=None,
+                                    color=False, json=False, no_hooks=False)
+            _, out = quiet(pythia.cmd_install, None, None, ns)
+            assert (base / ".claude" / "settings.local.json").is_file()
+            assert (base / ".claude" / "settings.json").read_text(
+                encoding="utf-8") == shared_before          # shared: untouched
+            mcp = base / ".mcp.json"
+            assert not mcp.exists() or "/v/bin" not in mcp.read_text(encoding="utf-8")
+            assert reg == [launcher]
+            assert "settings.local.json" in out and "virtual environment" in out
+            assert "also" in out and "settings.json" in out  # the shared copy, named
+            assert "~/.codex/config.toml" in out              # Codex, not silent
+            exclude = base / ".git" / "info" / "exclude"
+            assert ".claude/settings.local.json" in exclude.read_text(encoding="utf-8")
+            quiet(pythia.cmd_install, None, None, ns)          # re-run
+            assert exclude.read_text(encoding="utf-8").count(
+                ".claude/settings.local.json") == 1
+    finally:
+        pythia.choose_launcher, pythia.register_local_mcp = old[0], old[1]
+        if old[2] is not None:
+            os.environ["PATH"] = old[2]
+
+
+def test_lint_counts_comments_from_every_file_in_the_set():
+    """A release keeps its COMMENT ON statements in their own file — the
+    order deploy runs them in. Linting the set must not call them missing."""
+    import argparse
+    with tempfile.TemporaryDirectory() as td:
+        a = pathlib.Path(td) / "01_t_order.sql"
+        b = pathlib.Path(td) / "02_comments.sql"
+        a.write_text("create table t_order (id number(12) not null, "
+                     "note varchar2(10 char));\n", encoding="utf-8")
+        b.write_text("comment on table t_order is 'Orders';\n"
+                     "comment on column t_order.id is 'Key';\n"
+                     "comment on column t_order.note is 'Free text';\n",
+                     encoding="utf-8")
+
+        def lint(*paths):
+            ns = argparse.Namespace(paths=[str(p) for p in paths], json=True,
+                                    project_root=td, color=False)
+            _, out = quiet(pythia.cmd_lint, None, None, ns)
+            return json.loads(out)["files"]
+
+        assert not [f for f in lint(a, b)[str(a)] if f["rule"] == "comment-missing"]
+        alone = [f for f in lint(a)[str(a)] if f["rule"] == "comment-missing"]
+        assert alone and "in this script" in alone[0]["message"]
 
 
 def main():

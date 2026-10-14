@@ -199,6 +199,17 @@ agent buộc bạn tự làm.
    hay khi hook chưa được trust; khi đã có khối này, hook SessionStart chỉ bổ
    sung trạng thái sống chứ không lặp lại guide.
 
+   **Interpreter được chọn theo cái thật sự chạy được pythia.** Hook không
+   khởi động được thì cổng mở luôn — Claude Code coi lỗi của nó là không chặn —
+   nên `python -m pythia` trần chỉ được ghi vào file chung khi nó import được
+   pythia và không nằm trong virtual environment. Cài trong venv, bằng pipx,
+   hay khi `python` là một interpreter khác, thì hook được ghi vào
+   `.claude/settings.local.json` (file riêng của máy này, không vào git) với
+   đường dẫn tuyệt đối tới interpreter, còn MCP approver vào local scope của
+   Claude Code (`claude mcp add --scope local`); đồng nghiệp không bao giờ nhận
+   một đường dẫn từ máy bạn. `pythia doctor` chạy thử từng launcher nó tìm
+   thấy và báo `fail` cho cái nào không import được pythia.
+
    Skills vào `.claude/skills` (hoặc `~/.claude/skills` khi `-g`).
 2. **Khởi động lại phiên Claude Code** để hook và MCP server nạp.
 3. **Chạy `pythia doctor`.** Nó xác nhận mọi thứ đã nối, và chỉ đích danh
