@@ -37,6 +37,32 @@ def test_scaffold_creates_config_once_and_never_clobbers():
         assert json.loads(path.read_text(encoding="utf-8")) == {"default": "prod"}
 
 
+def test_scaffold_creates_the_config_readable_by_its_owner_only():
+    """connections.json is where the passwords go. Created 0644, it was
+    readable by every user on the machine — and pythia then warned about its
+    own file on every command (field test 0.15.1)."""
+    if os.name != "posix":
+        return
+    with tempfile.TemporaryDirectory() as td:
+        path, created = pythia.scaffold_config(pathlib.Path(td))
+        assert created and path.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_readable_config_is_warned_about_once_per_process():
+    if os.name != "posix":
+        return
+    import contextlib
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "connections.json"
+        path.write_text("{}", encoding="utf-8")
+        path.chmod(0o644)
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            pythia._load_config(path)
+            pythia._load_config(path)
+        assert buf.getvalue().count("readable by other users") == 1
+
+
 def test_missing_npx_falls_back_to_the_bundled_pack():
     """No Node -> the whole kit still installs, into .claude/skills ONLY —
     the directory Claude Code reliably reads (field evidence: project
@@ -331,6 +357,8 @@ def test_cmd_install_wires_the_claude_hooks_unless_told_not_to():
     import io
     old = os.environ.get("PATH")
     os.environ["PATH"] = ""                    # no npx: bundled path, offline
+    chooser = pythia.choose_launcher           # where `python` starts pythia
+    pythia.choose_launcher = lambda **kw: ("python -m pythia", True, "")
     try:
         for no_hooks in (False, True):
             with tempfile.TemporaryDirectory() as td:
@@ -349,6 +377,7 @@ def test_cmd_install_wires_the_claude_hooks_unless_told_not_to():
                 assert set(pythia.CLAUDE_DENY) <= set(s["permissions"]["deny"])
                 assert "settings.json" in buf.getvalue()
     finally:
+        pythia.choose_launcher = chooser
         if old is not None:
             os.environ["PATH"] = old
 
@@ -450,12 +479,29 @@ def test_merge_claude_md_keeps_the_developers_text_and_is_idempotent():
         assert pythia.merge_claude_md(path) == (path, "created")
         assert pythia.merge_claude_md(path) == (path, "unchanged")
         path.write_text("# Our project\n\nUse tabs.\n", encoding="utf-8")
-        assert pythia.merge_claude_md(path)[1] == "updated"
+        assert pythia.merge_claude_md(path)[1] == "added"   # joined their file
         body = path.read_text(encoding="utf-8")
         assert body.startswith("# Our project\n\nUse tabs.\n")
         assert body.count(pythia.AGENTS_BEGIN) == 1
         pythia.merge_claude_md(path)                       # a second run
         assert path.read_text(encoding="utf-8").count(pythia.AGENTS_BEGIN) == 1
+
+
+def test_merge_says_updated_only_when_a_block_was_replaced():
+    with tempfile.TemporaryDirectory() as td:
+        path = pathlib.Path(td) / "CLAUDE.md"
+        path.write_text(f"# Ours\n\n{pythia.AGENTS_BEGIN}\nold rules\n"
+                        f"{pythia.AGENTS_END}\n", encoding="utf-8")
+        assert pythia.merge_claude_md(path)[1] == "updated"
+        assert "old rules" not in path.read_text(encoding="utf-8")
+        import contextlib
+        buf = io.StringIO()
+        other = pathlib.Path(td) / "sub"
+        other.mkdir()
+        (other / "CLAUDE.md").write_text("# Theirs\n", encoding="utf-8")
+        with contextlib.redirect_stdout(buf):
+            pythia.report_claude_md(other)
+        assert "Added the pythia block to" in buf.getvalue()
 
 
 def test_cmd_install_writes_claude_md_in_the_project_scope():

@@ -126,6 +126,35 @@ deny on sqlplus/SQLcl writes is pattern matching: a determined agent can
 phrase a command it does not recognise. The account's Oracle grants remain
 the only boundary that cannot be argued with.
 
+### A hook that cannot start fails open (0.15.2)
+
+Claude Code treats a hook that exits with anything but 2 as a non-blocking
+error and carries on. A hook whose interpreter cannot import pythia — pythia
+installed in a venv or with pipx, Claude Code started from a desktop app or
+IDE where `python` is the system interpreter — therefore turns the
+PreToolUse guard off without a word: the 0.15.1 field test ran a sqlplus
+command straight through it, and the MCP approver never connected. So
+`pythia install` chooses the launcher by what really starts pythia: a bare
+`python -m pythia` (or `python3`) only when it imports pythia outside a
+virtual environment, otherwise the absolute interpreter. A machine's own
+launcher is written only to that machine's files — `.claude/settings.local.json`
+(added to `.git/info/exclude`) and Claude Code's local MCP scope through
+`claude mcp add --scope local` — never into `.claude/settings.json` or
+`.mcp.json`, where it would break every teammate's hooks the same way.
+`pythia doctor` starts each launcher it finds and reports `fail` for one
+that cannot import pythia. It runs only what is exactly an interpreter plus
+`-m pythia` or an absolute `pythia.py` path, never a relative path, without a
+shell and from an empty directory; a bare name is resolved on PATH alone
+(Windows would search the interpreter's directory and the current one
+first, where a repository can drop a `python.exe`). From a shared file — or
+a `settings.local.json` that git tracks — only `<bare interpreter> -m pythia`
+runs; any path there, the interpreter's or a `pythia.py`'s, is named and
+never executed: hook commands in a project's settings are repository
+content. A virtual, pipx, uv or conda environment always gets the absolute
+launcher, since `python` reaches it only while it is activated. The pythia
+block in `CLAUDE.md` tells the agent what a session with no `STATE` line or
+no `pythia_approve` tool means, because then nothing else can.
+
 Row-set revalidation, added in 0.9.0, brings a limit of its own worth naming:
 previewing a `data_dml` statement now runs a `SELECT` derived from that
 statement, so a predicate calling a function executes that function at preview

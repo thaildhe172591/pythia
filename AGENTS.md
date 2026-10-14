@@ -79,7 +79,8 @@ Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11, 13 (and 2's threshold) · Do: 3, 8, 1
 - `skills/` — the workflow skills (`pythia-apply` is the write gate,
   `using-pythia` the router)
 - `hooks/hooks.json` — the plugin's Claude Code hooks (same as
-  `pythia install` writes into `.claude/settings.json`)
+  `pythia install` writes into `.claude/settings.json`, or
+  `.claude/settings.local.json` when the interpreter is this machine's own)
 - `examples/` — connection config and the least-privilege agent-user setup
 - `tests/` — the suites, no database required; run them before claiming done
   (`test_phase6.py` covers scripts, lint, autopilot, deploy, hooks, doctor)

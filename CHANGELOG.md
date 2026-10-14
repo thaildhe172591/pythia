@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.15.2 — 2026-10-14
+
+Fixes from a field test of 0.15.1 in a sample project, with Claude Code
+itself started where pythia's venv was not active.
+
+- **A hook that could not start pythia turned the guard off without a
+  word.** The hooks and the MCP approver ran `python -m pythia`; install only
+  checked that some `python` existed. Installed in a venv or with pipx, with
+  Claude Code started from a desktop app or IDE, that `python` was the system
+  interpreter: "No module named pythia", which Claude Code treats as a
+  non-blocking hook error — the PreToolUse guard let a sqlplus command
+  through, the MCP approver never connected, and `pythia doctor` said ok.
+  - `pythia install` now picks the launcher by what really starts pythia: a
+    bare `python -m pythia` (or `python3`) only when it imports pythia outside
+    a virtual environment (venv, pipx, uv, or any conda environment);
+    otherwise the absolute interpreter (or, for a clone, the interpreter plus
+    `scripts/pythia.py`). A bare name is resolved on PATH alone and that path
+    is what runs — Windows would otherwise try the interpreter's own
+    directory and the current directory first.
+  - A machine's own launcher goes only into that machine's files: the hooks
+    and their deny rule into `.claude/settings.local.json` (added to
+    `.git/info/exclude`, found through `.git` files in worktrees and
+    submodules), the MCP approver into Claude Code's local scope via
+    `claude mcp add --scope local` (printed to run by hand when the `claude`
+    CLI is not on PATH; a failed update puts the old entry back). A
+    `settings.local.json` that git tracks is the team's file: install does not
+    write a machine path into it and says how to untrack it. The shared `.claude/settings.json` and `.mcp.json`
+    never get a path from one machine; pythia hooks already in the shared
+    file are named, since they run too. A moved venv is respelled in the
+    machine's files on the next install — only commands a pythia launcher
+    starts; another tool's `hook post-tool` is left alone. `-g` writes the chosen launcher into
+    `~/.claude/settings.json`, which is per-user already. Codex's `.codex/`
+    files stay portable and install says what to put in `~/.codex/config.toml`.
+  - `pythia doctor` starts every launcher it finds — project and local
+    settings, `~/.claude/settings.json`, `.mcp.json`, the local MCP scope,
+    `.codex/hooks.json` — and fails one that cannot import pythia; it warns
+    when a bare `python` only finds pythia inside the active venv or conda
+    environment. It runs only an interpreter plus `-m pythia` or an absolute
+    `pythia.py` path — never a relative path — with no shell, from an empty
+    directory, and from a shared (or git-tracked) file only `<bare> -m
+    pythia`: any path there is the repository's and is named, not run.
+  - The pythia block in `CLAUDE.md` tells the agent what a session with no
+    `STATE` line or no `pythia_approve` tool means: the hooks are not running
+    — say so before any write and ask for `pythia doctor`.
+- **`.pythia/connections.json` is created owner-only (0600).** It was
+  created 0644 — readable by every user on the machine once it holds a
+  password — and pythia then warned about its own file on every command.
+  The warning for an existing readable file is printed once per run.
+- **"Added the pythia block to CLAUDE.md"** when the block joins a file of
+  yours; "Updated" now means a block was replaced (AGENTS.md too).
+- **`pythia lint` counts comments across the files it lints together.** A
+  release keeps its `COMMENT ON` statements in their own file; linting the
+  set no longer reports those tables as uncommented.
+
 ## 0.15.1 — 2026-10-14
 
 - **`pythia install` writes the harness into `CLAUDE.md`.** Claude Code

@@ -183,6 +183,17 @@ each agent needs you to finish by hand.
    or while the hooks are untrusted; when the block is there, the
    SessionStart hook adds only the live state instead of repeating the guide.
 
+   **The interpreter is chosen by what really starts pythia.** A hook that
+   cannot start fails open — Claude Code treats its error as non-blocking —
+   so a bare `python -m pythia` goes into the shared files only when it
+   imports pythia outside a virtual environment. Installed in a venv, with
+   pipx, or where `python` is another interpreter, the hooks go to
+   `.claude/settings.local.json` (this machine's file, kept out of git) with
+   the absolute interpreter, and the MCP approver to Claude Code's local scope
+   (`claude mcp add --scope local`); your teammates never get a path from your
+   machine. `pythia doctor` starts every launcher it finds and fails the ones
+   that cannot import pythia.
+
    Skills land in `.claude/skills` (or `~/.claude/skills` with `-g`).
 2. **Restart the Claude Code session** so the hooks and the MCP server load.
 3. **Run `pythia doctor`.** It confirms the wiring and names every setting

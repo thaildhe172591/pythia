@@ -497,7 +497,20 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 
 `pythia install` tự ghi bốn hook vào `.claude/settings.json`, gộp vào file
 có sẵn và không đụng key nào khác; chạy lại không thêm gì, `--no-hooks` để
-bỏ qua; đồng thời đăng ký MCP approver vào `.mcp.json`. `install -g` chỉ ghi
+bỏ qua; đồng thời đăng ký MCP approver vào `.mcp.json`. Các lệnh này khởi
+động pythia bằng một launcher mà install chọn theo cái thật sự chạy được:
+hook không khởi động được thì cổng mở luôn (Claude Code coi lỗi của nó là
+không chặn, nên guard để sqlplus đi qua), mà `python -m pythia` chỉ chạy khi
+`python` import được pythia. Ngoài virtual environment, với `python` (hoặc
+`python3`) import được pythia, cách viết trần đó vào file chung. Còn lại —
+venv, pipx, `python` là interpreter khác — hook vào
+`.claude/settings.local.json` với đường dẫn tuyệt đối (thêm vào
+`.git/info/exclude`), MCP approver vào local scope của Claude Code bằng
+`claude mcp add --scope local` (in ra để bạn tự chạy nếu không có CLI
+`claude` trên PATH), và `.claude/settings.json`, `.mcp.json` dùng chung được
+để nguyên; install nêu tên các hook pythia đã có sẵn trong file chung, vì
+chúng cũng chạy. `pythia doctor` chạy thử từng launcher và báo `fail` cho
+cái nào không import được pythia. `install -g` chỉ ghi
 hook PreToolUse/PostToolUse và luật deny vào `~/.claude/settings.json` — file
 đó áp cho mọi dự án trên máy, guide đầu phiên ở đó sẽ thành nhiễu với dự án
 không dính Oracle. `SessionStart` chạy `python -m pythia hook session-start`:
