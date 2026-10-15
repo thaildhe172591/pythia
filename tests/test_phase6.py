@@ -1166,6 +1166,12 @@ def test_session_start_names_the_launcher_that_runs_here():
             out = _session_start(td)
             assert f"`pythia` here is `{launcher}`" in out, out
             assert f"`{launcher} guide`" in out and f"`{launcher} connections`" in out
+            # field test 0.15.5: the agent put the long launcher in a shell
+            # variable (PY=...; "$PY" -m pythia ...) — a compound command, so
+            # the guard asked instead of allowing. The line says how to type it.
+            run = next(ln for ln in out.splitlines() if ln.startswith("RUN"))
+            assert "as written" in run and "one command per call" in run, run
+            assert "variable" in run and "`;`" in run, run
             pythia.invocation = lambda: "pythia"
             out = _session_start(td)
             assert "`pythia` here is" not in out and "`pythia guide`" in out

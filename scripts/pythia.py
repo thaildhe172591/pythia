@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.5"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.6"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -7075,8 +7075,13 @@ def cmd_hook(conn, schema, ns):
             if run not in ("pythia", "pythia.exe"):
                 # the shared files say `pythia`; this machine runs it otherwise
                 # (a venv nobody activated, a clone) — field test 0.15.4
+                # ...typed as written: a shell variable or a `;` makes it a
+                # compound command, which the guard leaves to the client's
+                # prompt (field test 0.15.5: PY=...; "$PY" -m pythia ...)
                 print(f"RUN    `pythia` here is `{run}` — spell every pythia "
-                      "command the rules name that way.")
+                      "command the rules name that way, as written, one command "
+                      "per call: a shell variable or `;` makes it a compound "
+                      "command the guard asks about.")
             print("STATE  " + "\n       ".join(session_state_lines(root)))
             return
         out = (pre_tool_decision(payload) if event == "pre-tool"

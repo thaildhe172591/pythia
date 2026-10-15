@@ -103,5 +103,7 @@ or remove it.
 `pythia: command not found` in the agent's shell does not mean the hooks are
 off: pythia's venv is just not on PATH. The session preamble's `RUN` line names
 the spelling that works on this machine (the venv's interpreter by absolute
-path, `-m pythia`); use it for every pythia command the rules name. Commands
-pythia prints already use it.
+path, `-m pythia`); use it for every pythia command the rules name, typed as
+written and one command per call — wrapped in a shell variable or joined with
+`;`, it becomes a compound command the guard asks about. Commands pythia
+prints already use it.
