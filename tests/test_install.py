@@ -4,6 +4,7 @@ no network, no npx needed.
 
 Run: python tests/test_install.py
 """
+import contextlib
 import io
 import json
 import os
@@ -46,6 +47,142 @@ def test_scaffold_creates_the_config_readable_by_its_owner_only():
     with tempfile.TemporaryDirectory() as td:
         path, created = pythia.scaffold_config(pathlib.Path(td))
         assert created and path.stat().st_mode & 0o777 == 0o600
+
+
+SECRET = ".pythia/connections.json"
+
+
+@contextlib.contextmanager
+def hermetic_git():
+    """git with no system or personal config: a developer's own excludes file
+    must not decide what these tests see."""
+    keys = ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "XDG_CONFIG_HOME", "HOME")
+    old = {k: os.environ.get(k) for k in keys}
+    with tempfile.TemporaryDirectory() as home:
+        empty = os.path.join(home, "gitconfig")
+        open(empty, "w").close()
+        os.environ.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=empty,
+                          XDG_CONFIG_HOME=home, HOME=home)
+        try:
+            yield
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
+def git_init(td):
+    """A fresh repository at td; None where git is absent (the test skips)."""
+    import subprocess
+    git = pythia.path_lookup("git")
+    if git:
+        subprocess.run([git, "init", "-q", str(td)], check=True,
+                       stdin=subprocess.DEVNULL)
+    return git
+
+
+def test_install_keeps_the_password_file_out_of_every_clone():
+    """GUIDE and SECURITY said connections.json is "gitignored by the
+    scaffold", but nothing wrote the rule: in the 0.15.3 field test `git
+    status` listed `.pythia/`, one `git add -A` away from committing the
+    passwords. The rule goes in the project's .gitignore, so it reaches every
+    clone — .git/info/exclude would protect this machine only."""
+    with hermetic_git(), tempfile.TemporaryDirectory() as td:
+        if git_init(td) is None:
+            return
+        root = pathlib.Path(td)
+        gi = root / ".gitignore"
+        gi.write_bytes(b"node_modules")          # no final newline: theirs stays
+        pythia.scaffold_config(root)
+        assert pythia.git_ignore_source(root, SECRET)[0] == "none"
+        assert pythia.ignore_connections(root) == gi
+        text = gi.read_text(encoding="utf-8")
+        assert text.startswith("node_modules\n") and SECRET in text.splitlines()
+        assert pythia.git_ignore_source(root, SECRET)[0] == "shared"
+        assert pythia.ignore_connections(root) is None          # once
+        assert gi.read_text(encoding="utf-8") == text
+
+
+def test_install_trusts_a_shared_rule_but_not_a_negated_or_private_one():
+    with hermetic_git(), tempfile.TemporaryDirectory() as td:
+        if git_init(td) is None:
+            return
+        root = pathlib.Path(td)
+        gi = root / ".gitignore"
+        gi.write_text(".pythia/\n", encoding="utf-8")
+        assert pythia.ignore_connections(root) is None          # covered already
+        assert gi.read_text(encoding="utf-8") == ".pythia/\n"
+        # a later negation un-ignores it: the appended rule comes last and wins
+        gi.write_text(".pythia/*\n!.pythia/connections.json\n", encoding="utf-8")
+        assert pythia.git_ignore_source(root, SECRET)[0] == "none"
+        assert pythia.ignore_connections(root) == gi
+        assert pythia.git_ignore_source(root, SECRET)[0] == "shared"
+        # ignored on this machine only: a teammate's clone would still commit it
+        gi.unlink()
+        exclude = root / ".git" / "info" / "exclude"
+        exclude.parent.mkdir(exist_ok=True)
+        exclude.write_text(SECRET + "\n", encoding="utf-8")
+        state, source = pythia.git_ignore_source(root, SECRET)
+        assert state == "local" and "exclude" in source
+        assert pythia.ignore_connections(root) == gi
+        assert pythia.git_ignore_source(root, SECRET)[0] == "shared"
+
+
+def test_install_writes_the_rule_outside_git_too():
+    """No repository yet, or no git at all: the rule is written anyway, so a
+    later `git init` starts safe — and read back as text, written once."""
+    with hermetic_git(), tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        assert pythia.git_ignore_source(root, SECRET) is None
+        assert pythia.ignore_connections(root) == root / ".gitignore"
+        assert pythia.ignore_connections(root) is None
+    real = pythia.path_lookup
+    pythia.path_lookup = lambda *a, **k: None
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            (root / ".gitignore").write_text("/.pythia/connections.json\n",
+                                             encoding="utf-8")
+            assert pythia.ignore_connections(root) is None
+            (root / ".gitignore").write_text(
+                ".pythia\n!.pythia/connections.json\n", encoding="utf-8")
+            assert pythia.ignore_connections(root) == root / ".gitignore"
+    finally:
+        pythia.path_lookup = real
+
+
+def test_install_warns_when_git_already_tracks_the_password_file():
+    """A rule cannot untrack a committed file; the passwords are already in
+    the history. Say so, with the commands, at install time."""
+    import subprocess
+    with hermetic_git(), tempfile.TemporaryDirectory() as td:
+        git = git_init(td)
+        if git is None:
+            return
+        root = pathlib.Path(td)
+        pythia.scaffold_config(root)
+        subprocess.run([git, "-C", td, "add", "-f", SECRET], check=True,
+                       stdin=subprocess.DEVNULL)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.report_connections_ignore(root)
+        out = buf.getvalue()
+        assert f"git rm --cached {SECRET}" in out and "password" in out, out
+
+
+def test_install_survives_a_gitignore_it_cannot_write():
+    """The rule is a safeguard, not a reason to abort the install: say what
+    to add by hand and carry on."""
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        (root / ".gitignore").mkdir()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pythia.report_connections_ignore(root)
+        out = buf.getvalue()
+        assert "WARNING" in out and f"add {SECRET}" in out, out
 
 
 def test_a_readable_config_is_warned_about_once_per_process():
@@ -294,6 +431,9 @@ def test_cmd_install_runs_end_to_end():
         out = buf.getvalue()
         assert (pathlib.Path(td) / ".pythia" / "connections.json").is_file()
         assert "Next: fill in" in out
+        gi = pathlib.Path(td) / ".gitignore"
+        assert SECRET in gi.read_text(encoding="utf-8").splitlines()
+        assert f"Added {SECRET} to" in out
         assert env is not None
 
 

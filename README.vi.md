@@ -193,6 +193,11 @@ agent buộc bạn tự làm.
      thì nhắc luật đọc kết quả (exit 3 là hỏng) ngay cạnh kết quả;
    - luật `deny` để agent không giả được grant, và bật MCP server.
 
+   Nó tạo `.pythia/connections.json` (quyền 600) và thêm file này vào
+   `.gitignore` của dự án — hãy commit dòng đó — rồi cảnh báo nếu git đã theo
+   dõi file: khi đó mật khẩu đã nằm trong lịch sử git, cần bỏ theo dõi và đổi
+   mật khẩu.
+
    Nó còn ghi harness vào **`CLAUDE.md`** — file mà chính Claude Code nạp ở
    mọi phiên — trong một khối có đánh dấu, không đụng nội dung của bạn. Nhờ
    vậy luật vẫn có hiệu lực cả khi cài `--no-hooks`, trước khi khởi động lại,

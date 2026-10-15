@@ -172,8 +172,12 @@ changed in place inside a row that stays in the set.
 
 ## Credentials
 
-`.pythia/connections.json` holds them in plaintext and is gitignored by the
-scaffold. `PYTHIA_USER` / `PYTHIA_PASSWORD` / `PYTHIA_DSN` are read from the
+`.pythia/connections.json` holds them in plaintext. It is created mode 600,
+and `pythia install` writes it into the project's `.gitignore` — a rule every
+clone shares — unless a rule there already ignores it; a rule only this
+machine has (`.git/info/exclude`, a personal excludes file) is not counted.
+Install warns, and `pythia doctor` fails, when git already tracks the file:
+the passwords are then in the history, so untrack it and change them. `PYTHIA_USER` / `PYTHIA_PASSWORD` / `PYTHIA_DSN` are read from the
 environment if you prefer. pythia never transmits credentials anywhere except
 to the database you configured, and never writes them to the journal.
 

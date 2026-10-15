@@ -88,8 +88,10 @@ then only happen at the developer's console (`pythia approve <token>`), or
 through an autopilot lease started there (`pythia autopilot on`).
 
 After `pythia install`: restart the session, run `pythia doctor`, and fix
-every `fail` line — each one is a setting that will stop approvals from
-arriving. A `fail` on **hook launch** means a hook's interpreter cannot import
+every `fail` line — each one names its fix. Most are a setting that will stop
+approvals from arriving; a `fail` on **credentials** means git tracks
+`.pythia/connections.json`: `git rm --cached` it, commit, and change those
+passwords. A `fail` on **hook launch** means a hook's interpreter cannot import
 pythia, so the guard is off: common when pythia lives in a venv or pipx and
 Claude Code starts from a desktop app or IDE. Re-run `pythia install` — it pins
 that machine's interpreter in `.claude/settings.local.json` and Claude Code's

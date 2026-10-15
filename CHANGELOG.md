@@ -1,12 +1,37 @@
 # Changelog
 
-## Unreleased
+## 0.15.4 — 2026-10-15
 
+From the 0.15.3 field test: `git status` in the sample projects listed
+`.pythia/`, one `git add -A` away from committing the passwords — while
+GUIDE.md and SECURITY.md said the file was "gitignored by the scaffold".
+
+- **install keeps `.pythia/connections.json` out of every clone.** It writes
+  the path into the project's `.gitignore` (created if missing, your bytes
+  kept) unless a rule there already ignores it. A rule only this machine has
+  — `.git/info/exclude`, a personal excludes file — does not count, and a
+  later `!` negation is overridden by appending the rule after it. Outside a
+  repository the line is written anyway, so a later `git init` starts safe.
+  Re-running install on an existing project adds it.
+- **When git already tracks the file**, install warns and `pythia doctor`
+  fails a new **credentials** row: a rule cannot untrack a committed file,
+  so both name `git rm --cached .pythia/connections.json`, a commit, and
+  changing the passwords the history keeps. doctor warns when the file is
+  not ignored or ignored only on this machine, and is ok when a shared
+  `.gitignore` rule covers it.
+- doctor's closing line no longer says every `fail` stops approvals — a
+  tracked password file does not; it says each `fail` line names its fix.
 - **A project website** at https://thaildhe172591.github.io/pythia/ —
   `site/`, one static page in English with a Vietnamese toggle, published
   by the `pages` workflow on every change to `site/` on main. It states the
   release, the counts and every skill by name; `tests/test_install.py`
-  fails when any of them drifts from the code.
+  fails when any of them drifts from the code. It moves: a replay types one
+  write end to end — impact, lint, the preview, the approval, the write,
+  the verdict — while a track lights each of the six steps; the recorded
+  terminals stream in, the hero prompt keeps typing the commands an agent
+  runs, numbers count up and blocks rise as they arrive. The page as served
+  is the finished state; with reduced motion none of it runs, and "Pause
+  motion" holds whatever is mid-flight.
 
 ## 0.15.3 — 2026-10-15
 

@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.3"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.4"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -4095,6 +4095,117 @@ def exclude_local_settings(project_root):
     return exclude
 
 
+SECRET_REL = f"{CONFIG_DIR}/{CONFIG_NAME}"
+
+
+def git_ignore_source(root, rel):
+    """How git treats `rel` under root: ("shared", source) when a .gitignore
+    in the repository ignores it — every clone; ("local", source) when only
+    this machine does (.git/info/exclude, a personal excludes file);
+    ("none", "") when `git add -A` would take it. None outside a repository
+    or without git. The index is not consulted: tracked is git_tracks()."""
+    import subprocess
+    git = path_lookup("git")
+    if not git:
+        return None
+    try:
+        r = subprocess.run([git, "-C", str(root), "check-ignore", "-v",
+                            "--no-index", "--", rel], stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode not in (0, 1):
+        return None
+    # <source>:<line>:<pattern>TAB<path>; a match on "!pattern" un-ignores it
+    m = re.match(r"(.+?):(\d+):(.*?)\t", r.stdout)
+    if r.returncode == 1 or not m or m.group(3).startswith("!"):
+        return "none", ""
+    src = m.group(1)
+    shared = (not _is_abs_path(src)
+              and os.path.basename(src.replace("\\", "/")) == ".gitignore")
+    return ("shared" if shared else "local"), src
+
+
+def _gitignore_covers(path, rel):
+    """Read as text where git cannot answer: does the last rule in `path`
+    naming rel (or its folder) ignore it?"""
+    if not path.is_file():
+        return False
+    folder = rel.split("/")[0]
+    names = {rel, folder, folder + "/", folder + "/*", folder + "/**"}
+    covered = False
+    for ln in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        s = ln.strip()
+        neg = s.startswith("!")
+        body = (s[1:] if neg else s).lstrip("/")
+        if body in names:
+            covered = not neg
+    return covered
+
+
+def ignore_connections(project_root):
+    """Keep .pythia/connections.json — the passwords — out of every clone:
+    append it to the project's .gitignore unless a rule there already ignores
+    it. A rule only this machine has is not enough, and outside git the line
+    is written anyway, so a later `git init` starts safe. Returns the
+    .gitignore written, or None."""
+    root = pathlib.Path(project_root)
+    gi = root / ".gitignore"
+    state = git_ignore_source(root, SECRET_REL)
+    if state is not None and state[0] == "shared":
+        return None
+    if _gitignore_covers(gi, SECRET_REL):
+        return None        # written already; a rule deeper down overrides it
+    data = gi.read_bytes() if gi.is_file() else b""
+    with open(gi, "ab") as f:               # their bytes stay theirs
+        f.write((b"\n" if data and not data.endswith(b"\n") else b"")
+                + b"# pythia: database passwords, never committed\n"
+                + SECRET_REL.encode("utf-8") + b"\n")
+    return gi
+
+
+def report_connections_ignore(project_root):
+    root = pathlib.Path(project_root)
+    try:
+        gi = ignore_connections(root)
+    except OSError as e:            # a safeguard, never a reason to abort
+        gi = None
+        print(f"WARNING: could not write {root / '.gitignore'} ({e}) — "
+              f"add {SECRET_REL} to it by hand; the file holds passwords.")
+    if gi is not None:
+        print(f"Added {SECRET_REL} to {gi} — it holds passwords; commit the "
+              ".gitignore so every clone keeps it out")
+    if git_tracks(root, SECRET_REL):
+        print(f"WARNING: git already tracks {SECRET_REL}, so its passwords are "
+              f"in the repository. Run `git rm --cached {SECRET_REL}`, commit, "
+              "and change those passwords — the history keeps the old ones.")
+
+
+def credentials_check(root):
+    """doctor's row for the password file: fail when git tracks it, warn
+    when git would commit it, ok when a shared rule keeps it out."""
+    state = git_ignore_source(root, SECRET_REL)
+    if state is None:
+        return ("info", "credentials", f"{SECRET_REL} not checked — no git "
+                "repository here (or git is not on PATH)")
+    if git_tracks(root, SECRET_REL):
+        return ("fail", "credentials", f"git tracks {SECRET_REL} — its "
+                f"passwords are in the repository; `git rm --cached "
+                f"{SECRET_REL}`, commit, then change those passwords (the "
+                "history keeps the old ones)")
+    kind, src = state
+    fix = f"{invocation()} install adds it to .gitignore"
+    if kind == "shared":
+        return ("ok", "credentials", f"{SECRET_REL} is git-ignored ({src})")
+    if kind == "local":
+        return ("warn", "credentials", f"{SECRET_REL} is ignored only on this "
+                f"machine ({src}) — a teammate's clone would commit theirs; "
+                + fix)
+    return ("warn", "credentials", f"{SECRET_REL} is not git-ignored — one "
+            f"`git add -A` commits the passwords; " + fix)
+
+
 def git_common_dir(root):
     """The directory holding info/exclude: .git itself, or — in a worktree or
     a submodule, where .git is a file — the gitdir it names (a worktree's
@@ -4653,6 +4764,7 @@ def cmd_install(conn, schema, ns):
         return
     path, created = scaffold_config(ns.project_root)
     print(f"{'Created' if created else 'Kept existing'} {path}")
+    report_connections_ignore(ns.project_root)
     if global_pack_present():
         print("Skill pack found in the global install — it already serves "
               "this project,\nso no project copy is made (a second copy "
@@ -7126,6 +7238,7 @@ def harness_checks(project_root, home=None):
                         + ("" if filled else f" — fill in {cfg}")))
         except ValueError:
             out.append(("fail", "connections", f"{cfg} is not valid JSON"))
+        out.append(credentials_check(root))
     else:
         out.append(("warn", "connections", f"no {CONFIG_DIR}/{CONFIG_NAME} — "
                                            f"{invocation()} install"))
@@ -7273,8 +7386,8 @@ def cmd_doctor(conn, schema, ns):
         print(f"  {paint(f'{s:<4}', color[s], en)} {a:<15} {m}")
     bad = sum(1 for s, _, _ in rows if s == "fail")
     if bad:
-        print(paint(f"\n  {bad} problem(s) will stop approvals or the guard "
-                    "from working.", "red", en))
+        print(paint(f"\n  {bad} problem(s) to fix first — each fail line "
+                    "names its fix.", "red", en))
     if conn is None:
         print(f"\n  Database environment: {invocation()} doctor --db")
 
