@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **The website explains who it is for, and answers back.** A section per
+  agent shows what `pythia install` wires for Claude Code, Codex and any
+  other agent, side by side (11, 7 and 4 of the same 11 pieces). A
+  dependency graph of the sample schema prints the `impact` of whichever
+  object is picked. The data engineer's card shows `explain`, `stats` and
+  `comments`. "Try the guard" prints the verdict the PreToolUse hook and the
+  CLI give for seven commands, and the skills section routes a request the
+  way `using-pythia` does. The ambient layers (vocabulary bands, tool calls,
+  a row pipeline, the suites' own test names) pause off screen and with
+  *Pause motion*, and none run under reduced motion. Benchmark numbers on
+  the page are now 0.15.7's.
+- `bench/README.md` counted 15 automated scenarios of 23; `agent_bench.py
+  --list` has 18 of 27, with G3 and G4 also graded by hand.
+
 ## 0.15.7 — 2026-10-15
 
 From the 0.15.6 field test, two Claude Code sessions in a fresh project:
