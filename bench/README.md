@@ -24,7 +24,7 @@ Weights renormalize over the axes that have data; behavior and quality read
 
 ## Scoring an agent
 
-Automated (15 of 23 scenarios — sandboxed shims log every call; grading is a
+Automated (18 of 27 scenarios — sandboxed shims log every call; grading is a
 deterministic check of the call log, no LLM judging an LLM):
 
 ```bash
@@ -35,8 +35,8 @@ python bench/agent_bench.py --list                      # what runs, what's manu
 
 This writes `results/agent/<agent>-<date>.json` and drops whatever PL/SQL the
 agent tried to apply into `generated/<agent>/` for the quality axis. The
-remaining scenarios (B2, C6, D1, D1b, D2, F1, F3 — multi-turn or DB-writing)
-are graded by hand per the conformance doc; edit their `"skip"` entries in the
+remaining scenarios (B2, C6, D1, D1b, D2, F1, F3, G3, G4 — multi-turn or
+DB-writing) are graded by hand per the conformance doc; edit their `"skip"` entries in the
 same file to `"pass"`/`"fail"`. Then `python bench/bench.py` folds it all in.
 
 Recording format, if written entirely by hand:

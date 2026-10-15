@@ -20,7 +20,7 @@
 :root {
   --bg: #080c16; --bg-2: #0c1220; --surface: #10172a; --ink: #ecf0f6; --muted: #9ba7bb; --line: #1d2840;
   --gold: #e8b54a; --gold-ink: #170f00; --gold-soft: rgba(232, 181, 74, .13); --backdrop: #1f2a41;
-  --ok: #6fd19a; --warn: #f0b34c; --fail: #f27b72;
+  --ok: #6fd19a; --warn: #f0b34c; --fail: #f27b72; --cy: #6cc4d8;
   --term-bg: #050811; --term-fg: #d6dfeb; --term-dim: #7a879d; --term-line: #1b2438;
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --body: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -30,13 +30,13 @@
   :root:not([data-theme="dark"]) {
     --bg: #f6f7fb; --bg-2: #eef1f7; --surface: #ffffff; --ink: #10172a; --muted: #4f5b70; --line: #d8deea;
     --gold: #9a6806; --gold-ink: #ffffff; --gold-soft: rgba(154, 104, 6, .10); --backdrop: #e3e8f0;
-    --ok: #23784a; --warn: #94600a; --fail: #b32a20; color-scheme: light;
+    --ok: #23784a; --warn: #94600a; --fail: #b32a20; --cy: #1a7184; color-scheme: light;
   }
 }
 :root[data-theme="light"] {
   --bg: #f6f7fb; --bg-2: #eef1f7; --surface: #ffffff; --ink: #10172a; --muted: #4f5b70; --line: #d8deea;
   --gold: #9a6806; --gold-ink: #ffffff; --gold-soft: rgba(154, 104, 6, .10); --backdrop: #e3e8f0;
-  --ok: #23784a; --warn: #94600a; --fail: #b32a20; color-scheme: light;
+  --ok: #23784a; --warn: #94600a; --fail: #b32a20; --cy: #1a7184; color-scheme: light;
 }
 :root[data-lang="vi"] [lang="en"]:not(html) { display: none !important; }
 :root:not([data-lang="vi"]) [lang="vi"] { display: none !important; }
@@ -226,8 +226,152 @@ footer { margin-top: 110px; border-top: 1px solid var(--line); padding-block: 40
 .pause .ico { width: 10px; height: 10px; display: inline-block; border-left: 3px solid currentColor; border-right: 3px solid currentColor; }
 :root.still .pause .ico { border: 0; width: 0; height: 0; border-left: 9px solid currentColor; border-top: 6px solid transparent; border-bottom: 6px solid transparent; }
 :root.still .backdrop pre, :root.still .backdrop i, :root.still .orb::before, :root.still .cursor, :root.still .caret,
-:root.still .orbit g, :root.still ol.path li::after, :root.still ol.track li.now::before { animation-play-state: paused; }
+:root.still .orbit g, :root.still ol.path li::after, :root.still ol.track li.now::before,
+:root.still .band .run, :root.still .tokens span, :root.still #graph .flow, :root.still .rain div, :root.still .agent-chip.first i { animation-play-state: paused; }
 
+/* where you are: a reading line under the nav, and the nav names the section */
+.progress { position: fixed; z-index: 30; top: 0; left: 0; right: 0; height: 2px; pointer-events: none; transform-origin: 0 50%; transform: scaleX(0);
+  background: linear-gradient(90deg, var(--gold), var(--cy)); }
+.links a.here { color: var(--ink); background: var(--gold-soft); }
+
+/* the hero's lamp: under the pointer the drifting code comes up in gold */
+.backdrop .lit { position: absolute; inset: 0; opacity: 0; transition: opacity .4s ease;
+  -webkit-mask-image: radial-gradient(230px circle at var(--mx, -500px) var(--my, -500px), #000, transparent 72%);
+  mask-image: radial-gradient(230px circle at var(--mx, -500px) var(--my, -500px), #000, transparent 72%); }
+.backdrop .lit pre { color: var(--gold); }
+.hero.lamp .backdrop .lit { opacity: .62; }
+.orb img { transition: transform .5s cubic-bezier(.2, .7, .2, 1); transform: perspective(800px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); }
+
+/* agents: who pythia sits next to, Claude Code first */
+.agent-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+.agent-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-2); color: var(--muted); font: 600 .8rem/1 var(--mono); text-decoration: none; }
+.agent-chip:hover { color: var(--ink); border-color: var(--gold); }
+.agent-chip i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.agent-chip.first { color: var(--ink); border-color: color-mix(in srgb, var(--gold) 70%, var(--line)); background: var(--gold-soft); }
+.agent-chip.first i { background: var(--gold); animation: ping 2.2s ease-out infinite; }
+.agent-chip.second i { background: var(--cy); }
+
+/* ambient bands: the vocabulary of both worlds, running underneath */
+.bands { display: grid; gap: 4px; margin-top: 46px; padding-block: 16px; border-block: 1px solid var(--line); background: var(--bg-2); overflow: hidden; }
+.band { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); }
+.band .run { display: flex; width: max-content; animation: marquee 90s linear infinite; }
+.band.rev .run { animation-duration: 110s; animation-direction: reverse; }
+.band span { display: inline-flex; align-items: center; gap: 22px; padding: 7px 0 7px 22px; font: 400 .84rem/1 var(--mono); color: var(--muted); white-space: nowrap; }
+.band span::after { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--line); }
+.band b { color: var(--ink); font-weight: 800; }
+.band .g { color: var(--gold); font-weight: 600; }
+.band .c { color: var(--cy); font-weight: 600; }
+.bands:hover .run { animation-play-state: paused; }
+
+/* a section with its own ambient layer, kept behind the content and paused off screen */
+.zone { position: relative; isolation: isolate; }
+.ambient { position: absolute; inset: 0; z-index: -1; pointer-events: none; overflow: hidden;
+  -webkit-mask-image: radial-gradient(ellipse at 50% 45%, #000 30%, transparent 78%); mask-image: radial-gradient(ellipse at 50% 45%, #000 30%, transparent 78%); }
+.tokens span { position: absolute; top: 100%; left: var(--x, 0); font: 400 .78rem/1 var(--mono); color: var(--backdrop); white-space: nowrap;
+  animation: rise var(--t, 26s) linear infinite; animation-delay: var(--dl, 0s); }
+.tokens span.k { color: var(--gold); opacity: .32; }
+.tokens span.c { color: var(--cy); opacity: .3; }
+.zone.off .ambient *, .zone.off .ambient { animation-play-state: paused !important; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; }
+.tab { display: inline-flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font: 600 .92rem/1.2 var(--mono); cursor: pointer; transition: border-color .25s, color .25s, background-color .25s; }
+.tab:hover { color: var(--ink); border-color: color-mix(in srgb, var(--gold) 50%, var(--line)); }
+.tab small { font: 600 .68rem/1 var(--mono); letter-spacing: .04em; color: var(--muted); padding: 4px 7px; border-radius: 999px; background: var(--bg-2); }
+.tab[aria-selected="true"] { color: var(--ink); border-color: var(--gold); background: linear-gradient(180deg, var(--gold-soft), var(--surface)); }
+.tab[aria-selected="true"] small { color: var(--gold-ink); background: var(--gold); }
+.tabs.small .tab { padding: 7px 12px; font-size: .82rem; border-radius: 10px; }
+.js .tabpanel:not(.on) { display: none; }
+.js .tabpanel.on { animation: fadeup .45s cubic-bezier(.2, .7, .2, 1) both; }
+
+.agents { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; margin-top: 18px; align-items: start; }
+.agents .term { margin: 0; }
+.finish { margin: 16px 0 0; padding-left: 1.3em; display: grid; gap: 8px; color: var(--muted); font-size: .93rem; }
+.finish li::marker { color: var(--gold); font-family: var(--mono); }
+.matrix { min-width: 560px; }
+.matrix td, .matrix th { padding: 10px 12px; }
+.matrix td:first-child { color: var(--ink); }
+.matrix tr > :first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.matrix thead th:first-child, .matrix tfoot td:first-child { background: var(--bg-2); }
+.matrix td:not(:first-child), .matrix th:not(:first-child) { width: 19%; transition: background-color .35s; }
+.matrix small { display: block; margin-top: 2px; font: 400 .72rem/1.35 var(--mono); color: var(--muted); }
+.matrix .y, .matrix .n { font: 800 1rem/1 var(--mono); display: inline-block; }
+.matrix .h { display: inline-block; width: .8em; height: .8em; border-radius: 50%; border: 2px solid var(--warn); background: linear-gradient(90deg, var(--warn) 50%, transparent 50%); vertical-align: -.05em; }
+.matrix .y { color: var(--ok); } .matrix .n { color: var(--line); }
+.matrix[data-col="claude"] tr > :nth-child(2), .matrix[data-col="codex"] tr > :nth-child(3), .matrix[data-col="any"] tr > :nth-child(4) { background: var(--gold-soft); }
+.matrix td.pop .y { animation: pop .5s cubic-bezier(.2, .7, .2, 1.4) both; animation-delay: var(--d, 0s); }
+.matrix tfoot td { font: 600 .8rem/1.3 var(--mono); color: var(--ink); background: var(--bg-2); }
+
+/* Oracle and data: a dependency graph you can click, and a pipeline running behind the data card */
+.od { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; margin-top: 36px; align-items: start; }
+.panel { position: relative; isolation: isolate; overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 24px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.panel h3 { font: 800 1.2rem/1.25 var(--mono); }
+.panel .tag { font: 600 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+.panel.data .tag { color: var(--cy); }
+.panel p { color: var(--muted); }
+.panel .term { margin: 0; }
+.graph-wrap { overflow-x: auto; margin-inline: -8px; }
+#graph { display: block; width: 100%; min-width: 500px; height: auto; }
+#graph .edge { fill: none; stroke: var(--line); stroke-width: 1.4; }
+#graph .flow { fill: none; stroke: var(--gold); stroke-width: 1.6; stroke-dasharray: 3 9; opacity: .22; animation: flow 2.8s linear infinite; }
+#graph .flow.hit { opacity: .95; animation-duration: 1.1s; }
+#graph .node { cursor: pointer; }
+#graph .node rect { fill: var(--bg-2); stroke: var(--line); stroke-width: 1.2; transition: fill .35s, stroke .35s; }
+#graph .node text { font: 600 11px var(--mono); fill: var(--ink); }
+#graph .node .ty { font: 400 8.5px var(--mono); fill: var(--muted); letter-spacing: .06em; }
+#graph .node:hover rect, #graph .node:focus-visible rect { stroke: var(--gold); }
+#graph .node:focus { outline: none; }
+#graph .node.root rect { fill: var(--gold); stroke: var(--gold); }
+#graph .node.root text { fill: var(--gold-ink); }
+#graph .node.hit rect { stroke: var(--gold); fill: var(--gold-soft); animation: lit .6s ease both; animation-delay: var(--d, 0s); }
+.hint { font: 400 .8rem/1.4 var(--mono); color: var(--muted); }
+.panel.data { padding-top: 26px; }
+.panel .flowbg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000, #000 150px, transparent 230px); mask-image: linear-gradient(to bottom, #000, #000 150px, transparent 230px); }
+.dfacts { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.dfacts li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; font-size: .92rem; color: var(--muted); }
+.dfacts code { white-space: nowrap; align-self: start; }
+.dfacts b { color: var(--ink); font-weight: 600; }
+
+/* try the guard: pick a command, read the verdict the real hook gives */
+.play { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 16px; margin-top: 30px; align-items: start; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
+.chip { font: 400 .8rem/1.35 var(--mono); text-align: left; color: var(--term-fg); background: var(--term-bg); border: 1px solid var(--term-line); border-radius: 10px; padding: 9px 12px; cursor: pointer; max-width: 100%; overflow-wrap: anywhere; transition: border-color .2s, transform .2s; }
+.chip::before { content: "$ "; color: var(--term-dim); }
+.chip[data-r]::before { content: "› "; color: #e8b54a; }
+.chip:hover { border-color: #e8b54a; }
+.chip[aria-pressed="true"] { border-color: #e8b54a; box-shadow: 0 0 0 3px var(--gold-soft); }
+.verdict { margin: 0; }
+.verdict pre { min-height: 13.5em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.verdict .badge { display: inline-block; font: 800 .72rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; padding: 5px 9px; border-radius: 6px; border: 1px solid currentColor; }
+
+/* the router: say it the way you would, watch using-pythia open the page */
+.router { margin-top: 30px; display: grid; gap: 14px; }
+.router .say { font: 600 .74rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.route-out { font: 400 .9rem/1.5 var(--mono); color: var(--muted); min-height: 1.5em; }
+.route-out b { color: var(--gold); font-weight: 600; }
+html:not(.js) .router, html:not(.js) .play .chips { display: none; }
+.skills.routing .skill:not(.lead):not(.picked) { opacity: .42; }
+.skill { transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease, opacity .35s ease; }
+.skill.picked { border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+.skill.picked b::after { content: " ←"; color: var(--gold); }
+
+/* benchmark: the real test names fall behind the numbers */
+.rain { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.rain div { display: grid; gap: 12px; align-content: start; animation: fall 70s linear infinite; }
+.rain div:nth-child(2) { animation-duration: 88s; animation-delay: -30s; } .rain div:nth-child(3) { animation-duration: 76s; animation-delay: -12s; } .rain div:nth-child(4) { animation-duration: 96s; animation-delay: -50s; }
+.rain span { font: 400 .74rem/1.3 var(--mono); color: var(--backdrop); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rain span::before { content: "✓ "; color: var(--ok); opacity: .45; }
+
+/* the pointer warms whatever card it is over */
+.card, .skill, .stat, ol.doors li, .code, .panel { background-image: radial-gradient(260px circle at var(--px, -400px) var(--py, -400px), var(--gold-soft), transparent 70%); }
+
+@keyframes marquee { to { transform: translateX(-50%); } }
+@keyframes rise { 0% { transform: translateY(0); opacity: 0; } 8%, 85% { opacity: 1; } 100% { transform: translateY(var(--h, -900px)); opacity: 0; } }
+@keyframes flow { to { stroke-dashoffset: -24; } }
+@keyframes lit { from { stroke-width: 4; } to { stroke-width: 1.2; } }
+@keyframes pop { from { transform: scale(.2); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fadeup { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fall { from { transform: translateY(-50%); } to { transform: translateY(0); } }
 @keyframes drift { from { transform: translateY(0); } to { transform: translateY(-50%); } }
 @keyframes twinkle { 0%, 100% { opacity: .25; } 50% { opacity: 1; text-shadow: 0 0 12px rgba(232, 181, 74, .7); } }
 @keyframes glow { 0%, 100% { opacity: .75; transform: scale(.97); } 50% { opacity: 1; transform: scale(1.03); } }
@@ -237,7 +381,9 @@ footer { margin-top: 110px; border-top: 1px solid var(--line); padding-block: 40
 @keyframes walk { 0%, 100% { opacity: 0; } 6%, 14% { opacity: 1; box-shadow: 0 0 24px -8px var(--gold); } 24% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .backdrop pre, .backdrop i, .orb::before, .cursor, .caret, .orbit g, ol.path li::after, ol.track li.now::before { animation: none !important; }
+  .backdrop pre, .backdrop i, .orb::before, .cursor, .caret, .orbit g, ol.path li::after, ol.track li.now::before,
+  .band .run, .tokens span, #graph .flow, .rain div, .agent-chip.first i, .js .tabpanel.on, #graph .node.hit rect, .matrix td.pop .y { animation: none !important; }
+  .orb img, .tab, .skill { transition: none; }
   .backdrop i { opacity: .8; }
   .replay-btn { display: none; }
   .card, .skill, ol.doors li, .stat, ol.path li, .code { transition: none; }
@@ -250,6 +396,7 @@ footer { margin-top: 110px; border-top: 1px solid var(--line); padding-block: 40
   ol.track li::before { left: 13px; }
   ol.track li:not(:last-child)::after { display: none; }
   ol.path { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .agents, .od, .play { grid-template-columns: minmax(0, 1fr); }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .skills { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -258,6 +405,11 @@ footer { margin-top: 110px; border-top: 1px solid var(--line); padding-block: 40
   .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .orb { width: min(260px, 70%); order: -1; justify-self: start; }
   .grid3, .grid2, .codes, ol.doors { grid-template-columns: minmax(0, 1fr); }
+  .rain { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tokens span.k, .tokens span.c { opacity: .16; }
+  .matrix tr > :first-child { width: 38%; min-width: 150px; }
+  .rain div:nth-child(n+3) { display: none; }
+  .panel { padding: 18px; }
   .brand span.word { display: none; }
   .backdrop { opacity: .7; }
   .pause { padding: 12px; }
@@ -278,11 +430,14 @@ footer { margin-top: 110px; border-top: 1px solid var(--line); padding-block: 40
 </head>
 <body>
 
+<div class="progress" aria-hidden="true"></div>
 <header class="nav">
   <div class="nav-pill">
     <a class="brand" href="#top" aria-label="pythia, back to top"><img src="logo.webp" alt="" width="28" height="28"><span class="word">pythia</span><span class="cursor" aria-hidden="true"></span></a>
     <nav class="links" aria-label="Sections">
       <a href="#demo">Demo</a>
+      <a href="#agents">Agents</a>
+      <a href="#oracle">Oracle · Data</a>
       <a href="#how"><span lang="en">How it works</span><span lang="vi">Cách làm việc</span></a>
       <a href="#safety"><span lang="en">Safety</span><span lang="vi">An toàn</span></a>
       <a href="#autopilot">Autopilot</a>
@@ -397,7 +552,12 @@ END trg_order_audit;
         <a class="ghost" href="#how"><span lang="en">Explore ↓</span><span lang="vi">Xem tiếp ↓</span></a>
         <a class="ghost" href="https://github.com/thaildhe172591/pythia">GitHub →</a>
       </div>
-      <p class="works"><span lang="en">Works with Claude Code and Codex · MIT licensed · Python stdlib + python-oracledb, nothing else</span><span lang="vi">Dùng với Claude Code và Codex · giấy phép MIT · chỉ cần thư viện chuẩn Python và python-oracledb</span></p>
+      <div class="agent-row" aria-label="Agents">
+        <a class="agent-chip first" href="#agents"><i></i>Claude Code <span lang="en">· deepest</span><span lang="vi">· sâu nhất</span></a>
+        <a class="agent-chip second" href="#agents"><i></i>Codex</a>
+        <a class="agent-chip" href="#agents"><i></i><span lang="en">any agent with a shell</span><span lang="vi">mọi agent có shell</span></a>
+      </div>
+      <p class="works"><span lang="en">For Oracle PL/SQL developers and data engineers · MIT licensed · Python stdlib + python-oracledb, nothing else</span><span lang="vi">Cho dev Oracle PL/SQL và data engineer · giấy phép MIT · chỉ cần thư viện chuẩn Python và python-oracledb</span></p>
     </div>
     <div class="orb"><svg class="orbit" viewBox="0 0 100 100" aria-hidden="true"><g class="o1"><circle class="ring" cx="50" cy="50" r="48"/><circle class="dot" cx="50" cy="2" r="1.1"/><circle class="dot" cx="98" cy="50" r=".7"/></g><g class="o2"><circle class="ring" cx="50" cy="50" r="42"/><circle class="dot" cx="8" cy="50" r=".9"/></g></svg><img src="logo.webp" width="480" height="480" alt="pythia logo: a black cat oracle holding a glowing database"></div>
   </div>
@@ -411,6 +571,11 @@ END trg_order_audit;
     <span><b data-count="lint">39</b> <span lang="en">lint rules</span><span lang="vi">rule lint</span></span>
     <span><b>1</b> <span lang="en">write path, for every write</span><span lang="vi">con đường ghi cho mọi lần ghi</span></span>
   </div>
+</div>
+
+<div class="bands" aria-hidden="true">
+  <div class="band"><div class="run"><span><b>PL/SQL</b> packages</span><span>triggers</span><span>views</span><span><span class="c">COMMENT ON</span> tables and columns</span><span>DBMS_METADATA</span><span><span class="c">DBMS_XPLAN</span></span><span>PL/Scope</span><span>optimizer statistics</span><span>unindexed foreign keys</span><span>release scripts, read like SQL*Plus</span><span>utPLSQL</span><span>proxy login</span><span>EZConnect</span><span><span class="c">MERGE</span> and DML, behind the strictest gate</span><span>row set: count + fingerprint</span><span>snapshot · journal · undo</span><span><b>PL/SQL</b> packages</span><span>triggers</span><span>views</span><span><span class="c">COMMENT ON</span> tables and columns</span><span>DBMS_METADATA</span><span><span class="c">DBMS_XPLAN</span></span><span>PL/Scope</span><span>optimizer statistics</span><span>unindexed foreign keys</span><span>release scripts, read like SQL*Plus</span><span>utPLSQL</span><span>proxy login</span><span>EZConnect</span><span><span class="c">MERGE</span> and DML, behind the strictest gate</span><span>row set: count + fingerprint</span><span>snapshot · journal · undo</span></div></div>
+  <div class="band rev"><div class="run"><span><b>Claude Code</b></span><span><span class="g">CLAUDE.md</span></span><span>SessionStart</span><span><span class="g">PreToolUse</span> guard</span><span>PostToolUse verdict</span><span>AskUserQuestion</span><span><span class="g">pythia_approve</span> · MCP</span><span>native plugin</span><span><b>Codex</b></span><span><span class="c">AGENTS.md</span></span><span>.codex/hooks.json</span><span>.agents/skills</span><span>codex exec</span><span>npx skills</span><span>any agent with a shell</span><span><b>Claude Code</b></span><span><span class="g">CLAUDE.md</span></span><span>SessionStart</span><span><span class="g">PreToolUse</span> guard</span><span>PostToolUse verdict</span><span>AskUserQuestion</span><span><span class="g">pythia_approve</span> · MCP</span><span>native plugin</span><span><b>Codex</b></span><span><span class="c">AGENTS.md</span></span><span>.codex/hooks.json</span><span>.agents/skills</span><span>codex exec</span><span>npx skills</span><span>any agent with a shell</span></div></div>
 </div>
 
 <section class="block wrap" id="demo">
@@ -460,6 +625,146 @@ END trg_order_audit;
     </ol>
   </div>
   <p class="caption"><span lang="en">A replay on the sample schema; each output line uses the CLI's own wording, shortened.</span><span lang="vi">Phát lại trên schema mẫu; mỗi dòng output dùng đúng câu chữ của CLI, có rút gọn.</span></p>
+</section>
+
+<section class="block wrap zone" id="agents">
+  <div class="ambient tokens" aria-hidden="true" data-tokens></div>
+  <p class="kicker">Agents</p>
+  <h2><span lang="en">Deepest in Claude Code. Wired for Codex.</span><span lang="vi">Sâu nhất trong Claude Code. Nối sẵn cho Codex.</span></h2>
+  <p class="intro"><span lang="en">One <code>pythia install</code> in the project root sets up both. Claude Code gets every piece: a hook around each tool call, two approval doors inside the chat and a native plugin. Codex gets the rules, the skills, the session guide and the MCP approval door. Any agent that can run a shell gets the CLI, and since the write gate lives in the CLI, it holds in every client.</span><span lang="vi">Một lần <code>pythia install</code> ở gốc dự án cấu hình cả hai. Claude Code nhận đủ mọi phần: hook quanh mỗi lần gọi tool, hai cửa duyệt ngay trong chat và plugin gốc. Codex nhận bộ luật, skill, guide đầu phiên và cửa duyệt MCP. Agent nào chạy được shell cũng dùng được CLI, và vì cổng ghi nằm trong CLI nên nó giữ nguyên ở mọi client.</span></p>
+  <div class="tabs" role="tablist" aria-label="Agent" data-tabs="agent">
+    <button class="tab" type="button" role="tab" id="t-claude" aria-controls="p-claude" aria-selected="true" data-tab="claude">Claude Code <small>11 / 11</small></button>
+    <button class="tab" type="button" role="tab" id="t-codex" aria-controls="p-codex" aria-selected="false" tabindex="-1" data-tab="codex">Codex <small>7 / 11</small></button>
+    <button class="tab" type="button" role="tab" id="t-any" aria-controls="p-any" aria-selected="false" tabindex="-1" data-tab="any"><span lang="en">Any agent</span><span lang="vi">Agent khác</span> <small>4 / 11</small></button>
+  </div>
+  <div class="agents">
+    <div>
+      <div class="tabpanel on" role="tabpanel" id="p-claude" aria-labelledby="t-claude"><div class="term"><div class="bar"><i></i><i></i><i></i><span>pythia install · Claude Code</span></div>
+<pre data-type><span class="gd">CLAUDE.md</span>
+  the 13 rules, in a marked block
+<span class="gd">.claude/settings.json</span>
+  SessionStart · PreToolUse · PostToolUse
+<span class="gd">.mcp.json</span>
+  pythia_approve, the write-free approver
+<span class="gd">.claude/skills/</span>
+  <span data-count="skills">17</span> skills
+<span class="gd">.pythia/</span>
+  connections.json, mode 600, git-ignored
+<span class="d"># a venv install: settings.local.json, local MCP scope</span></pre></div>
+      <ol class="finish" lang="en"><li>Restart the Claude Code session so the hooks and the MCP server load.</li><li><code>pythia doctor</code>: no <span class="p-fail">fail</span> line means the guard and both chat doors work on this machine.</li><li>Prefer a plugin? <code>/plugin marketplace add thaildhe172591/pythia</code> brings the skills, hooks and approver.</li></ol>
+      <ol class="finish" lang="vi"><li>Khởi động lại phiên Claude Code để hook và MCP server có hiệu lực.</li><li><code>pythia doctor</code>: không còn dòng <span class="p-fail">fail</span> là guard và cả hai cửa duyệt trong chat đều chạy trên máy này.</li><li>Muốn dùng plugin? <code>/plugin marketplace add thaildhe172591/pythia</code> mang theo skill, hook và approver.</li></ol></div>
+      <div class="tabpanel" role="tabpanel" id="p-codex" aria-labelledby="t-codex"><div class="term"><div class="bar"><i></i><i></i><i></i><span>pythia install · Codex</span></div>
+<pre data-type><span class="cy">AGENTS.md</span>
+  the 13 rules, in a marked block
+<span class="cy">.codex/config.toml</span>
+  pythia_approve, the write-free approver
+<span class="cy">.codex/hooks.json</span>
+  SessionStart: the guide and the live state
+<span class="cy">.agents/skills/</span>
+  <span data-count="skills">17</span> skills
+<span class="cy">.pythia/</span>
+  connections.json, mode 600, git-ignored
+<span class="d"># chat approval needs Codex ≥ v0.120; older ones use the terminal</span></pre></div>
+      <ol class="finish" lang="en"><li>Trust the pieces once: <code>/mcp</code> (the pythia server) and <code>/hooks</code> (the project's <code>.codex</code> layer).</li><li>Restart the Codex session so the new <code>AGENTS.md</code> loads; <code>/skills</code> lists the skills and <code>/mcp</code> shows <code>pythia: connected</code>.</li><li>Never run it under <code>danger-full-access</code>: that sandbox approves elicitations by itself and skips your Approve.</li></ol>
+      <ol class="finish" lang="vi"><li>Tin cậy các phần một lần: <code>/mcp</code> (server pythia) và <code>/hooks</code> (lớp <code>.codex</code> của dự án).</li><li>Khởi động lại phiên Codex để nạp <code>AGENTS.md</code> mới; <code>/skills</code> liệt kê skill và <code>/mcp</code> hiện <code>pythia: connected</code>.</li><li>Đừng chạy dưới <code>danger-full-access</code>: sandbox đó tự duyệt elicitation và bỏ qua nút Approve của bạn.</li></ol></div>
+      <div class="tabpanel" role="tabpanel" id="p-any" aria-labelledby="t-any"><div class="term"><div class="bar"><i></i><i></i><i></i><span>pythia install · any agent</span></div>
+<pre data-type>AGENTS.md
+  the rules, for agents that read it
+skills
+  npx skills add thaildhe172591/pythia
+pythia &lt;command&gt;
+  the CLI and its write gate, from any shell
+.pythia/
+  connections.json, mode 600, git-ignored
+<span class="d"># approvals: the developer runs pythia approve &lt;token&gt;</span></pre></div>
+      <ol class="finish" lang="en"><li><code>npx skills add thaildhe172591/pythia</code> installs the skills for the agents it supports.</li><li><code>pythia guide --brief</code> is the session preamble; <code>pythia guide</code> prints the whole contract.</li><li>Approve each write at your own terminal with <code>pythia approve &lt;token&gt;</code>.</li></ol>
+      <ol class="finish" lang="vi"><li><code>npx skills add thaildhe172591/pythia</code> cài skill cho các agent mà nó hỗ trợ.</li><li><code>pythia guide --brief</code> là phần mở đầu phiên; <code>pythia guide</code> in hợp đồng đầy đủ.</li><li>Duyệt từng lần ghi ở terminal của bạn bằng <code>pythia approve &lt;token&gt;</code>.</li></ol></div>
+    </div>
+    <div class="tbl"><table class="matrix" id="matrix" data-col="claude">
+        <thead><tr><th><span lang="en">What the agent gets</span><span lang="vi">Agent nhận được</span></th><th>Claude Code</th><th>Codex</th><th><span lang="en">Any agent</span><span lang="vi">Agent khác</span></th></tr></thead>
+        <tbody><tr><td><span lang="en">Rules loaded every session</span><span lang="vi">Bộ luật nạp ở mọi phiên</span></td><td><span class="y">✓</span><small>CLAUDE.md</small></td><td><span class="y">✓</span><small>AGENTS.md</small></td><td><span class="h" role="img" aria-label="partly"></span><small><span lang="en">AGENTS.md, if it reads it</span><span lang="vi">AGENTS.md, nếu agent đọc</span></small></td></tr><tr><td><span lang="en">The <span data-count="skills">17</span> skills</span><span lang="vi"><span data-count="skills">17</span> skill</span></td><td><span class="y">✓</span><small>.claude/skills</small></td><td><span class="y">✓</span><small>.agents/skills</small></td><td><span class="y">✓</span><small>npx skills add</small></td></tr><tr><td><span lang="en">Session guide and live state</span><span lang="vi">Guide và trạng thái đầu phiên</span></td><td><span class="y">✓</span><small>SessionStart</small></td><td><span class="y">✓</span><small>.codex/hooks.json</small></td><td><span class="n">—</span><small>pythia guide --brief</small></td></tr><tr><td><span lang="en">Guard before every tool call</span><span lang="vi">Guard trước mỗi lần gọi tool</span></td><td><span class="y">✓</span><small>PreToolUse</small></td><td><span class="n">—</span></td><td><span class="n">—</span></td></tr><tr><td><span lang="en">Verdict rules beside each write result</span><span lang="vi">Luật đọc kết quả cạnh mỗi lần ghi</span></td><td><span class="y">✓</span><small>PostToolUse</small></td><td><span class="n">—</span></td><td><span class="n">—</span></td></tr><tr><td><span lang="en">Approve in chat: <code>pythia_approve</code></span><span lang="vi">Duyệt trong chat: <code>pythia_approve</code></span></td><td><span class="y">✓</span><small><span lang="en">every mode but dontAsk</span><span lang="vi">mọi mode trừ dontAsk</span></small></td><td><span class="y">✓</span><small>Codex ≥ v0.120</small></td><td><span class="n">—</span></td></tr><tr><td><span lang="en">Approve in chat: AskUserQuestion card</span><span lang="vi">Duyệt trong chat: thẻ AskUserQuestion</span></td><td><span class="y">✓</span><small>approve --card</small></td><td><span class="n">—</span></td><td><span class="n">—</span></td></tr><tr><td><span lang="en">Native plugin</span><span lang="vi">Plugin gốc</span></td><td><span class="y">✓</span><small>/plugin marketplace add</small></td><td><span class="n">—</span></td><td><span class="n">—</span></td></tr><tr><td><span lang="en">Approve at the developer's terminal</span><span lang="vi">Duyệt ở terminal của dev</span></td><td><span class="y">✓</span><small>pythia approve</small></td><td><span class="y">✓</span><small>pythia approve</small></td><td><span class="y">✓</span><small>pythia approve</small></td></tr><tr><td><span lang="en">Write gate inside the CLI</span><span lang="vi">Cổng ghi nằm trong CLI</span></td><td><span class="y">✓</span><small><span lang="en">token · policy · verify</span><span lang="vi">token · policy · verify</span></small></td><td><span class="y">✓</span><small><span lang="en">token · policy · verify</span><span lang="vi">token · policy · verify</span></small></td><td><span class="y">✓</span><small><span lang="en">token · policy · verify</span><span lang="vi">token · policy · verify</span></small></td></tr><tr><td><span lang="en">Headless behavior bench</span><span lang="vi">Bench hành vi chạy headless</span></td><td><span class="y">✓</span><small>--agent claude</small></td><td><span class="y">✓</span><small>--driver "codex exec …"</small></td><td><span class="y">✓</span><small>--driver "&lt;cli&gt; …"</small></td></tr></tbody>
+        <tfoot><tr><td><span lang="en">Pieces wired</span><span lang="vi">Số phần được nối</span></td><td>11 / 11</td><td>7 / 11</td><td>4 / 11</td></tr></tfoot>
+      </table></div>
+  </div>
+  <p class="caption"><span lang="en">The behavior bench drives either agent headless and grades its call log, with no model judging a model: <code>python bench/agent_bench.py --agent claude</code>, or <code>--agent codex --driver "codex exec {prompt}"</code>. 18 of its 27 scenarios run on their own. No run is recorded yet, so the scoreboard shows n/a.</span><span lang="vi">Bench hành vi chạy headless với cả hai agent và chấm từ log lời gọi, không có model nào chấm model: <code>python bench/agent_bench.py --agent claude</code>, hoặc <code>--agent codex --driver "codex exec {prompt}"</code>. 18 trong 27 kịch bản tự chạy. Chưa có lần chạy nào được ghi, nên bảng điểm ghi n/a.</span></p>
+</section>
+
+<section class="block wrap" id="oracle">
+  <p class="kicker">Oracle · Data</p>
+  <h2><span lang="en">For the people who own the schema.</span><span lang="vi">Cho người giữ schema.</span></h2>
+  <p class="intro"><span lang="en">PL/SQL developers change packages that other code leans on. Data engineers ship releases and tune the queries under their pipelines. The agent asks the data dictionary what either of them would check by hand, and changes to data wait behind the strictest gate pythia has.</span><span lang="vi">Dev PL/SQL sửa package mà code khác đang dựa vào. Data engineer đưa release lên và tối ưu các truy vấn nằm dưới pipeline. Agent hỏi data dictionary đúng những gì họ vẫn tự kiểm tra, còn thay đổi dữ liệu thì phải qua cổng chặt nhất của pythia.</span></p>
+  <div class="od">
+    <div class="panel">
+      <span class="tag"><span lang="en">Oracle developer</span><span lang="vi">Dev Oracle</span></span>
+      <h3><span lang="en">Pick an object. See what it would break.</span><span lang="vi">Chọn một object. Xem nó kéo theo những gì.</span></h3>
+      <div class="graph-wrap"><svg id="graph" viewBox="18 14 690 272" role="group" aria-label="Dependencies in the sample schema APP_OWNER"><path class="edge" d="M116 70C172 70 172 70 227 70"/><path class="edge" d="M116 70C163 70 163 160 210 160"/><path class="edge" d="M116 70C162 70 162 250 207 250"/><path class="edge" d="M133 160C180 160 180 70 227 70"/><path class="edge" d="M133 160C172 160 172 160 210 160"/><path class="edge" d="M136 250C172 250 172 250 207 250"/><path class="edge" d="M313 70C359 70 359 44 406 44"/><path class="edge" d="M313 70C362 70 362 150 412 150"/><path class="edge" d="M330 160C371 160 371 150 412 150"/><path class="edge" d="M512 150C544 150 544 150 577 150"/><path class="flow" data-e="T_ORDER>PKG_ORDER" d="M116 70C172 70 172 70 227 70"/><path class="flow" data-e="T_ORDER>V_ORDER_TOTALS" d="M116 70C163 70 163 160 210 160"/><path class="flow" data-e="T_ORDER>TRG_ORDER_AUDIT" d="M116 70C162 70 162 250 207 250"/><path class="flow" data-e="T_ORDER_LINE>PKG_ORDER" d="M133 160C180 160 180 70 227 70"/><path class="flow" data-e="T_ORDER_LINE>V_ORDER_TOTALS" d="M133 160C172 160 172 160 210 160"/><path class="flow" data-e="T_ORDER_AUDIT>TRG_ORDER_AUDIT" d="M136 250C172 250 172 250 207 250"/><path class="flow" data-e="PKG_ORDER>PKG_ORDER_API" d="M313 70C359 70 359 44 406 44"/><path class="flow" data-e="PKG_ORDER>PKG_BILLING" d="M313 70C362 70 362 150 412 150"/><path class="flow" data-e="V_ORDER_TOTALS>PKG_BILLING" d="M330 160C371 160 371 150 412 150"/><path class="flow" data-e="PKG_BILLING>PKG_BILLING_JOB" d="M512 150C544 150 544 150 577 150"/><g class="node" data-n="T_ORDER" data-t="TABLE" tabindex="0" role="button" aria-label="T_ORDER (table): show its impact"><rect x="44" y="52" width="73" height="36" rx="9"/><text x="80" y="69" text-anchor="middle">T_ORDER</text><text class="ty" x="80" y="81" text-anchor="middle">TABLE</text></g><g class="node" data-n="T_ORDER_LINE" data-t="TABLE" tabindex="0" role="button" aria-label="T_ORDER_LINE (table): show its impact"><rect x="27" y="142" width="106" height="36" rx="9"/><text x="80" y="159" text-anchor="middle">T_ORDER_LINE</text><text class="ty" x="80" y="171" text-anchor="middle">TABLE</text></g><g class="node" data-n="T_ORDER_AUDIT" data-t="TABLE" tabindex="0" role="button" aria-label="T_ORDER_AUDIT (table): show its impact"><rect x="24" y="232" width="113" height="36" rx="9"/><text x="80" y="249" text-anchor="middle">T_ORDER_AUDIT</text><text class="ty" x="80" y="261" text-anchor="middle">TABLE</text></g><g class="node root" data-n="PKG_ORDER" data-t="PACKAGE" tabindex="0" role="button" aria-label="PKG_ORDER (package): show its impact"><rect x="227" y="52" width="86" height="36" rx="9"/><text x="270" y="69" text-anchor="middle">PKG_ORDER</text><text class="ty" x="270" y="81" text-anchor="middle">PACKAGE</text></g><g class="node" data-n="V_ORDER_TOTALS" data-t="VIEW" tabindex="0" role="button" aria-label="V_ORDER_TOTALS (view): show its impact"><rect x="210" y="142" width="120" height="36" rx="9"/><text x="270" y="159" text-anchor="middle">V_ORDER_TOTALS</text><text class="ty" x="270" y="171" text-anchor="middle">VIEW</text></g><g class="node" data-n="TRG_ORDER_AUDIT" data-t="TRIGGER" tabindex="0" role="button" aria-label="TRG_ORDER_AUDIT (trigger): show its impact"><rect x="207" y="232" width="126" height="36" rx="9"/><text x="270" y="249" text-anchor="middle">TRG_ORDER_AUDIT</text><text class="ty" x="270" y="261" text-anchor="middle">TRIGGER</text></g><g class="node hit" data-n="PKG_ORDER_API" data-t="PACKAGE BODY" tabindex="0" role="button" aria-label="PKG_ORDER_API (package body): show its impact"><rect x="406" y="26" width="113" height="36" rx="9"/><text x="462" y="43" text-anchor="middle">PKG_ORDER_API</text><text class="ty" x="462" y="55" text-anchor="middle">PACKAGE BODY</text></g><g class="node hit" data-n="PKG_BILLING" data-t="PACKAGE BODY" tabindex="0" role="button" aria-label="PKG_BILLING (package body): show its impact"><rect x="412" y="132" width="100" height="36" rx="9"/><text x="462" y="149" text-anchor="middle">PKG_BILLING</text><text class="ty" x="462" y="161" text-anchor="middle">PACKAGE BODY</text></g><g class="node hit" data-n="PKG_BILLING_JOB" data-t="PACKAGE BODY" tabindex="0" role="button" aria-label="PKG_BILLING_JOB (package body): show its impact"><rect x="577" y="132" width="126" height="36" rx="9"/><text x="640" y="149" text-anchor="middle">PKG_BILLING_JOB</text><text class="ty" x="640" y="161" text-anchor="middle">PACKAGE BODY</text></g></svg></div>
+      <p class="hint"><span lang="en">Click or tap an object in the sample schema; pythia walks three levels by default.</span><span lang="vi">Bấm vào một object trong schema mẫu; mặc định pythia đi sâu ba tầng.</span></p>
+      <div class="term"><div class="bar"><i></i><i></i><i></i><span>pythia impact</span></div>
+<pre id="impact-out"><span class="d">$</span> pythia impact PKG_ORDER
+APP_OWNER.PKG_ORDER
+  APP_OWNER.PKG_ORDER_API (PACKAGE BODY)
+  APP_OWNER.PKG_BILLING (PACKAGE BODY)
+    APP_OWNER.PKG_BILLING_JOB (PACKAGE BODY)
+<span class="d">-- impact: 3 dependent objects, 3 currently VALID</span></pre></div>
+      <p class="hint"><span lang="en">Ten or more dependents, or one in another schema, and the developer sees this list before any code is written.</span><span lang="vi">Từ 10 object phụ thuộc trở lên, hoặc có object ở schema khác, thì dev được xem danh sách này trước khi viết code.</span></p>
+    </div>
+    <div class="panel data zone">
+      <canvas class="flowbg" aria-hidden="true"></canvas>
+      <span class="tag">Data engineer</span>
+      <h3><span lang="en">Tune it, document it, ship it.</span><span lang="vi">Tối ưu, ghi chú, đưa lên.</span></h3>
+      <div class="tabs small" role="tablist" aria-label="Command" data-tabs="data">
+        <button class="tab" type="button" role="tab" id="t-explain" aria-controls="d-explain" aria-selected="true" data-tab="explain">explain</button>
+        <button class="tab" type="button" role="tab" id="t-stats" aria-controls="d-stats" aria-selected="false" tabindex="-1" data-tab="stats">stats</button>
+        <button class="tab" type="button" role="tab" id="t-comments" aria-controls="d-comments" aria-selected="false" tabindex="-1" data-tab="comments">comments</button>
+      </div>
+      <div><div class="tabpanel on" role="tabpanel" id="d-explain" aria-labelledby="t-explain"><div class="term"><div class="bar"><i></i><i></i><i></i><span>pythia explain</span></div>
+<pre data-type><span class="d">$</span> pythia explain "select * from t_order where customer_id = :c"
+---------------------------------------------------------------
+| Id  | Operation         | Name    | Rows  | Cost (%CPU)|
+---------------------------------------------------------------
+|   0 | SELECT STATEMENT  |         |    42 |   311   (1)|
+|*  1 |  TABLE ACCESS FULL| T_ORDER |    42 |   311   (1)|
+---------------------------------------------------------------
+<span class="wn">-- note: full scan of T_ORDER — fine for small tables or most of the rows;
+   otherwise check the predicate is indexable (`pythia stats &lt;TABLE&gt;`)</span></pre></div></div><div class="tabpanel" role="tabpanel" id="d-stats" aria-labelledby="t-stats"><div class="term"><div class="bar"><i></i><i></i><i></i><span>pythia stats</span></div>
+<pre data-type><span class="d">$</span> pythia stats T_ORDER
+<span class="d">-- table</span>
+TABLE_NAME  NUM_ROWS  BLOCKS  LAST_ANALYZED     STALE_STATS  …
+T_ORDER     1840233   24310   2026-09-02 22:10  YES          …
+<span class="d">-- indexes</span>
+INDEX_NAME  COLUMNS   UNIQUENESS  STATUS  …
+PK_ORDER    ORDER_ID  UNIQUE      VALID   …
+<span class="d">-- unindexed fks</span>
+CONSTRAINT_NAME    COLUMNS      PARENT_TABLE
+FK_ORDER_CUSTOMER  CUSTOMER_ID  T_CUSTOMER
+<span class="wn">-- note: statistics are STALE
+-- note: unindexed foreign keys lock this table on parent DELETE/UPDATE of the key</span></pre></div></div><div class="tabpanel" role="tabpanel" id="d-comments" aria-labelledby="t-comments"><div class="term"><div class="bar"><i></i><i></i><i></i><span>pythia comments</span></div>
+<pre data-type><span class="d">$</span> pythia comments T_ORDER
+TABLE_NAME  COLUMN_NAME   DATA_TYPE     COMMENTS
+T_ORDER                   TABLE         Customer orders, one row each
+T_ORDER     ORDER_ID      NUMBER(12,0)  Order key
+T_ORDER     CUSTOMER_ID   NUMBER(12,0)
+T_ORDER     STATUS        VARCHAR2(1)   N new, C confirmed, X cancelled
+T_ORDER     CONFIRMED_AT  DATE
+<span class="d">-- 2 of 5 without a comment; pythia comments T_ORDER --scaffold writes the statements to fill in</span>
+<span class="d">$</span> pythia comments T_ORDER --scaffold
+COMMENT ON COLUMN T_ORDER.CUSTOMER_ID IS '';
+COMMENT ON COLUMN T_ORDER.CONFIRMED_AT IS '';</pre></div></div></div>
+      <ul class="dfacts" lang="en">
+        <li><code>explain</code><span>Parsed, never run. PLAN_TABLE only: no V$ views, no AWR or ASH, so nothing to license.</span></li>
+        <li><code>stats</code><span>Stale statistics and the foreign keys that lock, before anyone rewrites the query.</span></li>
+        <li><code>data_dml</code><span><b>Denied by default.</b> Where a policy allows it, the approval names the rows: a count, a fingerprint and a sample. Other rows need a new approval.</span></li>
+        <li><code>deploy</code><span>A release folder in its natural order, approved once, stopped at the first broken statement, resumed with <code>--from N</code>.</span></li>
+      </ul>
+      <ul class="dfacts" lang="vi">
+        <li><code>explain</code><span>Chỉ phân tích, không chạy. Chỉ dùng PLAN_TABLE: không V$, không AWR hay ASH, nên không cần thêm license.</span></li>
+        <li><code>stats</code><span>Thống kê đã cũ và các foreign key gây khoá, trước khi ai đó viết lại truy vấn.</span></li>
+        <li><code>data_dml</code><span><b>Mặc định bị chặn.</b> Khi policy cho phép, lần duyệt gọi tên đúng các dòng: số dòng, fingerprint và dữ liệu mẫu. Tập dòng khác phải duyệt lại.</span></li>
+        <li><code>deploy</code><span>Cả thư mục release theo thứ tự tự nhiên, duyệt một lần, dừng ở câu lệnh hỏng đầu tiên, chạy tiếp bằng <code>--from N</code>.</span></li>
+      </ul>
+    </div>
+  </div>
+  <p class="caption"><span lang="en">Sample schema; outputs use the CLI's own wording, columns shortened.</span><span lang="vi">Schema mẫu; output dùng đúng câu chữ của CLI, có lược bớt cột.</span></p>
 </section>
 
 <section class="block wrap" id="how">
@@ -525,6 +830,17 @@ sqlplus/SQLcl here would write with none of them (AGENTS.md rule 3). …<span cl
   </div>
   <p class="caption"><span lang="en">Recorded from a real Claude Code session on a sample project, October 2026.</span><span lang="vi">Ghi lại từ một phiên Claude Code thật trên dự án mẫu, tháng 10/2026.</span></p>
 
+  <h3 class="sub"><span lang="en">Try the guard</span><span lang="vi">Thử guard</span></h3>
+  <p class="intro"><span lang="en">Pick what the agent runs. The verdict is what pythia's PreToolUse hook and the CLI answer, word for word, shortened.</span><span lang="vi">Chọn lệnh agent chạy. Kết quả là đúng câu trả lời của hook PreToolUse và CLI của pythia, có rút gọn.</span></p>
+  <div class="play">
+    <div class="chips" role="group" aria-label="Commands"><button class="chip" type="button" data-g="impact" aria-pressed="true">pythia impact PKG_ORDER</button><button class="chip" type="button" data-g="preview" aria-pressed="false">pythia apply db/pkg_order_body.sql</button><button class="chip" type="button" data-g="confirm" aria-pressed="false">pythia apply db/pkg_order_body.sql --confirm 3f9a2c</button><button class="chip" type="button" data-g="sqlplus" aria-pressed="false">sqlplus app_owner/…@dev @db/01_t_order.sql</button><button class="chip" type="button" data-g="forge" aria-pressed="false">pythia approve 3f9a2c --hook</button><button class="chip" type="button" data-g="yes" aria-pressed="false">pythia apply db/pkg_order_body.sql --yes</button><button class="chip" type="button" data-g="auto" aria-pressed="false">pythia autopilot on</button></div>
+    <div class="term verdict"><div class="bar"><i></i><i></i><i></i><span><span lang="en">the verdict</span><span lang="vi">kết quả</span></span></div>
+<pre id="verdict" aria-live="polite"><span class="d">$</span> pythia impact PKG_ORDER
+<span class="ok">PreToolUse → allow</span>
+pythia read-only command — it cannot write
+<span class="d"># no prompt: a read cannot change the database</span></pre></div>
+  </div>
+
   <h3 class="sub"><span lang="en">Three doors to a yes, in order</span><span lang="vi">Ba cửa để được duyệt, theo thứ tự</span></h3>
   <ol class="doors">
     <li><h3><code>pythia_approve</code> (MCP)</h3><p lang="en">Prompts in every permission mode but <code>dontAsk</code>; no allow rule skips it, and it shows pythia's own card.</p><p lang="vi">Hỏi ở mọi chế độ quyền trừ <code>dontAsk</code>; không allow rule nào bỏ qua được, và hiện đúng thẻ duyệt của pythia.</p></li>
@@ -563,7 +879,12 @@ sqlplus/SQLcl here would write with none of them (AGENTS.md rule 3). …<span cl
   <p class="kicker">Skills</p>
   <h2><span lang="en">An Oracle build pack in <span data-count="skills">17</span> skills.</span><span lang="vi">Bộ phát triển Oracle trong <span data-count="skills">17</span> skill.</span></h2>
   <p class="intro"><span lang="en">Workflows the agent opens at the right moment. <code>using-pythia</code> routes; the rest each own one kind of job, held to the LEAD's conventions.</span><span lang="vi">Các quy trình mà agent tự mở đúng lúc. <code>using-pythia</code> điều hướng; mỗi skill còn lại lo một loại việc, theo đúng quy ước của LEAD.</span></p>
-  <div class="skills">
+  <div class="router">
+    <p class="say"><span lang="en">Say it the way you would</span><span lang="vi">Nói như bạn vẫn nói</span></p>
+    <div class="chips" role="group" aria-label="Requests"><button class="chip" type="button" data-r="table" aria-pressed="false"><span lang="en">Add a column to T_ORDER</span><span lang="vi">Thêm cột vào T_ORDER</span></button><button class="chip" type="button" data-r="tune" aria-pressed="false"><span lang="en">Why is this query slow?</span><span lang="vi">Sao truy vấn này chậm?</span></button><button class="chip" type="button" data-r="spec" aria-pressed="false"><span lang="en">Build an order-cancel flow</span><span lang="vi">Làm luồng huỷ đơn hàng</span></button><button class="chip" type="button" data-r="explore" aria-pressed="false"><span lang="en">Explain PKG_BILLING</span><span lang="vi">Giải thích PKG_BILLING</span></button><button class="chip" type="button" data-r="impact" aria-pressed="false"><span lang="en">Is it safe to touch T_ORDER?</span><span lang="vi">Sửa T_ORDER có an toàn không?</span></button><button class="chip" type="button" data-r="deploy" aria-pressed="false"><span lang="en">Run the release folder</span><span lang="vi">Chạy thư mục release</span></button><button class="chip" type="button" data-r="autopilot" aria-pressed="false"><span lang="en">Do it all without asking me</span><span lang="vi">Tự động hoàn toàn, đừng hỏi</span></button><button class="chip" type="button" data-r="ora" aria-pressed="false"><span lang="en">ORA-06550 in PKG_ORDER</span><span lang="vi">Lỗi ORA-06550 ở PKG_ORDER</span></button></div>
+    <p class="route-out" id="route-out" aria-live="polite"><span lang="en">Pick a request: using-pythia opens the skill it routes to.</span><span lang="vi">Chọn một yêu cầu: using-pythia mở skill tương ứng.</span></p>
+  </div>
+  <div class="skills" id="skill-grid">
     <div class="skill lead"><b>using-pythia</b><span lang="en">Routes each request to the right skill</span><span lang="vi">Mở đúng skill cho từng yêu cầu</span></div>
     <div class="skill"><b>pythia-spec</b><span lang="en">Settles open decisions before any code</span><span lang="vi">Chốt các điểm còn mở trước khi viết code</span></div>
     <div class="skill"><b>pythia-explore</b><span lang="en">Explains the code and schema that exist</span><span lang="vi">Giải thích code và schema đang có</span></div>
@@ -603,14 +924,15 @@ sqlplus/SQLcl here would write with none of them (AGENTS.md rule 3). …<span cl
   <p class="caption"><span lang="en">An excerpt from 0.15.3 on a sample project upgraded from 0.15.1, paths shortened.</span><span lang="vi">Trích từ bản 0.15.3 trên một dự án mẫu nâng cấp từ 0.15.1, đường dẫn được rút gọn.</span></p>
 </section>
 
-<section class="block wrap" id="benchmark">
+<section class="block wrap zone" id="benchmark">
+  <div class="ambient rain" aria-hidden="true"><div><span>test_query_bind_contract_matches_files</span><span>test_resolve_path_segment</span><span>test_approve_of_an_unsnapshotable_group_says_so</span><span>test_tools_list_returns_only_pythia_approve</span><span>test_query_binds_ignores_comments_and_literals</span><span>test_render_tree_indents_by_level</span><span>test_readme_and_security_carry_the_approval_gate</span><span>test_doctor_finds_what_breaks_askuserquestion</span><span>test_drift_note_fires_only_when_the_object_moved</span><span>test_paint_wraps_only_when_enabled</span><span>test_merge_codex_hooks_creates_and_is_idempotent</span><span>test_journal_restore_runs_the_six_steps</span><span>test_apply_skill_teaches_the_approval_gate</span><span>test_skills_add_cmd_scopes</span><span>test_query_bind_contract_matches_files</span><span>test_resolve_path_segment</span><span>test_approve_of_an_unsnapshotable_group_says_so</span><span>test_tools_list_returns_only_pythia_approve</span><span>test_query_binds_ignores_comments_and_literals</span><span>test_render_tree_indents_by_level</span><span>test_readme_and_security_carry_the_approval_gate</span><span>test_doctor_finds_what_breaks_askuserquestion</span><span>test_drift_note_fires_only_when_the_object_moved</span><span>test_paint_wraps_only_when_enabled</span><span>test_merge_codex_hooks_creates_and_is_idempotent</span><span>test_journal_restore_runs_the_six_steps</span><span>test_apply_skill_teaches_the_approval_gate</span><span>test_skills_add_cmd_scopes</span></div><div><span>test_read_grant_survives_a_corrupt_file</span><span>test_apply_refuses_a_spent_grant_the_second_time</span><span>test_apply_stale_token_refused</span><span>test_prepare_statement_terminators</span><span>test_resolve_default_must_name_a_connection</span><span>test_connection_summary_survives_a_thin_entry</span><span>test_apply_json_reports_the_grant_refusal_shape</span><span>test_template_matches_the_example_file</span><span>test_apply_preview_warns_on_naming_drift</span><span>test_frontmatter_is_valid_and_triggering</span><span>test_apply_skill_keeps_the_honest_rollback_table</span><span>test_comment_card_promises_a_real_undo</span><span>test_deploy_resumes_from_a_statement</span><span>test_missing_npx_falls_back_to_the_bundled_pack</span><span>test_read_grant_survives_a_corrupt_file</span><span>test_apply_refuses_a_spent_grant_the_second_time</span><span>test_apply_stale_token_refused</span><span>test_prepare_statement_terminators</span><span>test_resolve_default_must_name_a_connection</span><span>test_connection_summary_survives_a_thin_entry</span><span>test_apply_json_reports_the_grant_refusal_shape</span><span>test_template_matches_the_example_file</span><span>test_apply_preview_warns_on_naming_drift</span><span>test_frontmatter_is_valid_and_triggering</span><span>test_apply_skill_keeps_the_honest_rollback_table</span><span>test_comment_card_promises_a_real_undo</span><span>test_deploy_resumes_from_a_statement</span><span>test_missing_npx_falls_back_to_the_bundled_pack</span></div><div><span>test_copy_survives_a_symlinked_destination</span><span>test_approve_several_tokens_in_one_console_act</span><span>test_lint_catches_the_plsql_antipatterns</span><span>test_doctor_warns_a_rule_only_this_machine_has</span><span>test_apply_consumes_the_grant_and_records_it</span><span>test_skill_bodies_stay_within_budget</span><span>test_resolve_no_config_message</span><span>test_cmd_install_no_hooks_skips_the_mcp_files</span><span>test_the_router_names_every_skill</span><span>test_doctor_reports_the_wiring_after_install</span><span>test_resolve_single_connection_shortcut</span><span>test_restore_refuses_an_entry_that_has_no_undo</span><span>test_readonly_gate</span><span>test_apply_schema_mismatch_refused</span><span>test_copy_survives_a_symlinked_destination</span><span>test_approve_several_tokens_in_one_console_act</span><span>test_lint_catches_the_plsql_antipatterns</span><span>test_doctor_warns_a_rule_only_this_machine_has</span><span>test_apply_consumes_the_grant_and_records_it</span><span>test_skill_bodies_stay_within_budget</span><span>test_resolve_no_config_message</span><span>test_cmd_install_no_hooks_skips_the_mcp_files</span><span>test_the_router_names_every_skill</span><span>test_doctor_reports_the_wiring_after_install</span><span>test_resolve_single_connection_shortcut</span><span>test_restore_refuses_an_entry_that_has_no_undo</span><span>test_readonly_gate</span><span>test_apply_schema_mismatch_refused</span></div><div><span>test_doctor_checks_the_local_mcp_entry_too</span><span>test_apply_snapshot_survives_failed_execute</span><span>test_to_unistr</span><span>test_serve_fails_closed_on_scripted_decline</span><span>test_naming_violation_rules</span><span>test_agent_password_shape</span><span>test_all_expected_skills_exist</span><span>test_respell_never_touches_another_tools_hook</span><span>test_a_moved_row_set_refuses_the_confirm</span><span>test_claude_hook_block_matches_the_example_file</span><span>test_fallback_serves_both_claude_and_codex</span><span>test_prune_expired_grants_removes_only_the_dead</span><span>test_privilege_warning_speaks_proxy</span><span>test_dml_probe_reads_target_and_predicate</span><span>test_doctor_checks_the_local_mcp_entry_too</span><span>test_apply_snapshot_survives_failed_execute</span><span>test_to_unistr</span><span>test_serve_fails_closed_on_scripted_decline</span><span>test_naming_violation_rules</span><span>test_agent_password_shape</span><span>test_all_expected_skills_exist</span><span>test_respell_never_touches_another_tools_hook</span><span>test_a_moved_row_set_refuses_the_confirm</span><span>test_claude_hook_block_matches_the_example_file</span><span>test_fallback_serves_both_claude_and_codex</span><span>test_prune_expired_grants_removes_only_the_dead</span><span>test_privilege_warning_speaks_proxy</span><span>test_dml_probe_reads_target_and_predicate</span></div></div>
   <p class="kicker">Benchmark</p>
   <h2><span lang="en">Scored on every release.</span><span lang="vi">Chấm điểm ở mọi bản phát hành.</span></h2>
-  <p class="intro"><span lang="en"><code>bench/bench.py</code> scores four axes and keeps a row per version; CI fails on any regression. These are the 0.15.3 numbers, axes without data shown as such.</span><span lang="vi"><code>bench/bench.py</code> chấm bốn trục và lưu một dòng cho mỗi phiên bản; CI báo lỗi khi có bất kỳ regression nào. Đây là số của bản 0.15.3; trục chưa có dữ liệu được ghi đúng như vậy.</span></p>
+  <p class="intro"><span lang="en"><code>bench/bench.py</code> scores four axes and keeps a row per version; CI fails on any regression. These are the 0.15.7 numbers; axes without data say so.</span><span lang="vi"><code>bench/bench.py</code> chấm bốn trục và lưu một dòng cho mỗi phiên bản; CI báo lỗi khi có bất kỳ regression nào. Đây là số của bản 0.15.7; trục chưa có dữ liệu được ghi đúng như vậy.</span></p>
   <div class="stats">
-    <div class="stat"><div class="k"><span lang="en">Reliability</span><span lang="vi">Độ tin cậy</span></div><div class="v">100<small>/100</small></div><div class="s"><span lang="en">258 of 258 suite tests, 18 of 18 safety probes</span><span lang="vi">258/258 test trong các suite, 18/18 safety probe</span></div></div>
-    <div class="stat"><div class="k"><span lang="en">Performance</span><span lang="vi">Hiệu suất</span></div><div class="v">100<small>/100</small></div><div class="s"><span lang="en">131–137 ms median for the no-database commands</span><span lang="vi">131–137 ms (trung vị) cho các lệnh không cần database</span></div></div>
-    <div class="stat na"><div class="k"><span lang="en">Agent behavior</span><span lang="vi">Hành vi agent</span></div><div class="v">n/a</div><div class="s"><span lang="en">No recorded runs yet</span><span lang="vi">Chưa có lần chạy nào được ghi</span></div></div>
+    <div class="stat"><div class="k"><span lang="en">Reliability</span><span lang="vi">Độ tin cậy</span></div><div class="v">100<small>/100</small></div><div class="s"><span lang="en">267 of 267 suite tests, 18 of 18 safety probes</span><span lang="vi">267/267 test trong các suite, 18/18 safety probe</span></div></div>
+    <div class="stat"><div class="k"><span lang="en">Performance</span><span lang="vi">Hiệu suất</span></div><div class="v">100<small>/100</small></div><div class="s"><span lang="en">104–110 ms median for the no-database commands</span><span lang="vi">104–110 ms (trung vị) cho các lệnh không cần database</span></div></div>
+    <div class="stat na"><div class="k"><span lang="en">Agent behavior</span><span lang="vi">Hành vi agent</span></div><div class="v">n/a</div><div class="s"><span lang="en">No recorded run yet; the bench drives <code>claude -p</code> or <code>codex exec</code></span><span lang="vi">Chưa có lần chạy nào được ghi; bench chạy <code>claude -p</code> hoặc <code>codex exec</code></span></div></div>
     <div class="stat na"><div class="k"><span lang="en">Code quality</span><span lang="vi">Chất lượng code</span></div><div class="v">n/a</div><div class="s"><span lang="en">No generated samples yet</span><span lang="vi">Chưa có mẫu code nào</span></div></div>
   </div>
   <p class="caption"><a href="https://github.com/thaildhe172591/pythia/blob/main/BENCHMARK.md">BENCHMARK.md</a> · <span lang="en">CI runs Ubuntu, Windows and macOS on Python 3.9 and 3.13.</span><span lang="vi">CI chạy trên Ubuntu, Windows và macOS với Python 3.9 và 3.13.</span></p>
@@ -624,6 +946,11 @@ sqlplus/SQLcl here would write with none of them (AGENTS.md rule 3). …<span cl
     <div class="cmd"><span id="i2">pythia install</span><button class="copy" type="button" data-copy="i2">Copy</button></div>
   </div>
   <p class="caption"><span lang="en">Or, with Node.js: <code>npx pythia-plsql</code> does both.</span><span lang="vi">Hoặc, nếu có Node.js: <code>npx pythia-plsql</code> làm cả hai.</span></p>
+  <div class="tabs small" role="tablist" aria-label="Agent" data-tabs="install">
+    <button class="tab" type="button" role="tab" id="t-i-claude" aria-controls="i-claude" aria-selected="true" data-tab="i-claude">Claude Code</button>
+    <button class="tab" type="button" role="tab" id="t-i-codex" aria-controls="i-codex" aria-selected="false" tabindex="-1" data-tab="i-codex">Codex</button>
+  </div>
+  <div class="tabpanel on" role="tabpanel" id="i-claude" aria-labelledby="t-i-claude">
   <ol class="steps" lang="en">
     <li><code>pythia install</code> in the project root writes the rules into <code>CLAUDE.md</code> and <code>AGENTS.md</code>, wires the hooks and the MCP approver, installs the skills, and creates <code>.pythia/connections.json</code>, readable by its owner only.</li>
     <li>The developer fills in <code>connections.json</code> (below). The agent never opens it.</li>
@@ -636,6 +963,21 @@ sqlplus/SQLcl here would write with none of them (AGENTS.md rule 3). …<span cl
     <li><code>pythia check</code> thử kết nối; <code>pythia doctor</code> kiểm tra harness. Không còn dòng <span class="p-fail">fail</span> là guard và các cửa duyệt đều chạy trên máy này.</li>
     <li>Khởi động lại phiên Claude Code để hook có hiệu lực.</li>
   </ol>
+  </div>
+  <div class="tabpanel" role="tabpanel" id="i-codex" aria-labelledby="t-i-codex">
+  <ol class="steps" lang="en">
+    <li><code>pythia install</code> in the project root writes the rules into <code>AGENTS.md</code>, registers the MCP approver in <code>.codex/config.toml</code>, adds the session guide to <code>.codex/hooks.json</code>, puts the skills in <code>.agents/skills</code>, and creates <code>.pythia/connections.json</code>, readable by its owner only.</li>
+    <li>The developer fills in <code>connections.json</code> (below). The agent never opens it.</li>
+    <li>In Codex, trust the pieces once: <code>/mcp</code> for the pythia server, <code>/hooks</code> for the project's <code>.codex</code> layer.</li>
+    <li>Restart the Codex session. <code>/skills</code> lists the pythia skills and <code>/mcp</code> shows <code>pythia: connected</code>. Approval in the chat needs Codex v0.120 or later.</li>
+  </ol>
+  <ol class="steps" lang="vi">
+    <li><code>pythia install</code> ở gốc dự án ghi luật vào <code>AGENTS.md</code>, đăng ký MCP approver trong <code>.codex/config.toml</code>, thêm guide đầu phiên vào <code>.codex/hooks.json</code>, đặt skill vào <code>.agents/skills</code>, và tạo <code>.pythia/connections.json</code> với quyền chỉ chủ file đọc được.</li>
+    <li>Dev điền <code>connections.json</code> (hướng dẫn bên dưới). Agent không bao giờ mở file này.</li>
+    <li>Trong Codex, tin cậy các phần một lần: <code>/mcp</code> cho server pythia, <code>/hooks</code> cho lớp <code>.codex</code> của dự án.</li>
+    <li>Khởi động lại phiên Codex. <code>/skills</code> liệt kê skill của pythia và <code>/mcp</code> hiện <code>pythia: connected</code>. Duyệt trong chat cần Codex v0.120 trở lên.</li>
+  </ol>
+  </div>
 
   <h3 class="sub" id="connections"><span lang="en">Filling in connections.json</span><span lang="vi">Điền connections.json</span></h3>
   <div class="term">
@@ -722,6 +1064,7 @@ Added .pythia/connections.json to .gitignore — it holds passwords; commit the 
 <script>
 (function () {
   var root = document.documentElement;
+  root.classList.add("js");
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function save(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
@@ -766,13 +1109,196 @@ Added .pythia/connections.json to .gitignore — it holds passwords; commit the 
     });
   });
 
+
+  // --- interaction. All of it works with motion off; motion only adds the typing.
+  function held() { return root.classList.contains("still") || document.hidden; }
+  var typer = null, popRows = null;
+  function show(pre, html) {
+    pre._g = (pre._g || 0) + 1;
+    if (typer && !held()) typer(pre, html); else pre.innerHTML = html;
+  }
+  function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  document.querySelectorAll("pre[data-type]").forEach(function (pre) { pre._html = pre.innerHTML; });
+
+  // tabs: click or arrow keys; a panel's terminal types itself in when it opens
+  document.querySelectorAll("[data-tabs]").forEach(function (list) {
+    var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+    var pick = function (tab, focus) {
+      var panel = null;
+      tabs.forEach(function (t) {
+        var on = t === tab, p = document.getElementById(t.getAttribute("aria-controls"));
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        t.tabIndex = on ? 0 : -1;
+        if (p) p.classList.toggle("on", on);
+        if (on) panel = p;
+      });
+      if (focus) tab.focus();
+      var pre = panel && panel.querySelector("pre[data-type]");
+      if (pre) show(pre, pre._html);
+      list.dispatchEvent(new CustomEvent("pick", { detail: tab.getAttribute("data-tab") }));
+    };
+    tabs.forEach(function (t, i) {
+      t.addEventListener("click", function () { if (t.getAttribute("aria-selected") !== "true") pick(t); });
+      t.addEventListener("keydown", function (e) {
+        var k = e.key, j = k === "ArrowRight" ? i + 1 : k === "ArrowLeft" ? i - 1 : k === "Home" ? 0 : k === "End" ? tabs.length - 1 : null;
+        if (j === null) return;
+        e.preventDefault();
+        pick(tabs[(j + tabs.length) % tabs.length], true);
+      });
+    });
+  });
+  var matrix = document.getElementById("matrix"), agentTabs = document.querySelector('[data-tabs="agent"]');
+  if (matrix && agentTabs) agentTabs.addEventListener("pick", function (e) {
+    matrix.setAttribute("data-col", e.detail);
+    var wrap = matrix.parentElement, th = matrix.querySelectorAll("thead th"), col = { claude: 1, codex: 2, any: 3 }[e.detail];
+    if (wrap && th[col] && wrap.scrollWidth > wrap.clientWidth) wrap.scrollLeft = Math.max(0, th[col].offsetLeft - th[0].offsetWidth);
+    if (popRows) popRows(e.detail);
+  });
+
+  // the dependency graph: pick an object, and the graph and the terminal show its impact
+  var graph = document.getElementById("graph"), iout = document.getElementById("impact-out");
+  if (graph && iout) {
+    var dep = {}, kind = {};
+    graph.querySelectorAll(".flow").forEach(function (f) {
+      var e = f.getAttribute("data-e").split(">");
+      (dep[e[0]] = dep[e[0]] || []).push(e[1]);
+    });
+    graph.querySelectorAll(".node").forEach(function (g) { kind[g.getAttribute("data-n")] = g.getAttribute("data-t"); });
+    var pickNode = function (name, typed) {
+      var rows = [], hit = {};
+      (function walk(n, lvl) {          // what `pythia impact` walks: three levels; one object may come by two paths
+        if (lvl > 3) return;
+        (dep[n] || []).forEach(function (d) { rows.push([lvl, d]); hit[d] = Math.min(hit[d] || 9, lvl); walk(d, lvl + 1); });
+      })(name, 1);
+      var nodes = graph.querySelectorAll(".node");
+      nodes.forEach(function (g) { g.classList.remove("hit"); });
+      void graph.getBoundingClientRect();
+      nodes.forEach(function (g) {
+        var me = g.getAttribute("data-n");
+        g.classList.toggle("root", me === name);
+        g.setAttribute("aria-pressed", me === name ? "true" : "false");
+        if (hit[me]) { g.style.setProperty("--d", ((hit[me] - 1) * 0.16) + "s"); g.classList.add("hit"); }
+      });
+      graph.querySelectorAll(".flow").forEach(function (f) {
+        var e = f.getAttribute("data-e").split(">");
+        f.classList.toggle("hit", (e[0] === name || !!hit[e[0]]) && !!hit[e[1]]);
+      });
+      var n = Object.keys(hit).length, html = '<span class="d">$</span> pythia impact ' + name + "\n";
+      if (!n) html += '<span class="d">-- nothing depends on ' + name + " (within APP_OWNER, depth 3)</span>";
+      else {
+        html += "APP_OWNER." + name + "\n";
+        rows.forEach(function (r) { html += new Array(r[0] + 1).join("  ") + "APP_OWNER." + r[1] + " (" + kind[r[1]] + ")\n"; });
+        html += '<span class="d">-- impact: ' + n + " dependent objects, " + n + " currently VALID</span>";
+      }
+      if (typed) show(iout, html); else iout.innerHTML = html;
+    };
+    graph.addEventListener("click", function (e) {
+      var g = e.target.closest && e.target.closest(".node");
+      if (g) pickNode(g.getAttribute("data-n"), true);
+    });
+    graph.addEventListener("keydown", function (e) {
+      var g = e.target.closest && e.target.closest(".node");
+      if (g && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pickNode(g.getAttribute("data-n"), true); }
+    });
+    pickNode("PKG_ORDER", false);
+  }
+
+  // try the guard: each verdict is what the hook and the CLI print, shortened
+  var V_ASK = '<span class="wn">PreToolUse → no verdict: Claude Code asks you, as for any command</span>';
+  var VERDICT = {
+    impact: ['<span class="ok">PreToolUse → allow</span>', "pythia read-only command — it cannot write",
+             '<span class="d"># no prompt: a read cannot change the database</span>'],
+    preview: ['<span class="ok">PreToolUse → allow</span>', "pythia preview — writes nothing to the database",
+              '<span class="d"># the diff, the impact, a snapshot and token 3f9a2c; nothing is written yet</span>'],
+    confirm: [V_ASK, '<span class="d"># with no approval on file, apply refuses it (exit 1):</span>',
+              "The confirmation token matches, but no developer approval is on file.",
+              "Ask in chat — AskUserQuestion carrying the text of", "  pythia approve --card 3f9a2c", "with the options Approve / Reject …",
+              '<span class="d"># after your Approve, the hook answers:</span>',
+              '<span class="ok">PreToolUse → allow</span>', "the developer approved 3f9a2c (…); apply re-verifies it"],
+    sqlplus: ['<span class="fl">PreToolUse → deny</span>',
+              "Writes go through `pythia apply &lt;file&gt;` (one statement) or `pythia deploy &lt;files&gt;` (a script): snapshot, preview, approval, verify, journal. sqlplus/SQLcl here would write with none of them (AGENTS.md rule 3). Reads: `pythia sql \"select ...\"`. …"],
+    forge: ['<span class="fl">PreToolUse → deny</span>',
+            "approve --hook is the client's door: it reads a payload Claude Code wrote. Piping one in by hand would forge the developer's approval."],
+    yes: [V_ASK, '<span class="d"># and the CLI refuses it (exit 1), since no terminal is attached:</span>',
+          "--yes is the developer's flag, and no terminal is attached to this session.",
+          "Agents preview, relay the diff and the impact verbatim, STOP, and pass --confirm &lt;token&gt; only after the developer's explicit approval in chat."],
+    auto: [V_ASK, '<span class="d"># and the CLI refuses it (exit 1) outside a real console:</span>',
+           "autopilot on is the developer's command at a real console. Agents: run `pythia autopilot request` and ask with its card — through the pythia_approve tool, AskUserQuestion, or the developer's terminal."]
+  };
+  var verdict = document.getElementById("verdict");
+  document.querySelectorAll(".chip[data-g]").forEach(function (chip, i, all) {
+    chip.addEventListener("click", function () {
+      all.forEach(function (c) { c.setAttribute("aria-pressed", c === chip ? "true" : "false"); });
+      if (verdict) show(verdict, '<span class="d">$</span> ' + esc(chip.textContent) + "\n" + VERDICT[chip.getAttribute("data-g")].join("\n"));
+    });
+  });
+
+  // the router: what the developer says, and the skill using-pythia opens for it
+  var ROUTE = { table: ["pythia-table", "pythia-deploy"], tune: ["pythia-tune", "pythia-table / pythia-write"],
+                spec: ["pythia-spec", "impact → write → apply"], explore: ["pythia-explore"], impact: ["pythia-impact"],
+                deploy: ["pythia-deploy"], autopilot: ["pythia-autopilot", "pythia-spec"], ora: ["pythia-explore", "pythia-review"] };
+  var grid = document.getElementById("skill-grid"), rout = document.getElementById("route-out");
+  document.querySelectorAll(".chip[data-r]").forEach(function (chip, i, all) {
+    chip.addEventListener("click", function () {
+      var r = ROUTE[chip.getAttribute("data-r")];
+      all.forEach(function (c) { c.setAttribute("aria-pressed", c === chip ? "true" : "false"); });
+      if (grid) {
+        grid.classList.add("routing");
+        grid.querySelectorAll(".skill").forEach(function (sk) {
+          var b = sk.querySelector("b");
+          sk.classList.toggle("picked", !!b && b.textContent === r[0]);
+        });
+      }
+      if (rout) rout.innerHTML = '<span lang="en">Using <b>' + r[0] + "</b>" + (r[1] ? " — then " + r[1] : "") +
+        '</span><span lang="vi">Dùng <b>' + r[0] + "</b>" + (r[1] ? " — sau đó " + r[1] : "") + "</span>";
+    });
+  });
+
+  // the pointer warms the card under it
+  if (window.matchMedia && window.matchMedia("(hover: hover)").matches) {
+    var SPOT = ".card, .skill, .stat, ol.doors li, .code, .panel";
+    document.addEventListener("pointermove", function (e) {
+      var el = e.target.closest && e.target.closest(SPOT);
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      el.style.setProperty("--px", (e.clientX - r.left) + "px");
+      el.style.setProperty("--py", (e.clientY - r.top) + "px");
+    }, { passive: true });
+    document.addEventListener("pointerout", function (e) {
+      var el = e.target.closest && e.target.closest(SPOT);
+      if (el && !(e.relatedTarget && el.contains(e.relatedTarget))) { el.style.removeProperty("--px"); el.style.removeProperty("--py"); }
+    }, { passive: true });
+  }
+
+  // how far down the page, and which section the nav is on
+  var progress = document.querySelector(".progress"), links = document.querySelector(".links");
+  var navA = Array.prototype.slice.call(document.querySelectorAll('.links a[href^="#"]'));
+  var marks = navA.map(function (a) { return document.getElementById(a.getAttribute("href").slice(1)); });
+  var ticking = false, here = -2;
+  var onScroll = function () {
+    ticking = false;
+    var max = document.documentElement.scrollHeight - window.innerHeight;
+    if (progress) progress.style.transform = "scaleX(" + (max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0) + ")";
+    var line = window.innerHeight * 0.35, cur = -1;
+    marks.forEach(function (m, i) { if (m && m.getBoundingClientRect().top <= line) cur = i; });
+    if (cur === here) return;
+    here = cur;
+    navA.forEach(function (a, i) { a.classList.toggle("here", i === cur); });
+    if (cur >= 0 && links && links.scrollWidth > links.clientWidth) {
+      var a = navA[cur];
+      links.scrollLeft = a.offsetLeft - links.offsetLeft - (links.clientWidth - a.offsetWidth) / 2;
+    }
+  };
+  window.addEventListener("scroll", function () { if (!ticking) { ticking = true; requestAnimationFrame(onScroll); } }, { passive: true });
+  window.addEventListener("resize", onScroll);
+  onScroll();
+
   // --- motion. The page as served is the finished state: every terminal full,
   // every number final. What follows replays it; with reduced motion none runs,
   // and "Pause motion" holds whatever is mid-flight.
   var calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (calm || !window.IntersectionObserver || !window.Promise) return;
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-  function held() { return root.classList.contains("still") || document.hidden; }
   function hold() { return held() ? sleep(250).then(hold) : Promise.resolve(); }
   function seen(el, fn, margin) {
     var io = new IntersectionObserver(function (es) { es.forEach(function (e) { fn(e.isIntersecting); }); },
@@ -781,10 +1307,148 @@ Added .pythia/connections.json to .gitignore — it holds passwords; commit the 
     return io;
   }
 
+  // answers to a click type themselves in
+  typer = function (pre, html) {
+    var my = pre._g;
+    play(pre, html.split("\n"), function () { return pre._g === my; }, null, true);
+  };
+  var mtx = document.getElementById("matrix");
+  popRows = function (key) {
+    if (!mtx || held()) return;
+    var col = { claude: 1, codex: 2, any: 3 }[key];
+    mtx.querySelectorAll("td.pop").forEach(function (td) { td.classList.remove("pop"); });
+    void mtx.offsetWidth;
+    mtx.querySelectorAll("tbody tr").forEach(function (tr, i) {
+      var td = tr.children[col];
+      if (!td) return;
+      td.style.setProperty("--d", (i * 45) + "ms");
+      td.classList.add("pop");
+    });
+  };
+
+  // ambient layers rest while their section is off screen
+  document.querySelectorAll(".zone").forEach(function (z) {
+    seen(z, function (on) { z.classList.toggle("off", !on); }, "80px 0px 80px 0px");
+  });
+
+  // the agents section: tool calls from both clients drift up behind it
+  var tok = document.querySelector("[data-tokens]");
+  if (tok) {
+    [["Bash(pythia impact PKG_ORDER)", "k"], ["PreToolUse → allow", "k"], ["SessionStart", ""], ["pythia_approve", "k"],
+     ["AskUserQuestion", ""], ["PostToolUse", ""], ["CLAUDE.md", "k"], ["AGENTS.md", "c"], ["codex exec", "c"],
+     [".codex/hooks.json", "c"], ["/mcp", "c"], ["/hooks", "c"], ["apply --confirm 3f9a2c", ""], ["exit 0", ""],
+     ["Grant minted", "k"], ["PreToolUse → deny", ""], ["/skills", "c"], ["claude -p", "k"], ["autopilot: off", ""], ["RUN", ""]]
+      .forEach(function (w, i) {
+        var sp = document.createElement("span"), t = 24 + (i * 7) % 16;
+        sp.textContent = w[0];
+        if (w[1]) sp.className = w[1];
+        sp.style.setProperty("--x", ((i * 37) % 86 + 2) + "%");
+        sp.style.setProperty("--t", t + "s");
+        sp.style.setProperty("--dl", (-((i * 5.3) % t)).toFixed(1) + "s");
+        tok.appendChild(sp);
+      });
+    var tall = function () { tok.style.setProperty("--h", -(tok.offsetHeight + 40) + "px"); };
+    tall();
+    window.addEventListener("resize", tall);
+  }
+
+  // the hero: a lamp over the drifting code, and the oracle turns toward the pointer
+  var hero = document.querySelector(".hero");
+  if (hero && window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+    var bd = hero.querySelector(".backdrop"), src = bd && bd.querySelector("pre"), orbImg = hero.querySelector(".orb img"), lit = null;
+    if (src) {
+      lit = document.createElement("div");
+      lit.className = "lit";
+      var copy = src.cloneNode(true);
+      lit.appendChild(copy);
+      bd.appendChild(lit);
+      try {                                // the copy drifts in step with the original
+        var a0 = src.getAnimations()[0], a1 = copy.getAnimations()[0];
+        if (a0 && a1) a1.currentTime = a0.currentTime;
+      } catch (e) {}
+    }
+    var aimAt = 0, px = 0, py = 0;
+    var aim = function () {
+      aimAt = 0;
+      if (held()) return;
+      hero.classList.add("lamp");
+      if (lit) {
+        var r = bd.getBoundingClientRect();
+        lit.style.setProperty("--mx", (px - r.left) + "px");
+        lit.style.setProperty("--my", (py - r.top) + "px");
+      }
+      if (orbImg) {
+        var o = orbImg.getBoundingClientRect();
+        var dx = Math.max(-1, Math.min(1, (px - o.left - o.width / 2) / o.width));
+        var dy = Math.max(-1, Math.min(1, (py - o.top - o.height / 2) / o.height));
+        orbImg.style.setProperty("--ry", (dx * 9).toFixed(2) + "deg");
+        orbImg.style.setProperty("--rx", (-dy * 9).toFixed(2) + "deg");
+      }
+    };
+    hero.addEventListener("pointermove", function (e) { px = e.clientX; py = e.clientY; if (!aimAt) aimAt = requestAnimationFrame(aim); }, { passive: true });
+    hero.addEventListener("pointerleave", function () {
+      hero.classList.remove("lamp");
+      if (orbImg) { orbImg.style.removeProperty("--rx"); orbImg.style.removeProperty("--ry"); }
+    });
+  }
+
+  // the data card: rows stream left to right; past the gate they are counted and lit
+  var cv = document.querySelector(".flowbg");
+  if (cv && cv.getContext) {
+    var cx = cv.getContext("2d"), W = 0, Ht = 0, lanes = [], tone = {}, last = 0, toneAt = -1e9, cvZone = cv.closest(".zone");
+    var readTone = function () {
+      var cs = getComputedStyle(root);
+      tone.cy = cs.getPropertyValue("--cy").trim() || "#6cc4d8";
+      tone.gold = cs.getPropertyValue("--gold").trim() || "#e8b54a";
+    };
+    var fit = function () {
+      var r = cv.getBoundingClientRect(), d = Math.min(2, window.devicePixelRatio || 1);
+      W = r.width; Ht = r.height;
+      cv.width = Math.round(W * d); cv.height = Math.round(Ht * d);
+      cx.setTransform(d, 0, 0, d, 0, 0);
+      lanes = [];
+      for (var y = 16, k = 0; y < Ht - 8; y += 24, k++) {
+        var lane = { y: y, v: 16 + (k * 13) % 24, items: [] };
+        for (var x = -((k * 47) % 140); x < W + 80; x += 64 + (k * 31 + Math.abs(x)) % 96) lane.items.push({ x: x, w: 12 + (k * 7 + Math.abs(x)) % 22 });
+        lanes.push(lane);
+      }
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    var frame = function (t) {
+      requestAnimationFrame(frame);
+      var dt = last ? Math.min(0.05, (t - last) / 1000) : 0;
+      last = t;
+      if (held() || (cvZone && cvZone.classList.contains("off"))) return;
+      if (t - toneAt > 1200) { toneAt = t; readTone(); }
+      if (Math.abs(cv.offsetWidth - W) > 1 || Math.abs(cv.offsetHeight - Ht) > 1) fit();
+      cx.clearRect(0, 0, W, Ht);
+      var gate = W * 0.68;
+      cx.globalAlpha = 0.3;
+      cx.strokeStyle = tone.gold;
+      cx.setLineDash([3, 6]);
+      cx.beginPath(); cx.moveTo(gate, 0); cx.lineTo(gate, Ht); cx.stroke();
+      cx.setLineDash([]);
+      lanes.forEach(function (ln) {
+        ln.items.forEach(function (it) {
+          it.x += ln.v * dt;
+          if (it.x > W + 40) it.x -= W + 140;
+          var past = it.x > gate && it.x < gate + 80;
+          cx.globalAlpha = past ? 0.4 : 0.13;
+          cx.fillStyle = past ? tone.gold : tone.cy;
+          cx.fillRect(it.x, ln.y, it.w, 3);
+        });
+      });
+      cx.globalAlpha = 1;
+    };
+    requestAnimationFrame(frame);
+  }
+
   // a terminal types its commands and prints its output, line by line
   var CARET = '<span class="caret"></span>';
   function linesOf(pre) { return pre.innerHTML.replace(CARET, "").split("\n"); }
-  async function play(pre, lines, alive, onStage) {
+  async function play(pre, lines, alive, onStage, fast) {
+    var f = fast ? 0.4 : 1;
     var caret = document.createElement("span");
     caret.className = "caret";
     pre.innerHTML = "";
@@ -801,19 +1465,19 @@ Added .pythia/connections.json to .gitignore — it holds passwords; commit the 
         tmp.innerHTML = cmd[1];
         var text = tmp.textContent, node = document.createTextNode("");
         row.appendChild(node);
-        await sleep(420);
+        await sleep(420 * f);
         for (var k = 0; k < text.length; k++) {
           await hold();
           if (!alive()) return false;
           node.data += text[k];
-          await sleep(22 + Math.random() * 38);
+          await sleep((22 + Math.random() * 38) * f);
         }
-        await sleep(340);
+        await sleep(340 * f);
       } else {
         row.innerHTML = line;
         var st = /data-stage="([a-z]+)"/.exec(line);
         if (st && onStage) onStage(st[1]);
-        await sleep(line.trim() ? 80 : 30);
+        await sleep((line.trim() ? 80 : 30) * f);
       }
       if (i < lines.length - 1) pre.insertBefore(document.createTextNode("\n"), caret);
     }
@@ -912,7 +1576,7 @@ Added .pythia/connections.json to .gitignore — it holds passwords; commit the 
   // below the fold, blocks rise into place as they arrive; what is on screen stays put
   if (!held()) {
     var fold = window.innerHeight * 0.92;
-    document.querySelectorAll(".card, ol.path li, .code, ol.doors li, .skill, .stat, .tbl, .demo, .term[data-stream], ol.steps li, .install")
+    document.querySelectorAll(".card, ol.path li, .code, ol.doors li, .skill, .stat, .tbl, .demo, .term[data-stream], ol.steps li, .install, .panel, .play, .router")
       .forEach(function (el) {
         if (el.getBoundingClientRect().top < fold) return;
         var i = Array.prototype.indexOf.call(el.parentElement.children, el);
