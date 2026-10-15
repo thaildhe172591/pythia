@@ -29,7 +29,8 @@ a session changing pythia itself must do; CONTRIBUTING.md is the long form.
   README.md, README.vi.md, GUIDE.md, GUIDE.vi.md, the affected skill,
   SECURITY.md when a gate moves, and CHANGELOG.md — in the same change.
 - **Versions** agree in pyproject.toml, plugin.json, marketplace.json,
-  npm/package.json and `pythia.__version__`.
+  npm/package.json and `pythia.__version__` — and `site/index.html`, which
+  also states the command, skill, query and lint-rule counts.
 
 ## Never
 

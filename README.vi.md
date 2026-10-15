@@ -7,7 +7,7 @@
 > MCP của Oracle cho agent một kết nối tới database.
 > **pythia dạy nó dùng kết nối đó cho đúng.**
 
-[English](README.md) · **Tiếng Việt** · **[Hướng dẫn chi tiết →](GUIDE.vi.md)**
+[English](README.md) · **Tiếng Việt** · **[Hướng dẫn chi tiết →](GUIDE.vi.md)** · **[Trang web →](https://thaildhe172591.github.io/pythia/)**
 
 [![ci](https://github.com/thaildhe172591/pythia/actions/workflows/ci.yml/badge.svg)](https://github.com/thaildhe172591/pythia/actions/workflows/ci.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)

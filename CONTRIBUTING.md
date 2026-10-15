@@ -133,7 +133,9 @@ or to the approval gates.
 
 Versions live in four files and must agree: `pyproject.toml`,
 `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
-`npm/package.json` (`tests/test_install.py` enforces it). To release:
+`npm/package.json` (`tests/test_install.py` enforces it). The website,
+`site/index.html`, states the same release and the command, skill, query and
+lint-rule counts — the same test holds it to the code. To release:
 
 1. Bump the version in all four, update `CHANGELOG.md`, merge to `main`.
 2. `git tag vX.Y.Z && git push origin vX.Y.Z` — the `release` workflow
