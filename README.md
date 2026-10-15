@@ -192,7 +192,10 @@ each agent needs you to finish by hand.
    the absolute interpreter, and the MCP approver to Claude Code's local scope
    (`claude mcp add --scope local`); your teammates never get a path from your
    machine. `pythia doctor` starts every launcher it finds and fails the ones
-   that cannot import pythia.
+   that cannot import pythia — except where this machine's own launcher
+   already serves the same hooks: then the team's shared copy erroring here
+   is a warning (keep it for teammates or remove it). Codex's session hook is
+   a warning too: it carries only the session guide, and AGENTS.md the rules.
 
    Skills land in `.claude/skills` (or `~/.claude/skills` with `-g`).
 2. **Restart the Claude Code session** so the hooks and the MCP server load.

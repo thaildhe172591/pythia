@@ -1621,6 +1621,111 @@ def test_doctor_never_runs_a_script_path_from_a_shared_file():
         assert len(named) == 3, rows
 
 
+# Field test of 0.15.2: right after an install from a venv, doctor reported
+# `fail` for the team's shared hooks ("the guard is off") although
+# settings.local.json served every one of them, and `fail` for Codex's session
+# hook, which carries no guard at all — and advised a re-run of install that
+# cannot change either, since install leaves shared files alone.
+
+GONE = "python3.99 -m pythia"           # a bare interpreter on no PATH
+
+
+def _launch_rows(rows, prefix):
+    return [(s, m) for s, a, m in rows if a == "hook launch" and m.startswith(prefix)]
+
+
+def test_doctor_a_shared_hook_this_machine_already_covers_is_a_warning():
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_hooks(td, launcher=GONE)                  # the team's
+        pythia.install_claude_hooks(td, launcher=_good_launcher(), local=True)
+        rows = pythia.harness_checks(td, home)
+        shared = _launch_rows(rows, ".claude/settings.json")
+        assert len(shared) == 1 and shared[0][0] == "warn", rows
+        msg = shared[0][1]
+        assert ".claude/settings.local.json" in msg      # what serves them here
+        assert "keep" in msg and "remove" in msg          # the developer's call
+        assert "error" in msg                             # what they will see
+        assert not [r for r in rows if r[0] == "fail"], rows
+
+
+def test_doctor_a_shared_hook_nothing_here_covers_stays_a_fail_with_a_real_fix():
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_hooks(td, launcher=GONE)
+        local = pathlib.Path(td) / ".claude" / "settings.local.json"
+        local.write_text(json.dumps({"hooks": {"PreToolUse": [         # the guard only
+            {"matcher": "Bash", "hooks": [{"type": "command",
+             "command": f"{_good_launcher()} hook pre-tool"}]}]}}), encoding="utf-8")
+        rows = pythia.harness_checks(td, home)
+        shared = _launch_rows(rows, ".claude/settings.json")
+        assert len(shared) == 1 and shared[0][0] == "fail", rows
+        msg = shared[0][1]
+        assert "not on PATH" in msg and "install" in msg
+        assert ".claude/settings.local.json" in msg       # where the fix lands
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_hooks(td, launcher=GONE)    # no local file at all
+        assert _launch_rows(pythia.harness_checks(td, home),
+                            ".claude/settings.json")[0][0] == "fail"
+
+
+def test_doctor_names_exactly_what_a_broken_hook_leaves_off():
+    """~/.claude (install -g) serves the guard and the approval hook but no
+    SessionStart: the team's broken copy then leaves off only the session
+    guide — a warning that says so, not "the guard is off"."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_hooks(td, launcher=GONE)
+        pythia.install_claude_hooks(home, events=("PreToolUse", "PostToolUse"),
+                                    launcher=_good_launcher())
+        rows = pythia.harness_checks(td, home)
+        shared = _launch_rows(rows, ".claude/settings.json")
+        assert len(shared) == 1 and shared[0][0] == "warn", rows
+        assert "session guide" in shared[0][1] and "guard" not in shared[0][1]
+        assert not [r for r in rows if r[0] == "fail"], rows
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_hooks(td, launcher=GONE)
+        local = pathlib.Path(td) / ".claude" / "settings.local.json"
+        local.write_text(json.dumps({"hooks": {"PreToolUse": [
+            {"matcher": "Bash", "hooks": [{"type": "command",
+             "command": f"{_good_launcher()} hook pre-tool"}]}]}}), encoding="utf-8")
+        msg = _launch_rows(pythia.harness_checks(td, home), ".claude/settings.json")[0][1]
+        assert "AskUserQuestion approval" in msg and "sqlplus guard" not in msg
+
+
+def test_doctor_codex_session_hook_names_its_real_scope():
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        p = pathlib.Path(td) / ".codex" / "hooks.json"
+        p.parent.mkdir()
+        p.write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [
+            {"type": "command", "command": f"{GONE} hook session-start"}]}]}}),
+            encoding="utf-8")
+        rows = pythia.harness_checks(td, home)
+        codex = _launch_rows(rows, ".codex/hooks.json")
+        assert len(codex) == 1 and codex[0][0] == "warn", rows
+        assert "AGENTS.md" in codex[0][1] and "session" in codex[0][1]
+        assert "guard" not in codex[0][1]                 # it carries none
+        assert not [r for r in rows if r[0] == "fail"], rows
+
+
+def test_doctor_names_what_a_broken_mcp_launcher_closes():
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        (pathlib.Path(td) / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "pythia": {"command": "python3.99", "args": ["-m", "pythia", "mcp"]}}}),
+            encoding="utf-8")
+        door = [(s, m) for s, a, m in pythia.harness_checks(td, home)
+                if a == "approval door"]
+        assert len(door) == 1 and door[0][0] == "fail", door
+        assert "pythia_approve" in door[0][1] and "local scope" in door[0][1]
+        assert "guard" not in door[0][1]                  # a door, not the guard
+
+
+def test_doctor_sends_a_broken_global_hook_to_install_dash_g():
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_hooks(home, events=("PreToolUse", "PostToolUse"),
+                                    launcher='"/nonexistent/bin/python" -m pythia')
+        user = _launch_rows(pythia.harness_checks(td, home), "~/.claude/settings.json")
+        assert len(user) == 1 and user[0][0] == "fail", user
+        assert "install -g" in user[0][1]
+
+
 def test_doctor_warns_a_bare_launcher_that_lives_in_the_active_virtualenv():
     ok = lambda l, cwd=None: (True, "")                       # noqa: E731
     with tempfile.TemporaryDirectory() as venv:

@@ -548,7 +548,12 @@ a venv, pipx, a `python` that is another interpreter — the hooks go to
 is not on PATH), and the shared `.claude/settings.json` and `.mcp.json` are
 left alone; install names any pythia hooks already in the shared file, since
 those run too. `pythia doctor` starts every launcher it finds and fails the
-ones that cannot import pythia. `install -g`
+ones that cannot import pythia, naming what each one leaves off and the fix
+that applies to its file. A shared hook that cannot start here while this
+machine's own launcher serves the same hooks is a warning — the team's copy
+erroring on this machine; keep it for teammates or remove it — and Codex's
+session hook is a warning, since it carries only the session guide and
+AGENTS.md the rules. `install -g`
 writes only the approve hook and the deny rule into `~/.claude/settings.json`
 — that file applies to every project on the machine, and the session guide
 would be noise outside Oracle work. After `pip install --upgrade`,

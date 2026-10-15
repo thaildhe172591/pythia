@@ -510,8 +510,12 @@ venv, pipx, `python` là interpreter khác — hook vào
 `claude` trên PATH), và `.claude/settings.json`, `.mcp.json` dùng chung được
 để nguyên; install nêu tên các hook pythia đã có sẵn trong file chung, vì
 chúng cũng chạy. `pythia doctor` chạy thử từng launcher và báo `fail` cho
-cái nào không import được pythia. `install -g` chỉ ghi
-hook PreToolUse/PostToolUse và luật deny vào `~/.claude/settings.json` — file
+cái nào không import được pythia, kèm việc nó làm mất và cách sửa đúng với
+file chứa nó. Hook dùng chung không chạy được ở đây trong khi launcher riêng
+của máy đã phục vụ đúng các hook đó thì chỉ là `warn` — bản của team báo lỗi
+trên máy này; giữ cho đồng nghiệp hoặc xoá — và hook đầu phiên của Codex cũng
+là `warn`, vì nó chỉ mang guide đầu phiên, còn luật nằm trong AGENTS.md.
+`install -g` chỉ ghi hook PreToolUse/PostToolUse và luật deny vào `~/.claude/settings.json` — file
 đó áp cho mọi dự án trên máy, guide đầu phiên ở đó sẽ thành nhiễu với dự án
 không dính Oracle. `SessionStart` chạy `python -m pythia hook session-start`:
 guide một trang kèm trạng thái sống của dự án — chính nó làm việc định tuyến

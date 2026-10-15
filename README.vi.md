@@ -208,7 +208,11 @@ agent buộc bạn tự làm.
    đường dẫn tuyệt đối tới interpreter, còn MCP approver vào local scope của
    Claude Code (`claude mcp add --scope local`); đồng nghiệp không bao giờ nhận
    một đường dẫn từ máy bạn. `pythia doctor` chạy thử từng launcher nó tìm
-   thấy và báo `fail` cho cái nào không import được pythia.
+   thấy và báo `fail` cho cái nào không import được pythia — trừ khi launcher
+   riêng của máy này đã phục vụ đúng các hook đó: khi ấy bản dùng chung của
+   team báo lỗi trên máy này chỉ là `warn` (giữ cho đồng nghiệp hoặc xoá). Hook
+   đầu phiên của Codex cũng chỉ là `warn`: nó chỉ mang guide đầu phiên, còn
+   luật đã nằm trong AGENTS.md.
 
    Skills vào `.claude/skills` (hoặc `~/.claude/skills` khi `-g`).
 2. **Khởi động lại phiên Claude Code** để hook và MCP server nạp.

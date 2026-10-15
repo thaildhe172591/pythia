@@ -142,7 +142,12 @@ launcher is written only to that machine's files — `.claude/settings.local.jso
 `claude mcp add --scope local` — never into `.claude/settings.json` or
 `.mcp.json`, where it would break every teammate's hooks the same way.
 `pythia doctor` starts each launcher it finds and reports `fail` for one
-that cannot import pythia. It runs only what is exactly an interpreter plus
+that cannot import pythia whenever that leaves a gate off — the guard or
+the approval hook, with no other launcher that starts here doing the same
+job. Where no gate is lost it is a warning naming what is: the session guide
+or the reminders, nothing at all (the team's shared copy erroring while this
+machine's own launcher does every job), or Codex's session hook, which
+carries no guard. It runs only what is exactly an interpreter plus
 `-m pythia` or an absolute `pythia.py` path, never a relative path, without a
 shell and from an empty directory; a bare name is resolved on PATH alone
 (Windows would search the interpreter's directory and the current one
