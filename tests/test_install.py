@@ -208,6 +208,27 @@ def test_devnull_stdin_is_not_a_human():
         assert not (pathlib.Path(td) / ".pythia" / "policy.json").is_file()
 
 
+def test_the_website_states_what_the_code_is():
+    """site/ is published to GitHub Pages. What it states — the release, the
+    counts, every skill by name — must be what this commit is, so a version
+    bump or a new skill that forgets the site fails here, not in public."""
+    site = ROOT / "site"
+    html = (site / "index.html").read_text(encoding="utf-8")
+    v = pythia.__version__
+    assert f'data-version="{v}"' in html
+    assert set(re.findall(r'class="ver">([^<]+)<', html)) == {v}
+    skills = sorted(p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md"))
+    want = {"commands": len(pythia.COMMANDS), "skills": len(skills),
+            "queries": len(list((ROOT / "queries").glob("*.sql"))),
+            "lint": len(pythia.LINT_RULES)}
+    for key, n in want.items():
+        assert set(re.findall(rf'data-count="{key}">(\d+)<', html)) == {str(n)}, key
+    for name in skills:
+        assert f"<b>{name}</b>" in html, name
+    for f in ("logo.webp", "logo.png", "favicon.png"):     # what the page loads
+        assert (site / f).is_file(), f
+
+
 def test_one_version_across_every_manifest():
     """pyproject, plugin.json, marketplace.json and npm/package.json must all
     carry the same version — the release workflow publishes from one tag."""

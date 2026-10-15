@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **A project website** at https://thaildhe172591.github.io/pythia/ —
+  `site/`, one static page in English with a Vietnamese toggle, published
+  by the `pages` workflow on every change to `site/` on main. It states the
+  release, the counts and every skill by name; `tests/test_install.py`
+  fails when any of them drifts from the code.
+
 ## 0.15.3 — 2026-10-15
 
 From a field test of 0.15.2 on three sample projects: the install was right,
