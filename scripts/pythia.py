@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.2"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.3"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -4008,47 +4008,68 @@ def register_local_mcp(project_root, launcher, which=None, run=None, home=None):
     return ("updated" if have is not None else "added"), shown
 
 
-def launcher_health(launcher, cwd=None, which=None, env=None, starts=None,
-                    shared=False):
-    """(status, message) for one launcher found in the harness files. A bare
-    name is resolved on this PATH and run; a path (an interpreter's, or a
-    pythia.py's) is run only from a machine's own files — in a shared file it
-    is reported, never executed."""
+def launcher_verdict(launcher, which=None, env=None, starts=None, shared=False):
+    """(status, code, detail) for one launcher found in the harness files —
+    what doctor knows before a word is chosen. code: not-plain | shared-path |
+    not-on-path | cannot-start | venv-only | ok; detail: the reason, or the
+    active environment. A bare name is resolved on this PATH and run; a path
+    (an interpreter's, or a pythia.py's) is run only from a machine's own
+    files — in a shared file it is the repository's to choose, so it is
+    named, never executed."""
     which = which or path_lookup
     env = os.environ if env is None else env
     starts = starts or launcher_starts
     argv = plain_launcher(launcher)
     if argv is None:
-        return ("warn", f"`{launcher}` is not a plain launcher (an interpreter "
-                "plus -m pythia, or an absolute pythia.py path) — doctor does "
-                "not run it")
+        return "warn", "not-plain", ""
     bare = not re.search(r"[/\\]", argv[0])
     if shared and not (bare and argv[1:] == ["-m", "pythia"]):
-        # a path in a shared file is the repository's to choose — the
-        # interpreter's or the pythia.py it is pointed at — so it is named,
-        # never run
-        return ("warn", f"`{launcher}` is a path on one machine, in a file the "
-                "team shares — teammates' hooks will not find it, and doctor "
-                f"does not run it; `{invocation()} install` keeps a machine's "
-                "own launcher in .claude/settings.local.json")
+        return "warn", "shared-path", ""
     resolved = which(argv[0]) if bare else argv[0]
     if bare and not resolved:
-        return ("fail", f"`{argv[0]}` is not on PATH, so `{launcher}` cannot "
-                "start — the guard and the approval doors it serves are off; "
-                f"re-run `{invocation()} install`")
+        return "fail", "not-on-path", f"`{argv[0]}` is not on PATH"
     ok, why = starts(launcher)
     if not ok:
-        return ("fail", f"`{launcher}` cannot start pythia here ({why}) — the "
-                "guard and the approval doors it serves are off; re-run "
-                f"`{invocation()} install`, which picks an interpreter that can")
+        return "fail", "cannot-start", why
     venv = env.get("VIRTUAL_ENV") or env.get("CONDA_PREFIX")
     if bare and venv and os.path.normcase(os.path.abspath(resolved)).startswith(
             os.path.normcase(os.path.abspath(venv)) + os.sep):
-        return ("warn", f"`{argv[0]}` finds pythia only while the virtual "
-                f"environment {venv} is active — Claude Code started from a "
+        return "warn", "venv-only", venv
+    return "ok", "ok", ""
+
+
+def launcher_message(launcher, code, detail, broken=None):
+    """The words for a verdict. `broken` replaces what follows a launcher
+    that cannot start — what it leaves off, and the fix — when the caller
+    knows more than the launcher does (which file it is in, what else on
+    this machine serves the same hooks)."""
+    if code == "not-plain":
+        return (f"`{launcher}` is not a plain launcher (an interpreter plus -m "
+                "pythia, or an absolute pythia.py path) — doctor does not run it")
+    if code == "shared-path":
+        return (f"`{launcher}` is a path on one machine, in a file the team "
+                "shares — teammates' hooks will not find it, and doctor does "
+                f"not run it; `{invocation()} install` keeps a machine's own "
+                "launcher in .claude/settings.local.json")
+    if code in ("not-on-path", "cannot-start"):
+        return (f"`{launcher}` cannot start pythia here ({detail}) — " + (
+            broken or "the guard and the approval doors it serves are off; "
+            f"re-run `{invocation()} install`, which picks an interpreter that "
+            "can"))
+    if code == "venv-only":
+        return (f"`{launcher}` finds pythia only while the virtual environment "
+                f"{detail} is active — Claude Code or Codex started from a "
                 f"desktop app or IDE will not; re-run `{invocation()} install`, "
                 "which pins this interpreter in .claude/settings.local.json")
-    return "ok", f"`{launcher}` starts pythia"
+    return f"`{launcher}` starts pythia"
+
+
+def launcher_health(launcher, cwd=None, which=None, env=None, starts=None,
+                    shared=False, broken=None):
+    """(status, message) for one launcher — launcher_verdict in words."""
+    st, code, detail = launcher_verdict(launcher, which=which, env=env,
+                                        starts=starts, shared=shared)
+    return st, launcher_message(launcher, code, detail, broken)
 
 
 def exclude_local_settings(project_root):
@@ -6989,32 +7010,98 @@ def ask_question_breakers(project_root, home=None, plugin_limit=400):
     return found
 
 
+# what each pythia hook does, the two gates first — a launcher that cannot
+# start leaves exactly these off
+HOOK_JOBS = (("hook pre-tool", "the sqlplus guard"),
+             ("approve --hook", "the AskUserQuestion approval"),
+             ("hook session-start", "the session guide"),
+             ("hook post-tool", "the verdict reminders"))
+
+
+def _and_list(words):
+    words = list(words)
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+
+
 def launch_checks(root, home, settings, local_settings):
-    """One row per launcher the harness files start pythia with: can it?
-    A hook that cannot start fails open, so this is a fail, not a warning."""
+    """One row per launcher the harness files start pythia with: can it? A
+    Claude hook that cannot start fails open, so the row names exactly which
+    jobs (HOOK_JOBS) no other launcher that starts on this machine still
+    does: a gate among them (the guard, the approval hook) is a fail; only
+    the session guide or the reminders, a warning; nothing at all — the
+    team's copy erroring here while this machine's own launcher serves the
+    same hooks — a warning that leaves keep-or-remove to the developer.
+    Codex's hook carries only the session guide: a warning either way."""
     tracked = bool(local_settings.get("hooks")) and git_tracks(
         root, ".claude/settings.local.json")
-    sources = [(".claude/settings.json", settings.get("hooks"), True),
-               (".claude/settings.local.json", local_settings.get("hooks"), tracked),
+    # role: shared (the team's file), own (this machine's), user (~/.claude,
+    # every project of this user), codex (shared, the session guide only)
+    sources = [(".claude/settings.json", settings.get("hooks"), "shared"),
+               (".claude/settings.local.json", local_settings.get("hooks"),
+                "shared" if tracked else "own"),
                ("~/.claude/settings.json",
                 (_read_json(home / ".claude" / "settings.json") or {}).get("hooks"),
-                False),
+                "user"),
                (".codex/hooks.json",
                 (_read_json(root / ".codex" / "hooks.json") or {}).get("hooks"),
-                True)]
-    out = []
-    for where, hooks, shared in sources:
-        launchers = []
+                "codex")]
+    found = []
+    for where, hooks, role in sources:
+        marks = {}
         for ev in (hooks or {}).values() if isinstance(hooks, dict) else []:
             for e in ev if isinstance(ev, list) else []:
                 for h in (e.get("hooks") or []) if isinstance(e, dict) else []:
                     cmd = str(h.get("command", "")) if isinstance(h, dict) else ""
                     mark = _hook_mark(cmd)
                     if mark:
-                        launchers.append(cmd[:cmd.index(mark)].strip())
-        for launcher in dict.fromkeys(launchers):
-            st, msg = launcher_health(launcher, shared=shared)
-            out.append((st, "hook launch", f"{where}: {msg}"))
+                        marks.setdefault(cmd[:cmd.index(mark)].strip(), set()).add(
+                            LEGACY_HOOK_COMMANDS.get(mark, mark))
+        for launcher, served in marks.items():
+            found.append((where, role, launcher, served) + launcher_verdict(
+                launcher, shared=role in ("shared", "codex")))
+    out = []
+    for i, (where, role, launcher, served, st, code, detail) in enumerate(found):
+        broken = None
+        if code in ("not-on-path", "cannot-start") and role == "codex":
+            st = "warn"
+            broken = ("Codex then misses only its session guide and live state; "
+                      "AGENTS.md still carries the rules. The .codex/ files are "
+                      f"shared and stay portable — `{invocation()} install` says "
+                      "what this machine's ~/.codex/config.toml needs")
+        elif code in ("not-on-path", "cannot-start"):
+            # what the other Claude launchers that do start already serve
+            others = [(w, s) for j, (w, r, _, s, _, c, _) in enumerate(found)
+                      if j != i and r != "codex" and c == "ok"]
+            covered = set().union(*[s for _, s in others]) if others else set()
+            off = [label for mark, label in HOOK_JOBS if mark in served - covered]
+            here = {"shared": ".claude/settings.json",
+                    "own": ".claude/settings.local.json",
+                    "user": "~/.claude/settings.json"}[role]
+            if not off:
+                st = "warn"
+                names = list(dict.fromkeys(w for w, s in others if s & served))
+                keep = ("Teammates may rely on them — keep them, or remove them "
+                        "from .claude/settings.json" if role == "shared" else
+                        f"Remove them from {here}")
+                broken = (f"these hooks show an error on every call they match, "
+                          f"while {' and '.join(names)} "
+                          f"{'serve' if len(names) > 1 else 'serves'} the same "
+                          f"hooks with a launcher that starts. {keep}")
+            else:
+                gate = any(m in served - covered for m, _ in HOOK_JOBS[:2])
+                st = "fail" if gate else "warn"
+                fix = {"shared": f"re-run `{invocation()} install` — it adds this "
+                                 "machine's own launcher to "
+                                 ".claude/settings.local.json and leaves the "
+                                 "shared file to the team",
+                       "own": f"re-run `{invocation()} install`, which picks an "
+                              "interpreter that can",
+                       "user": f"re-run `{invocation()} install -g`"}[role]
+                broken = (f"{_and_list(off)} {'is' if len(off) == 1 else 'are'} "
+                          f"off {'in every project' if role == 'user' else 'on this machine'}"
+                          f"; {fix}")
+        out.append((st, "hook launch",
+                    f"{where}: {launcher_message(launcher, code, detail, broken)}"))
     return out
 
 
@@ -7060,7 +7147,11 @@ def harness_checks(project_root, home=None):
     mcp = _read_json(root / ".mcp.json") or {}
     local = local_mcp_entry(root, home_dir)
     if local is not None:
-        st, msg = launcher_health(mcp_launcher(local) or str(local.get("command")))
+        st, msg = launcher_health(
+            mcp_launcher(local) or str(local.get("command")),
+            broken="the pythia_approve door stays closed (AskUserQuestion and "
+                   f"the console remain); re-run `{invocation()} install`, which "
+                   "registers it again with a launcher that starts")
         out.append((st, "approval door", "pythia_approve MCP tool registered in "
                     f"Claude Code's local scope (overrides .mcp.json) — {msg}"))
     elif "pythia" in (mcp.get("mcpServers") or {}):
@@ -7069,7 +7160,11 @@ def harness_checks(project_root, home=None):
         entry = mcp["mcpServers"]["pythia"]
         st, msg = launcher_health(mcp_launcher(entry) or str(
             (entry or {}).get("command") if isinstance(entry, dict) else entry),
-            shared=True)
+            shared=True,
+            broken="the pythia_approve door stays closed (AskUserQuestion and "
+                   f"the console remain); re-run `{invocation()} install` — it "
+                   "registers this machine's launcher in Claude Code's local "
+                   "scope, which overrides .mcp.json")
         out.append((st, "approval door", "pythia_approve MCP tool registered in "
                     ".mcp.json" + ("" if trusted else
                                    " (approve the server once in /mcp)")

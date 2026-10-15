@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.15.3 — 2026-10-15
+
+From a field test of 0.15.2 on three sample projects: the install was right,
+`pythia doctor`'s verdicts were not.
+
+- **doctor no longer calls a covered shared hook a failure.** After an
+  install from a venv, the team's `.claude/settings.json` still ran
+  `python -m pythia`, which cannot start on that machine, while
+  `.claude/settings.local.json` served every one of those hooks. doctor said
+  `fail`, "the guard is off", counted it among the problems that "stop
+  approvals or the guard", and advised re-running install — which, by
+  design, never changes a shared file. Now a shared hook that cannot start
+  is a warning when this machine's own files (`settings.local.json`, or
+  `~/.claude/settings.json`) already serve every hook it would run: it names
+  them, says the shared copy will show an error on each call it matches, and
+  leaves keep-or-remove to the developer. Otherwise the row names exactly
+  which jobs no launcher that starts here still does — the sqlplus guard,
+  the AskUserQuestion approval, the session guide, the verdict reminders —
+  and is a `fail` only when a gate (the first two) is among them, with the
+  fix that works for its file: re-run install, which adds this machine's
+  launcher to `settings.local.json`.
+- **Codex's session hook is a warning with its real scope.** It carries only
+  the session guide and live state — no guard — and AGENTS.md carries the
+  rules; doctor says so, and that `.codex/` stays portable.
+- Each `fail` names what it leaves off and the fix for its own file: the MCP
+  approver ("the pythia_approve door stays closed", fixed through Claude
+  Code's local scope), a global hook (`pythia install -g`).
+
 ## 0.15.2 — 2026-10-14
 
 Fixes from a field test of 0.15.1 in a sample project, with Claude Code
