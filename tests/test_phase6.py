@@ -1194,6 +1194,25 @@ def test_session_state_names_a_local_scope_approval_door():
                    for ln in pythia.session_state_lines(td, home=home))
 
 
+def test_pre_tool_lets_help_through():
+    """Field test 0.15.6: an agent ran `… -m pythia --help` and got a
+    permission prompt — help exits inside the parser, before any command
+    runs, so the guard could not classify it. Exit 0 from the parser is
+    help and nothing else: it reads."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as v:
+        for cmd in ("pythia --help", "pythia -h", "pythia apply --help",
+                    "pythia journal restore --help", "python -m pythia lint --help"):
+            assert decision(pre(td, cmd)) == "allow", cmd
+        exe = pathlib.Path(v) / "bin" / "python3"
+        with _interpreter(exe):
+            assert decision(pre(td, f'"{exe.as_posix()}" -m pythia --help')) == "allow"
+        for cmd in ("pythia --he", "pythia --help; touch x", "pythia --help && rm y",
+                    "pythia apply f.sql --yes", "pythia policy set data_dml allow"):
+            assert decision(pre(td, cmd)) is None, cmd
+        # the forged-approval rule runs first, help or no help
+        assert decision(pre(td, "pythia approve --hook --help")) == "deny"
+
+
 def test_tokens_that_are_not_tokens_name_nothing():
     with tempfile.TemporaryDirectory() as td:
         lease(td)
@@ -2045,6 +2064,21 @@ def test_lint_counts_comments_from_every_file_in_the_set():
         assert not [f for f in lint(a, b)[str(a)] if f["rule"] == "comment-missing"]
         alone = [f for f in lint(a)[str(a)] if f["rule"] == "comment-missing"]
         assert alone and "in this script" in alone[0]["message"]
+
+        # field test 0.15.6: an agent linted file by file and could only
+        # guess the warnings were covered elsewhere. One file with missing
+        # comments says how to count the others: lint them in one run.
+        def text(*paths):
+            ns = argparse.Namespace(paths=[str(p) for p in paths], json=False,
+                                    project_root=td, color=False)
+            _, out = quiet(pythia.cmd_lint, None, None, ns)
+            return out
+        hint = text(a)
+        assert "one run" in hint and f"{pythia.invocation()} lint {a}" in hint, hint
+        ns = argparse.Namespace(paths=[str(a)], json=True, project_root=td, color=False)
+        _, out = quiet(pythia.cmd_lint, None, None, ns)
+        assert "one run" in json.loads(out).get("hint", "")
+        assert "one run" not in text(a, b) and "one run" not in text(b)
 
 
 def main():

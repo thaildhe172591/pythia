@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.15.7 — 2026-10-15
+
+From the 0.15.6 field test, two Claude Code sessions in a fresh project:
+
+- **`--help` reads.** `… -m pythia --help` got a permission prompt: help
+  exits inside the parser, before any command runs, so the guard could not
+  classify it. An exit 0 from the parser is help and nothing else, and now
+  counts as a read; parser errors (exit 2) still fall to the client's
+  prompt, and the forged-approval deny still runs first.
+- **Lint says how to count comments kept in another file.** The agent
+  linted a change file by file, got `comment-missing` for a table whose
+  COMMENT ON lived in `02_comments.sql`, and could only guess. One file
+  with comments missing now adds a hint (`hint` in `--json`) naming the
+  run that counts them — the change's files, or the folder, together.
+  The brief guide in CLAUDE.md, AGENTS.md rule 9, pythia-table and GUIDE
+  say to lint a change's files in one run.
+
 ## 0.15.6 — 2026-10-15
 
 From the 0.15.5 field test: a real Claude Code session read the `RUN` line

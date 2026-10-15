@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.6"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.7"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -3106,7 +3106,8 @@ ROUTE  build/change with open decisions -> pythia-spec asks FIRST. tables,
        trigger design -> pythia-package. scripts, releases -> pythia-deploy.
        explain -> explore. review -> review. landing a change -> apply.
 LEARN  impact before any change. Ask the live database, never a dump. Read
-       .pythia/conventions.md if present; `pythia lint <file>` before apply.
+       .pythia/conventions.md if present; `pythia lint <files>` before apply
+       - a change's files in one run, so comments count across them.
        `pythia connections` - never open connections.json (passwords).
 ASK    relay apply/deploy previews verbatim and wait for a real yes. >=10
        dependents or cross-schema: show the developer first. Refusals and
@@ -6609,9 +6610,20 @@ def cmd_lint(conn, schema, ns):
         f = lint_script(texts[p], conv, in_set)
         report[str(p)] = f
         errors += sum(1 for x in f if x["severity"] == "error")
+    # one file, comments missing: they may live in another file of the same
+    # change, which only one run over the set can count (field test 0.15.6)
+    hint = None
+    if len(paths) == 1 and any(x["rule"] == "comment-missing"
+                               for x in report[str(paths[0])]):
+        hint = (f"COMMENT ON in another file? Comments count across the files "
+                f"of one run: {invocation()} lint {paths[0]} <its comments "
+                "file> (or the folder).")
     if ns.json:
-        print(json.dumps({"files": report, "errors": errors,
-                          "rules": {k: v[0] for k, v in LINT_RULES.items()}}))
+        out = {"files": report, "errors": errors,
+               "rules": {k: v[0] for k, v in LINT_RULES.items()}}
+        if hint:
+            out["hint"] = hint
+        print(json.dumps(out))
     else:
         for path, f in report.items():
             for ln in render_findings(f, label=path, en=en):
@@ -6621,6 +6633,8 @@ def cmd_lint(conn, schema, ns):
               + ("" if conv and conv.get("lint") else
                  "  (built-in rules; the LEAD tunes them in "
                  ".pythia/conventions.json \"lint\")"))
+        if hint:
+            print("-- " + hint)
     if errors:
         sys.exit(2)
 
@@ -6846,8 +6860,10 @@ def classify_pythia_argv(argv):
         with contextlib.redirect_stderr(io.StringIO()), \
                 contextlib.redirect_stdout(io.StringIO()):
             ns = build_parser().parse_args(argv)
-    except SystemExit:
-        return "other", None
+    except SystemExit as e:
+        # exit 0 inside the parser is --help: it prints and stops before
+        # main() runs any command (field test 0.15.6). Errors exit 2.
+        return ("read" if e.code == 0 else "other"), None
     sub = ns.command
     if getattr(ns, "yes", False):
         return "other", ns
