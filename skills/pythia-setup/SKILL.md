@@ -25,8 +25,9 @@ applies:
   top-level `"default": "<name>"`. Ambiguity is an error, never a guess.
 - `--conn NAME` and `PYTHIA_CONNECTION` override everything; the
   `PYTHIA_USER/PYTHIA_PASSWORD/PYTHIA_DSN` variables bypass the file.
-- The file holds credentials: it is gitignored — keep it that way, and keep
-  it out of chat and screenshots.
+- The file holds credentials: install writes it into `.gitignore` (commit
+  that line) — keep it that way, and keep it out of chat and screenshots.
+  `pythia doctor` fails if git tracks it.
 
 Verify with `pythia check`: it prints who you are connected as and object
 counts. A failure names the connection and what to check.
@@ -89,7 +90,7 @@ until you want it.
 
 | File | Created by | What it does |
 |---|---|---|
-| `connections.json` | `pythia install` | Where to connect. **Holds passwords — never open it**; `pythia connections` lists names, users, schemas and targets with no secrets. Gitignored. |
+| `connections.json` | `pythia install` | Where to connect. **Holds passwords — never open it**; `pythia connections` lists names, users, schemas and targets with no secrets. Install adds it to `.gitignore`. |
 | `journal/` | first write or snapshot | Every captured version, with a runnable rollback per entry. |
 | `conventions.json` | `pythia conventions --init` | Naming patterns per object type. Every apply preview warns when a new name drifts. |
 | `conventions.md` | `pythia conventions --init` | The house rules in prose. **`pythia-write` reads this before writing anything**, and it outranks the generic patterns this pack ships with. |

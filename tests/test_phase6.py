@@ -20,6 +20,7 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 sys.path.insert(0, str(HERE))
 import pythia  # noqa: E402
 import test_phase3 as p3  # noqa: E402  (fakes only; its tests are not re-run)
+import test_install as ti  # noqa: E402  (git helpers only; its tests are not re-run)
 
 FakeConn, base_script, apply_ns, expect_exit = (
     p3.FakeConn, p3.base_script, p3.apply_ns, p3.expect_exit)
@@ -1171,6 +1172,61 @@ def test_doctor_reports_the_wiring_after_install():
         # .mcp.json, which doctor names (warn) but never runs
         assert any(a == "approval door" and s == "warn" and "registered" in m
                    and "shares" in m for s, a, m in rows), rows
+
+
+def _cred(rows):
+    found = [(s, m) for s, a, m in rows if a == "credentials"]
+    assert len(found) == 1, rows
+    return found[0]
+
+
+def test_doctor_fails_a_password_file_git_tracks():
+    """Not ignored is a risk (warn); tracked is a leak (fail) — the passwords
+    are in the repository already, and a .gitignore line cannot take them
+    back out. The fix names the commands and the rotation."""
+    import subprocess
+    with ti.hermetic_git(), tempfile.TemporaryDirectory() as td, \
+            tempfile.TemporaryDirectory() as home:
+        git = ti.git_init(td)
+        if git is None:
+            return
+        root = pathlib.Path(td)
+        pythia.scaffold_config(root)
+        st, msg = _cred(pythia.harness_checks(td, home))
+        assert st == "warn" and "git add -A" in msg and "install" in msg, msg
+        pythia.ignore_connections(root)
+        assert _cred(pythia.harness_checks(td, home))[0] == "ok"
+        subprocess.run([git, "-C", td, "add", "-f", ti.SECRET], check=True,
+                       stdin=subprocess.DEVNULL)
+        st, msg = _cred(pythia.harness_checks(td, home))
+        assert st == "fail", msg
+        assert f"git rm --cached {ti.SECRET}" in msg and "password" in msg, msg
+
+
+def test_doctor_warns_a_rule_only_this_machine_has():
+    with ti.hermetic_git(), tempfile.TemporaryDirectory() as td, \
+            tempfile.TemporaryDirectory() as home:
+        if ti.git_init(td) is None:
+            return
+        root = pathlib.Path(td)
+        pythia.scaffold_config(root)
+        exclude = root / ".git" / "info" / "exclude"
+        exclude.parent.mkdir(exist_ok=True)
+        exclude.write_text(ti.SECRET + "\n", encoding="utf-8")
+        st, msg = _cred(pythia.harness_checks(td, home))
+        assert st == "warn" and "only on this machine" in msg, msg
+
+
+def test_doctor_says_plainly_when_there_is_no_git_to_ask():
+    with ti.hermetic_git(), tempfile.TemporaryDirectory() as td, \
+            tempfile.TemporaryDirectory() as home:
+        pythia.scaffold_config(pathlib.Path(td))
+        st, msg = _cred(pythia.harness_checks(td, home))
+        assert st == "info" and "git" in msg, msg
+        # no password file, nothing to protect: no row at all
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        assert not [a for _, a, _ in pythia.harness_checks(td, home)
+                    if a == "credentials"]
 
 
 def test_install_registers_the_mcp_approver_once_and_keeps_other_servers():

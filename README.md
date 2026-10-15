@@ -177,6 +177,11 @@ each agent needs you to finish by hand.
    - a `deny` rule so the agent cannot forge a grant, and the MCP server
      enabled.
 
+   It scaffolds `.pythia/connections.json` (mode 600) and adds it to the
+   project's `.gitignore` — commit that line — and warns if git already
+   tracks the file: its passwords are then in the history, so untrack it and
+   change them.
+
    It also writes the harness into **`CLAUDE.md`** — the file Claude Code
    itself loads every session — in a marker-delimited block, leaving your own
    text untouched. The rules hold even with `--no-hooks`, before a restart,

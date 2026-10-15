@@ -105,8 +105,14 @@ Mọi lệnh follow-up in ra luôn khớp cách bạn gọi (`pythia` / `python 
 
 ## 2. Kết nối theo project
 
-`.pythia/connections.json` — tạo bởi `pythia install`, **gitignore, chứa
-credentials, không đưa vào chat/screenshot**:
+`.pythia/connections.json` — tạo bởi `pythia install`, **chứa
+credentials, không đưa vào chat/screenshot**. Install ghi
+`.pythia/connections.json` vào `.gitignore` của dự án (hãy commit dòng đó để
+mọi bản clone đều bỏ qua file) trừ khi đã có luật bỏ qua nó, và cảnh báo nếu
+git đã theo dõi file. `pythia doctor` báo `fail` khi file bị theo dõi —
+`git rm --cached .pythia/connections.json`, commit, rồi đổi các mật khẩu đó
+vì lịch sử git vẫn giữ chúng — và `warn` khi file chưa được bỏ qua, hoặc chỉ
+được bỏ qua trên máy này (`.git/info/exclude`):
 
 ```json
 {
@@ -649,7 +655,8 @@ pythia autopilot on ...       # dev, tại console: xin + duyệt trong một l�
 ### `pythia doctor` — khi cú duyệt không về
 
 `pythia doctor` kiểm harness: hook đã nối, MCP approver đã đăng ký và bật,
-skill cài một chỗ (không trùng), policy, conventions, lease. Nó còn chỉ đích
+skill cài một chỗ (không trùng), policy, conventions, lease, và git có giữ
+`.pythia/connections.json` ngoài mọi bản clone không. Nó còn chỉ đích
 danh mọi cấu hình đã biết làm `AskUserQuestion` trả về mà không hiện câu hỏi
 — allow rule hoặc `allowed-tools` của skill có `AskUserQuestion`, hook
 PreToolUse/PermissionRequest có matcher bắt trúng nó (trong file settings

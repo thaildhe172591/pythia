@@ -109,8 +109,14 @@ Printed follow-up commands always match how you invoked the tool.
 
 ## 2. Per-project connections
 
-`.pythia/connections.json` — scaffolded by `pythia install`, **gitignored,
-holds credentials, keep it out of chat and screenshots**:
+`.pythia/connections.json` — scaffolded by `pythia install`, **holds
+credentials, keep it out of chat and screenshots**. Install writes
+`.pythia/connections.json` into the project's `.gitignore` (commit that
+line, so every clone keeps it out) unless a rule there already ignores it,
+and warns if git already tracks the file. `pythia doctor` fails a tracked
+file — `git rm --cached .pythia/connections.json`, commit, then change those
+passwords, since the history keeps them — and warns when the file is not
+ignored, or ignored only on this machine (`.git/info/exclude`):
 
 ```json
 {
@@ -684,7 +690,8 @@ pythia autopilot on ...       # the developer, at a console: request + approve i
 
 `pythia doctor` checks the harness: hooks wired, the MCP approver registered
 and enabled, skills installed once (not twice), policy, conventions, the
-lease. It also names every setting known to make `AskUserQuestion` return
+lease, and whether git keeps `.pythia/connections.json` out of every clone.
+It also names every setting known to make `AskUserQuestion` return
 without showing the question — an allow rule or a skill's `allowed-tools`
 naming it, a PreToolUse or PermissionRequest hook whose matcher catches it
 (in settings files or installed plugins), `dontAsk` mode. `pythia doctor
