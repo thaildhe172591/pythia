@@ -632,8 +632,10 @@ codes outside -20999..-20000, `SELECT *`), the DDL standards (no primary key,
 unnamed constraints, `VARCHAR2(n)` in byte semantics, `ADD ... NOT NULL`
 without a default, `LONG`, `DROP ... PURGE`) and, across a whole script,
 every new table and column without `COMMENT ON` and every foreign key
-without an index. Every apply preview shows the statement's findings, and an
-autopilot lease does not land a file with errors.
+without an index. Comments count across every file of one run, so lint a
+change's files together; a single file with comments missing says so and
+names the run that would count them. Every apply preview shows the
+statement's findings, and an autopilot lease does not land a file with errors.
 
 The LEAD tunes it in `.pythia/conventions.json`:
 

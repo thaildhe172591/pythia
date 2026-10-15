@@ -45,7 +45,8 @@ NO TABLE OR COLUMN WITHOUT ITS COMMENT, ITS CONSTRAINTS AND ITS IMPACT KNOWN
      — `COMMENT ... IS` takes a literal only (no `unistr`), and pythia sends
      UTF-8 exactly; `pythia doctor --db` warns if the character set cannot
      hold it.
-4. **Lint it**: `pythia lint script.sql` — missing comments, unnamed
+4. **Lint it**: `pythia lint script.sql comments.sql` (one run, so the
+   comments file counts) — missing comments, unnamed
    constraints, unindexed FKs, `ADD ... NOT NULL` without a default,
    byte-semantics text, missing house columns. Errors are fixed, not argued.
 5. **Land it** with `pythia-deploy` (`pythia deploy script.sql`): every

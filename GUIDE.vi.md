@@ -600,8 +600,11 @@ nối chuỗi, COMMIT trong vòng lặp, DML từng dòng, `= ''`, mã lỗi ngo
 -20999..-20000, `SELECT *`), chuẩn DDL (không có primary key, constraint
 không tên, `VARCHAR2(n)` theo byte, `ADD ... NOT NULL` không default, `LONG`,
 `DROP ... PURGE`) và, trên cả script, mọi bảng/cột mới thiếu `COMMENT ON`,
-mọi foreign key thiếu index. Mọi preview của apply hiện kết quả lint của câu
-lệnh, và autopilot lease không tự ghi file còn lỗi.
+mọi foreign key thiếu index. Comment được tính trên mọi file của cùng một lần
+chạy, nên hãy lint các file của một thay đổi cùng lúc; lint riêng một file bị
+thiếu comment thì lint nói rõ và chỉ lệnh chạy chung để tính đủ. Mọi preview
+của apply hiện kết quả lint của câu lệnh, và autopilot lease không tự ghi file
+còn lỗi.
 
 LEAD tinh chỉnh trong `.pythia/conventions.json`:
 

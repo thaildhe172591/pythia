@@ -52,7 +52,9 @@ Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11, 13 (and 2's threshold) · Do: 3, 8, 1
 9. **House style outranks generic style.** If `.pythia/conventions.md`
    exists, read it before writing any object; `pythia conventions` shows the
    machine-checked naming patterns and the LEAD's lint rules. Run
-   `pythia lint <file>` before any apply; errors are fixed, not argued.
+   `pythia lint` before any apply — a change's files in one run, since
+   COMMENT ON in one file counts for the tables of another; errors are
+   fixed, not argued.
 10. **Never open `.pythia/connections.json`.** It holds passwords, and a
     permission gate should stop you. `pythia connections` lists the names,
     users, schemas and targets with no secrets in the output.
