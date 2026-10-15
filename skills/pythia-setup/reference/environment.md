@@ -99,3 +99,9 @@ local MCP scope, never in the shared files. A `warn` naming
 `.claude/settings.json` is the team's shared copy failing on this machine
 while your own launcher already serves the same hooks: keep it for teammates
 or remove it.
+
+`pythia: command not found` in the agent's shell does not mean the hooks are
+off: pythia's venv is just not on PATH. The session preamble's `RUN` line names
+the spelling that works on this machine (the venv's interpreter by absolute
+path, `-m pythia`); use it for every pythia command the rules name. Commands
+pythia prints already use it.

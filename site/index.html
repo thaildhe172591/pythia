@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-version="0.15.4">
+<html lang="en" data-version="0.15.5">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -388,7 +388,7 @@ END trg_order_audit;
 /</pre></div>
   <div class="wrap hero-grid">
     <div>
-      <p class="eyebrow"><span lang="en">pythia <b class="ver">0.15.4</b> · PL/SQL for AI agents</span><span lang="vi">pythia <b class="ver">0.15.4</b> · PL/SQL cho AI agent</span></p>
+      <p class="eyebrow"><span lang="en">pythia <b class="ver">0.15.5</b> · PL/SQL for AI agents</span><span lang="vi">pythia <b class="ver">0.15.5</b> · PL/SQL cho AI agent</span></p>
       <h1><span lang="en">Ask first.<span class="l2">Write with a way back.</span></span><span lang="vi">Hỏi trước.<span class="l2">Ghi luôn có đường lui.</span></span></h1>
       <p class="lede"><span lang="en">A CLI and skill pack for AI coding agents on Oracle. Your agent reads the live schema, asks a person before it writes, and every write lands with a snapshot, a verify step and a journal.</span><span lang="vi">CLI và bộ skill cho AI agent làm việc với Oracle. Agent đọc schema thật, hỏi người trước khi ghi, và mọi lần ghi đều có snapshot, bước kiểm tra và nhật ký.</span></p>
       <p class="typed" aria-hidden="true"><span class="d">$</span> <span id="typed">pythia impact PKG_ORDER</span><span class="caret"></span></p>
@@ -587,7 +587,7 @@ sqlplus/SQLcl here would write with none of them (AGENTS.md rule 3). …<span cl
   <div class="grid2">
     <div class="card"><h3>CLAUDE.md · AGENTS.md</h3><p lang="en">The rules go into the files Claude Code and Codex load every session, in a marked block. Your own text is untouched.</p><p lang="vi">Luật được ghi vào file mà Claude Code và Codex nạp ở mọi phiên, trong một khối có đánh dấu. Nội dung riêng của bạn giữ nguyên.</p></div>
     <div class="card"><h3>Hooks</h3><p lang="en">SessionStart prints the live state. PreToolUse blocks writes around the gate and forged approvals. PostToolUse reads the answer and the exit code.</p><p lang="vi">SessionStart in trạng thái hiện tại. PreToolUse chặn lệnh ghi đi vòng và lần duyệt giả. PostToolUse đọc câu trả lời và exit code.</p></div>
-    <div class="card"><h3 lang="en">A launcher that starts</h3><h3 lang="vi">Launcher chạy được thật</h3><p lang="en">A system install gets a shared <code>python -m pythia</code>. A venv, pipx or conda install gets this machine's absolute interpreter, in <code>settings.local.json</code> and Claude Code's local MCP scope only.</p><p lang="vi">Cài toàn hệ thống thì dùng <code>python -m pythia</code> trong file chung. Cài trong venv, pipx hay conda thì dùng đường dẫn tuyệt đối của máy, chỉ trong <code>settings.local.json</code> và local scope của MCP.</p></div>
+    <div class="card"><h3 lang="en">A launcher that starts</h3><h3 lang="vi">Launcher chạy được thật</h3><p lang="en">A system install gets a shared <code>python -m pythia</code>. A venv, pipx or conda install gets this machine's absolute interpreter, in <code>settings.local.json</code> and Claude Code's local MCP scope only — and every command pythia prints, and the session's <code>RUN</code> line, spell it that way.</p><p lang="vi">Cài toàn hệ thống thì dùng <code>python -m pythia</code> trong file chung. Cài trong venv, pipx hay conda thì dùng đường dẫn tuyệt đối của máy, chỉ trong <code>settings.local.json</code> và local scope của MCP — mọi lệnh pythia in ra và dòng <code>RUN</code> đầu phiên cũng viết theo cách đó.</p></div>
     <div class="card"><h3>pythia doctor</h3><p lang="en">Starts every launcher it finds and names what is lost: a gate is a fail; the session guide alone, or the team's copy failing where your own already works, is a warning. A password file git tracks is a fail too.</p><p lang="vi">Chạy thử từng launcher và gọi tên thứ bị mất: mất một cổng là fail; chỉ mất guide đầu phiên, hoặc bản chung của team lỗi trong khi bản riêng đã chạy, là warning. File mật khẩu bị git theo dõi cũng là fail.</p></div>
   </div>
   <div class="term" data-stream>

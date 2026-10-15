@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.15.5 — 2026-10-15
+
+From the 0.15.4 field test: a real Claude Code session in a project whose
+pythia lives in a venv that is not on PATH. The hooks ran, but every command
+the harness named for the agent — `pythia guide`, `pythia connections`,
+the install's fallback `python3 -m pythia` — started nothing or the system
+interpreter, which has no pythia. The agent got `command not found`,
+concluded the hooks were off, and stopped at Learn.
+
+- **Printed commands name what runs here.** The bare `pythia` only when PATH
+  finds this very install; `python3 -m pythia` only when PATH's `python3` is
+  this interpreter (a venv's python is a symlink to the base one, so paths
+  are compared as spelled, not resolved); otherwise this interpreter by
+  absolute path, `"…/venv/bin/python3" -m pythia` — the launcher the hooks
+  already use. The install's PATH hint says the same. It also stops turning
+  `python3.9` into `python3` (Path.stem took ".9" for an extension).
+- **The session preamble says how `pythia` is spelled here.** CLAUDE.md is
+  shared, so it says `pythia`; when that is not what runs on this machine,
+  the SessionStart hook adds a `RUN` line naming the spelling, and spells its
+  own pointers that way. It now names the approval door when the MCP
+  approver lives in Claude Code's local scope, not only in `.mcp.json`.
+- **The guard lets reads through in that spelling.** The PreToolUse hook
+  also allows read-only commands run by the hook's own interpreter at its
+  absolute path (with `-m pythia`, or with this very pythia.py), or by the
+  `pythia` script beside it. Nothing else by path: a look-alike, another
+  directory or a symlink to the interpreter gets the client's prompt.
+
 ## 0.15.4 — 2026-10-15
 
 From the 0.15.3 field test: `git status` in the sample projects listed

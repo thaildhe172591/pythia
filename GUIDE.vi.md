@@ -413,7 +413,10 @@ Nhóm không snapshot được mặc định `deny` — và lời từ chối n�
 Mặc định **bật**: mọi object apply qua pythia được compile kèm PL/Scope →
 `pythia plscope` luôn có index đầy đủ trên schema dev. Thêm hai công tắc,
 đều mặc định **bật**: `"auto_allow_reads"` — hook PreToolUse cho lệnh đọc của
-pythia (và lệnh ghi đã được duyệt) chạy thẳng không hỏi; `"block_raw_writes"`
+pythia (và lệnh ghi đã được duyệt) chạy thẳng không hỏi, khi viết là `pythia`,
+`python -m pythia`, hoặc — nếu venv của pythia không nằm trên PATH — chính
+interpreter đang chạy hook theo đường dẫn tuyệt đối, đúng cách pythia in ra ở
+máy đó (không tin bất kỳ đường dẫn nào khác); `"block_raw_writes"`
 — chặn DDL/DML qua sqlplus hoặc `run-sql` của SQLcl, thứ đi vòng đường ghi.
 
 ### Conventions — quy ước nhà, dưới dạng config
@@ -515,7 +518,12 @@ venv, pipx, `python` là interpreter khác — hook vào
 `claude mcp add --scope local` (in ra để bạn tự chạy nếu không có CLI
 `claude` trên PATH), và `.claude/settings.json`, `.mcp.json` dùng chung được
 để nguyên; install nêu tên các hook pythia đã có sẵn trong file chung, vì
-chúng cũng chạy. `pythia doctor` chạy thử từng launcher và báo `fail` cho
+chúng cũng chạy. Các lệnh pythia in ra theo đúng quy tắc đó: chỉ dùng tên trần
+khi PATH tìm ra đúng bản đang cài, còn lại dùng interpreter này theo đường dẫn
+tuyệt đối; CLAUDE.md là file chung nên chỉ ghi được `pythia`, vì vậy phần đầu
+phiên (SessionStart) thêm dòng `RUN` nêu cách gọi chạy được trên máy này, và
+dòng `approval door` khi MCP approver nằm ở local scope. `pythia doctor` chạy
+thử từng launcher và báo `fail` cho
 cái nào không import được pythia, kèm việc nó làm mất và cách sửa đúng với
 file chứa nó. Hook dùng chung không chạy được ở đây trong khi launcher riêng
 của máy đã phục vụ đúng các hook đó thì chỉ là `warn` — bản của team báo lỗi

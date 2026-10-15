@@ -212,7 +212,11 @@ agent buộc bạn tự làm.
    `.claude/settings.local.json` (file riêng của máy này, không vào git) với
    đường dẫn tuyệt đối tới interpreter, còn MCP approver vào local scope của
    Claude Code (`claude mcp add --scope local`); đồng nghiệp không bao giờ nhận
-   một đường dẫn từ máy bạn. `pythia doctor` chạy thử từng launcher nó tìm
+   một đường dẫn từ máy bạn. Mọi lệnh pythia in ra đều dùng cách gọi chạy được
+   trên máy này, dòng `RUN` ở đầu phiên báo cách gọi đó cho agent (CLAUDE.md là
+   file chung nên chỉ ghi được `pythia`), và guard cho lệnh đọc viết theo cách
+   đó chạy thẳng — chỉ đúng đường dẫn của interpreter này, không cái nào khác.
+   `pythia doctor` chạy thử từng launcher nó tìm
    thấy và báo `fail` cho cái nào không import được pythia — trừ khi launcher
    riêng của máy này đã phục vụ đúng các hook đó: khi ấy bản dùng chung của
    team báo lỗi trên máy này chỉ là `warn` (giữ cho đồng nghiệp hoặc xoá). Hook

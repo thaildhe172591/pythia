@@ -120,7 +120,13 @@ option value never passes for a subcommand, and the CLI accepts no
 abbreviated flags (`--ho` is an error, not `--hook`). It allows only a bare
 `pythia`, an interpreter by name with `-m pythia` (and no `pythia.py` in the
 working directory to shadow it), or a path to the very file running the
-hook — not a script an agent wrote and named pythia. It allows a write only when a
+hook — not a script an agent wrote and named pythia. Since 0.15.5 it also
+allows the interpreter running the hook by its absolute path — with
+`-m pythia`, or with the path to that very file — and the `pythia` script in
+the same directory: the spelling that runs where pythia's venv is not on
+PATH. The path must be that interpreter's own spelling: a look-alike, another
+directory or a symlink to it is another file and gets the client's prompt —
+a venv's python is itself a symlink, and only its own path loads the venv. It allows a write only when a
 live grant or lease already exists, which `apply` re-verifies itself. Its
 deny on sqlplus/SQLcl writes is pattern matching: a determined agent can
 phrase a command it does not recognise. The account's Oracle grants remain

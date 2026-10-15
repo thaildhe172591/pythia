@@ -1028,6 +1028,166 @@ def test_pre_tool_cannot_be_talked_into_a_second_command():
     expect_exit(lambda: pythia.build_parser().parse_args(["approve", "--ho"]))
 
 
+@contextlib.contextmanager
+def _interpreter(path):
+    """Run as if sys.executable were `path` — the hook's own interpreter."""
+    old = sys.executable
+    sys.executable = str(path)
+    try:
+        yield
+    finally:
+        sys.executable = old
+
+
+def test_pre_tool_lets_reads_through_this_interpreter_by_absolute_path():
+    """Field test 0.15.4: pythia in a venv that is not on PATH. The commands
+    that run there are spelled with the venv's interpreter by absolute path —
+    the same launcher the hooks use — and every read was a prompt, because
+    the guard knew only `pythia` and `python -m pythia`."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as v:
+        exe = pathlib.Path(v) / "bin" / ("python.exe" if os.name == "nt" else "python3")
+        script = exe.with_name("pythia.exe" if os.name == "nt" else "pythia")
+        with _interpreter(exe):
+            q = exe.as_posix()
+            assert decision(pre(td, f'"{q}" -m pythia src PKG_ORDER')) == "allow"
+            assert decision(pre(td, f"{q} -m pythia connections")) == "allow"
+            assert decision(pre(td, f'"{q}" -m pythia apply f.sql')) == "allow"   # preview
+            # the install's own entry point, beside its interpreter
+            assert decision(pre(td, f'"{script.as_posix()}" src PKG_ORDER')) == "allow"
+            # a clone's launcher: this interpreter and this very pythia.py
+            real = pathlib.Path(pythia.__file__).resolve().as_posix()
+            assert decision(pre(td, f'"{q}" "{real}" src PKG_ORDER')) == "allow"
+
+
+def test_pre_tool_trusts_no_other_absolute_launcher():
+    """Allowing a command runs it without asking. An absolute path is
+    trusted only when it is, by spelling, the interpreter running this hook
+    (or its own pythia script): not a look-alike, not a symlink to it — a
+    venv's python IS a symlink, and only its own path loads its packages."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as v:
+        exe = pathlib.Path(v) / "bin" / "python3"
+        with _interpreter(exe):
+            q = exe.as_posix()
+            for cmd in (f'"{pathlib.Path(v).as_posix()}/evil/python3" -m pythia src X',
+                        f'"{q}x" -m pythia src X',
+                        f'"{exe.with_name("python4").as_posix()}" -m pythia src X',
+                        f'"{exe.with_name("evil").as_posix()}" src X',
+                        "./bin/python3 -m pythia src X",           # relative: cwd decides
+                        f'"{q}" -c "import os" -m pythia src X',
+                        f'"{q}" -m pythia src X; rm -rf ~',
+                        f'"{q}" -m pythia src X && touch y',
+                        f'"{q}" -m pythia apply f.sql --yes',
+                        f'"{q}" -m pythia policy set structural allow',
+                        f'"{q}" -m pythiax src X',
+                        f'"{q}" /tmp/elsewhere/pythia.py src X'):
+                assert decision(pre(td, cmd)) is None, cmd
+            # a pythia.py in the working directory shadows `-m pythia`
+            (pathlib.Path(td) / "pythia.py").write_text("print('x')\n", encoding="utf-8")
+            assert decision(pre(td, f'"{q}" -m pythia src X')) is None
+        # the same path while ANOTHER interpreter runs the hook: not trusted
+        with _interpreter(pathlib.Path(v) / "other" / "python3"), \
+                tempfile.TemporaryDirectory() as clean:
+            assert decision(pre(clean, f'"{exe.as_posix()}" -m pythia src X')) is None
+        # a symlink to the real interpreter is another spelling: not trusted
+        link = pathlib.Path(v) / "link-python3"
+        try:
+            os.symlink(sys.executable, link)
+        except (OSError, NotImplementedError):
+            return                       # no symlinks here (Windows without rights)
+        with tempfile.TemporaryDirectory() as clean:
+            assert decision(pre(clean, f'"{link.as_posix()}" -m pythia src X')) is None
+
+
+@contextlib.contextmanager
+def _path_finds(found):
+    """path_lookup answering `found(name)` instead of reading PATH."""
+    old = pythia.path_lookup
+    pythia.path_lookup = lambda name, *a, **k: found(name)
+    try:
+        yield
+    finally:
+        pythia.path_lookup = old
+
+
+def test_printed_commands_run_where_pythia_is_not_on_path():
+    """Field test 0.15.4: a real Claude Code session in a project whose
+    pythia lives in a venv that is not on PATH ran `pythia ...` and got
+    `command not found`; the install's fallback said `python3 -m pythia`,
+    which on that machine is the system interpreter, without pythia. A
+    printed command names what runs here: the bare name only when PATH finds
+    this very file, else this interpreter by absolute path."""
+    with tempfile.TemporaryDirectory() as v:
+        exe = pathlib.Path(v) / "bin" / "python3"
+        script = exe.with_name("pythia")
+        launcher = f'"{exe.as_posix()}" -m pythia'
+        old = sys.argv[0]
+        try:
+            with _interpreter(exe):
+                sys.argv[0] = str(script)                      # console script
+                with _path_finds(lambda n: "/usr/bin/" + n):   # PATH: other ones
+                    assert pythia.invocation() == launcher
+                    hint = pythia.entry_point_hint(None, str(exe.parent))
+                    assert launcher in hint and "\n  python3 -m pythia" not in hint
+                with _path_finds(lambda n: str(script) if n == "pythia" else None):
+                    assert pythia.invocation() == "pythia"
+                sys.argv[0] = "scripts/pythia.py"              # from a clone
+                with _path_finds(lambda n: str(exe) if n == "python3" else None):
+                    assert pythia.invocation() == "python3 scripts/pythia.py"
+                with _path_finds(lambda n: None):
+                    assert pythia.invocation() == f'"{exe.as_posix()}" scripts/pythia.py'
+        finally:
+            sys.argv[0] = old
+
+
+def _session_start(td, home=None):
+    import argparse
+    old_stdin = sys.stdin
+    sys.stdin = io.StringIO("")
+    try:
+        _, out = quiet(pythia.cmd_hook, None, None,
+                       argparse.Namespace(event="session-start", project_root=td))
+    finally:
+        sys.stdin = old_stdin
+    return out
+
+
+def test_session_start_names_the_launcher_that_runs_here():
+    """CLAUDE.md is shared, so it says `pythia`. The hook runs on this
+    machine: it says how `pythia` is spelled here, once, and spells its own
+    pointers that way."""
+    launcher = '"/v/bin/python3" -m pythia'
+    with tempfile.TemporaryDirectory() as td:
+        pythia.scaffold_config(td)
+        pythia.merge_marked_block(pathlib.Path(td) / "CLAUDE.md",
+                                  pythia.claude_md_block())
+        old = pythia.invocation
+        try:
+            pythia.invocation = lambda: launcher
+            out = _session_start(td)
+            assert f"`pythia` here is `{launcher}`" in out, out
+            assert f"`{launcher} guide`" in out and f"`{launcher} connections`" in out
+            pythia.invocation = lambda: "pythia"
+            out = _session_start(td)
+            assert "`pythia` here is" not in out and "`pythia guide`" in out
+        finally:
+            pythia.invocation = old
+
+
+def test_session_state_names_a_local_scope_approval_door():
+    """Field test 0.15.4: in a venv project the MCP approver lives in Claude
+    Code's local scope (~/.claude.json), not .mcp.json — and the session
+    state said nothing about the door that prompts in every mode."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        assert not any("approval door" in ln
+                       for ln in pythia.session_state_lines(td, home=home))
+        (pathlib.Path(home) / ".claude.json").write_text(json.dumps({"projects": {
+            str(pathlib.Path(td)): {"mcpServers": {"pythia": {
+                "command": "/v/bin/python3", "args": ["-m", "pythia", "mcp"]}}}}}),
+            encoding="utf-8")
+        assert any("approval door" in ln and "pythia_approve" in ln
+                   for ln in pythia.session_state_lines(td, home=home))
+
+
 def test_tokens_that_are_not_tokens_name_nothing():
     with tempfile.TemporaryDirectory() as td:
         lease(td)

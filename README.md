@@ -196,7 +196,10 @@ each agent needs you to finish by hand.
    `.claude/settings.local.json` (this machine's file, kept out of git) with
    the absolute interpreter, and the MCP approver to Claude Code's local scope
    (`claude mcp add --scope local`); your teammates never get a path from your
-   machine. `pythia doctor` starts every launcher it finds and fails the ones
+   machine. Every command pythia prints uses the spelling that starts it here,
+   the session preamble's `RUN` line names it for the agent (CLAUDE.md, being
+   shared, can only say `pythia`), and the guard lets reads through in that
+   spelling — this interpreter's own path, never another. `pythia doctor` starts every launcher it finds and fails the ones
    that cannot import pythia — except where this machine's own launcher
    already serves the same hooks: then the team's shared copy erroring here
    is a warning (keep it for teammates or remove it). Codex's session hook is
