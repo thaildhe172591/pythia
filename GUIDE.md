@@ -559,8 +559,10 @@ left alone; install names any pythia hooks already in the shared file, since
 those run too. Commands pythia prints follow the same rule: the bare name
 only when PATH finds this very install, else this interpreter by absolute
 path; CLAUDE.md, a shared file, can only say `pythia`, so the SessionStart
-preamble adds a `RUN` line naming the spelling that works on this machine,
-and an `approval door` line when the MCP approver lives in the local scope.
+preamble adds a `RUN` line naming the spelling that works on this machine
+(typed as written, one command per call: a shell variable or `;` makes a
+compound command, which the guard leaves to the client's prompt), and an
+`approval door` line when the MCP approver lives in the local scope.
 `pythia doctor` starts every launcher it finds and fails the
 ones that cannot import pythia, naming what each one leaves off and the fix
 that applies to its file. A shared hook that cannot start here while this

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.6 — 2026-10-15
+
+From the 0.15.5 field test: a real Claude Code session read the `RUN` line
+and, to shorten the long launcher, wrote `PY="…/venv/bin/python3"; "$PY" -m
+pythia connections`. A variable and a `;` make a compound command, which the
+guard rightly leaves to the client's prompt — so the first read cost a
+permission round trip before the agent retyped it plainly.
+
+- **The `RUN` line says how to type the spelling:** as written, one command
+  per call, and why — a shell variable or `;` makes a compound command the
+  guard asks about. AGENTS.md and the pythia-setup reference say the same.
+  The guard itself is unchanged.
+
 ## 0.15.5 — 2026-10-15
 
 From the 0.15.4 field test: a real Claude Code session in a project whose

@@ -521,7 +521,9 @@ venv, pipx, `python` là interpreter khác — hook vào
 chúng cũng chạy. Các lệnh pythia in ra theo đúng quy tắc đó: chỉ dùng tên trần
 khi PATH tìm ra đúng bản đang cài, còn lại dùng interpreter này theo đường dẫn
 tuyệt đối; CLAUDE.md là file chung nên chỉ ghi được `pythia`, vì vậy phần đầu
-phiên (SessionStart) thêm dòng `RUN` nêu cách gọi chạy được trên máy này, và
+phiên (SessionStart) thêm dòng `RUN` nêu cách gọi chạy được trên máy này (gõ
+đúng như viết, mỗi lần gọi một lệnh: dùng biến shell hay `;` sẽ thành lệnh ghép,
+guard để client hỏi quyền), và
 dòng `approval door` khi MCP approver nằm ở local scope. `pythia doctor` chạy
 thử từng launcher và báo `fail` cho
 cái nào không import được pythia, kèm việc nó làm mất và cách sửa đúng với

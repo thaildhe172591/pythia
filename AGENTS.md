@@ -11,7 +11,8 @@ pythia-plsql`), or `python scripts/pythia.py <command>` from a clone. Every pyth
 paste-able form — prefer running exactly those. Where pythia's environment
 is not on PATH (a venv nobody activated), that form is the interpreter's
 absolute path, and the session preamble's `RUN` line names it: use it
-wherever these rules say `pythia`. `--json` gives structured
+wherever these rules say `pythia`, typed as written, one command per call —
+a shell variable or `;` makes a compound command the guard asks about. `--json` gives structured
 output on any command.
 
 ## Standing rules — the Learn, Ask, Do model
