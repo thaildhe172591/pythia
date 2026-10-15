@@ -8,7 +8,10 @@ carries the full workflows.
 
 Run as `pythia <command>` when installed from pip (`pip install
 pythia-plsql`), or `python scripts/pythia.py <command>` from a clone. Every pythia output prints follow-up commands in the correct,
-paste-able form — prefer running exactly those. `--json` gives structured
+paste-able form — prefer running exactly those. Where pythia's environment
+is not on PATH (a venv nobody activated), that form is the interpreter's
+absolute path, and the session preamble's `RUN` line names it: use it
+wherever these rules say `pythia`. `--json` gives structured
 output on any command.
 
 ## Standing rules — the Learn, Ask, Do model

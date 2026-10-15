@@ -428,7 +428,10 @@ says that, not "policy forbids it".
 Default **on**: every object applied through pythia compiles with PL/Scope,
 so `pythia plscope` always has a complete index on the dev schema. Two more
 switches, both default **on**: `"auto_allow_reads"` — the PreToolUse hook lets
-pythia's read-only commands (and approved writes) through without a prompt;
+pythia's read-only commands (and approved writes) through without a prompt,
+spelled `pythia`, `python -m pythia`, or — where pythia's venv is not on PATH
+— the hook's own interpreter by absolute path, the spelling pythia prints
+there (no other path is trusted);
 `"block_raw_writes"` — it denies sqlplus/SQLcl `run-sql` DDL and DML that
 would skip the write path.
 
@@ -553,7 +556,12 @@ a venv, pipx, a `python` that is another interpreter — the hooks go to
 `claude mcp add --scope local` (printed for you to run when the `claude` CLI
 is not on PATH), and the shared `.claude/settings.json` and `.mcp.json` are
 left alone; install names any pythia hooks already in the shared file, since
-those run too. `pythia doctor` starts every launcher it finds and fails the
+those run too. Commands pythia prints follow the same rule: the bare name
+only when PATH finds this very install, else this interpreter by absolute
+path; CLAUDE.md, a shared file, can only say `pythia`, so the SessionStart
+preamble adds a `RUN` line naming the spelling that works on this machine,
+and an `approval door` line when the MCP approver lives in the local scope.
+`pythia doctor` starts every launcher it finds and fails the
 ones that cannot import pythia, naming what each one leaves off and the fix
 that applies to its file. A shared hook that cannot start here while this
 machine's own launcher serves the same hooks is a warning — the team's copy

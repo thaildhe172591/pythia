@@ -796,10 +796,18 @@ def test_apply_preview_warns_on_naming_drift():
 
 
 def test_invocation_reflects_how_the_tool_was_run():
+    """...as it runs from a shell here: a bare name only when PATH finds this
+    very file (tests/test_phase6.py covers the venv that is not on PATH)."""
     import os
-    interp = pathlib.Path(sys.executable).stem   # python / python3 / python3.13
-    old = sys.argv[0]
+    import re
+    # python / python3 / python3.13 — the name, not Path.stem ("python3.9"
+    # would lose its ".9")
+    interp = re.sub(r"\.exe$", "", pathlib.Path(sys.executable).name, flags=re.I)
+    old, old_lookup = sys.argv[0], pythia.path_lookup
     try:
+        # PATH finds this interpreter by its name, and the entry point by its
+        pythia.path_lookup = lambda name, *a, **k: (
+            sys.executable if name == interp else sys.argv[0])
         sys.argv[0] = "scripts/pythia.py"        # run from source
         assert pythia.invocation() == f"{interp} scripts/pythia.py"
         # packaged entry point — a native path for whichever OS runs the test
@@ -812,7 +820,7 @@ def test_invocation_reflects_how_the_tool_was_run():
             sys.argv[0] = "/usr/local/bin/pythia"
             assert pythia.invocation() == "pythia"
     finally:
-        sys.argv[0] = old
+        sys.argv[0], pythia.path_lookup = old, old_lookup
 
 
 def test_preview_hint_is_pasteable():
@@ -830,8 +838,9 @@ def test_preview_hint_is_pasteable():
                 pythia.run_apply(conn, "APP", apply_ns(td, file="f.sql"), NEW_FILE)
         finally:
             sys.argv[0] = old
-        interp = pathlib.Path(sys.executable).stem
-        assert f"{interp} scripts/pythia.py apply f.sql --confirm " in buf.getvalue()
+        # this interpreter as a shell here types it (tests/test_phase6.py)
+        assert (f"{pythia.interpreter_word()} scripts/pythia.py apply f.sql "
+                "--confirm ") in buf.getvalue()
 
 
 def test_preview_diff_ignores_the_create_header():

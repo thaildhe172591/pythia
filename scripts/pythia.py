@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.4"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.5"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -239,7 +239,7 @@ def offer_path_fix(scripts_dir, interactive, forced=False):
         print("  " + warn)
     print("  Open a NEW terminal for it to take effect — an already-running")
     print("  one keeps the environment it started with, and so do its tabs.")
-    print(f"  Until then: {pathlib.Path(sys.executable).stem} -m pythia <command>")
+    print(f"  Until then: {interpreter_word()} -m pythia <command>")
     return True
 
 
@@ -357,7 +357,7 @@ def entry_point_hint(found, scripts_dir, in_stored_path=False):
             "Windows Terminal,",
             "  VS Code or Cursor, restart the application itself.",
             "  In this one, keep using: "
-            + pathlib.Path(sys.executable).stem + " -m pythia <command>",
+            + interpreter_word() + " -m pythia <command>",
         ]))
     out = ["`pythia` is installed but not on your PATH."]
     if scripts_dir:
@@ -367,8 +367,7 @@ def entry_point_hint(found, scripts_dir, in_stored_path=False):
             # that variable is system and user merged, so writing it
             # back into user scope copies every system entry into the
             # user's. Let the tool do it correctly instead.
-            out.append("  Put it there with: "
-                       + pathlib.Path(sys.executable).stem
+            out.append("  Put it there with: " + interpreter_word()
                        + " -m pythia install --add-to-path")
         else:
             out.append("  Add it to your shell profile:")
@@ -376,25 +375,54 @@ def entry_point_hint(found, scripts_dir, in_stored_path=False):
     else:
         out.append("  Add pip's scripts directory to PATH.")
     out.append("Either way, this works right now, PATH or no PATH:")
-    out.append("  " + pathlib.Path(sys.executable).stem + " -m pythia <command>")
+    out.append("  " + interpreter_word() + " -m pythia <command>")
     return "\n".join(out)
 
 
+def _same_path(a, b):
+    """The same file by spelling, symlinks NOT followed: a venv's python is a
+    symlink to the base interpreter, and only the venv's own path loads the
+    venv's packages."""
+    norm = lambda p: os.path.normcase(os.path.abspath(p))      # noqa: E731
+    return norm(a) == norm(b)
+
+
+def interpreter_word():
+    """This interpreter as a shell here can type it: its bare name when PATH
+    finds this very file, else its absolute path, quoted. "python3" on most
+    Linux/macOS, "python" on Windows — and in a venv nobody activated (Claude
+    Code started from an app or an IDE), the venv's own path: the bare name
+    would start the system interpreter, which has no pythia."""
+    exe = sys.executable
+    if not exe:
+        return "python"
+    # the name as typed: Path.stem would turn "python3.9" into "python3"
+    name = re.sub(r"\.exe$", "", pathlib.Path(exe).name, flags=re.I)
+    found = path_lookup(name)
+    if found and _same_path(found, exe):
+        return name
+    return launcher_text([pathlib.Path(exe).as_posix()])
+
+
 def invocation():
-    """How to invoke this tool, exactly as the user actually ran it. Every
-    printed command must be paste-able: a bare `pythia ...` is
-    CommandNotFound for anyone running from source."""
+    """How to invoke this tool from a shell on this machine. Every printed
+    command must be paste-able: a bare `pythia ...` is CommandNotFound for
+    anyone running from source, or from a venv that is not on PATH."""
     main_spec = getattr(sys.modules.get("__main__"), "__spec__", None)
     if getattr(main_spec, "name", "") == "pythia":
         # `python -m pythia` — argv[0] is the module's site-packages path,
         # which nobody typed; the -m form is the paste-able one
-        return f"{pathlib.Path(sys.executable).stem} -m pythia"
+        return f"{interpreter_word()} -m pythia"
     prog = sys.argv[0] or "pythia"
     if prog.lower().endswith(".py"):
-        # the interpreter actually running us: "python3" on most Linux/macOS,
-        # "python" on Windows — a hardcoded "python" would not paste on Ubuntu
-        return f"{pathlib.Path(sys.executable).stem} {prog}"
-    return pathlib.Path(prog).name
+        return f"{interpreter_word()} {launcher_text([prog]) if ' ' in prog else prog}"
+    name = pathlib.Path(prog).name
+    if not re.search(r"[/\\]", prog):
+        return name                       # found by name: PATH has it
+    found = path_lookup(name)
+    if found and (_same_path(found, prog) or _same_path(found, prog + ".exe")):
+        return name
+    return f"{interpreter_word()} -m pythia"
 
 
 HEADLESS_YES_MSG = (
@@ -6778,6 +6806,23 @@ def parse_pythia_command(command, cwd=None):
     exe = re.sub(r"\.exe$", "", first.lower())
     if exe == "pythia":                   # by name only: PATH decides, not the agent
         return toks[1:]
+    if _is_abs_path(first) and sys.executable:
+        # this hook's own interpreter by absolute path — the spelling that
+        # runs where pythia's venv is not on PATH (field test 0.15.4) — or
+        # the pythia script beside it; any other path is a stranger's file
+        own = pathlib.Path(sys.executable)
+        if _same_path(first, own) and toks[1:3] == ["-m", "pythia"]:
+            base = pathlib.Path(cwd or os.getcwd())
+            if (base / "pythia.py").exists() or (base / "pythia").is_dir():
+                return None               # python -m would import that one
+            return toks[3:]
+        if _same_path(first, own) and len(toks) > 1 and _is_real_pythia(
+                pathlib.Path(cwd or os.getcwd()) / toks[1]):
+            return toks[2:]               # a clone's launcher: this very file
+        if any(_same_path(first, own.with_name(n))
+               for n in ("pythia", "pythia.exe")):
+            return toks[1:]
+        return None
     if re.fullmatch(r"python(\d+(\.\d+)?)?|py", exe):
         if toks[1:3] == ["-m", "pythia"]:
             base = pathlib.Path(cwd or os.getcwd())
@@ -6972,9 +7017,10 @@ def post_tool_note(payload):
     return _hook_out("PostToolUse", context="pythia: " + " ".join(notes))
 
 
-def session_state_lines(root):
+def session_state_lines(root, home=None):
     """The project's live state, for the session preamble — no database."""
     lines = []
+    run = invocation()
     cfg_path = pathlib.Path(root) / CONFIG_DIR / CONFIG_NAME
     if cfg_path.is_file():
         try:
@@ -6983,16 +7029,19 @@ def session_state_lines(root):
             rows = []
         names = ", ".join(r["name"] + ("*" if r["default"] else "") for r in rows)
         lines.append(f"connections: {names or 'none filled in'} (* = default; "
-                     "`pythia connections` for details)")
+                     f"`{run} connections` for details)")
     else:
-        lines.append("connections: none — `pythia install` scaffolds "
+        lines.append(f"connections: none — `{run} install` scaffolds "
                      ".pythia/connections.json")
     lines.append(lease_line(read_lease(root)))
     if (pathlib.Path(root) / CONFIG_DIR / "conventions.md").is_file():
         lines.append("conventions: .pythia/conventions.md exists — read it "
                      "before writing any object")
     mcp = _read_json(pathlib.Path(root) / ".mcp.json") or {}
-    if "pythia" in (mcp.get("mcpServers") or {}):
+    # a venv install registers the approver in Claude Code's local scope
+    # (~/.claude.json), never in the shared .mcp.json
+    if ("pythia" in (mcp.get("mcpServers") or {})
+            or local_mcp_entry(root, home) is not None):
         lines.append("approval door: the pythia_approve tool (MCP) — prompts in "
                      "every permission mode; AskUserQuestion is the fallback")
     return lines
@@ -7015,13 +7064,19 @@ def cmd_hook(conn, schema, ns):
             md = pathlib.Path(root) / "CLAUDE.md"
             loaded = md.is_file() and AGENTS_BEGIN in md.read_text(
                 encoding="utf-8", errors="replace")
+            run = invocation()
             if loaded:
                 # Claude Code already loaded the guide from CLAUDE.md: the
                 # hook adds what a static file cannot — the live state
                 print("PYTHIA HARNESS ACTIVE - the rules are in CLAUDE.md "
-                      "(pythia block); `pythia guide` prints the full contract.")
+                      f"(pythia block); `{run} guide` prints the full contract.")
             else:
                 print(BRIEF_GUIDE.rstrip())
+            if run not in ("pythia", "pythia.exe"):
+                # the shared files say `pythia`; this machine runs it otherwise
+                # (a venv nobody activated, a clone) — field test 0.15.4
+                print(f"RUN    `pythia` here is `{run}` — spell every pythia "
+                      "command the rules name that way.")
             print("STATE  " + "\n       ".join(session_state_lines(root)))
             return
         out = (pre_tool_decision(payload) if event == "pre-tool"
