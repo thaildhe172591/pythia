@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.8"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.9"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -7254,13 +7254,16 @@ def cmd_hook(conn, schema, ns):
                 print("PYTHIA HARNESS ACTIVE - the rules are in CLAUDE.md "
                       f"(pythia block); `{run} guide` prints the full contract.")
             else:
+                head, rest = BRIEF_GUIDE.rstrip().split("\n", 1)
+                print(head)
                 if loaded:
                     # upgraded, not re-installed: the block carries an older
-                    # version's rules (the door order among them)
-                    print("PYTHIA HARNESS ACTIVE - CLAUDE.md's pythia block is "
-                          f"from an older pythia; where it differs from the "
-                          f"rules below, these win. `{run} install` refreshes it.")
-                print(BRIEF_GUIDE.rstrip())
+                    # version's rules (the door order among them) — said
+                    # under the one header, before the rules that replace it
+                    print("NOTE   CLAUDE.md's pythia block is from an older "
+                          "pythia; where it differs from the rules below, these "
+                          f"win. `{run} install` refreshes it.")
+                print(rest)
             if run not in ("pythia", "pythia.exe"):
                 # the shared files say `pythia`; this machine runs it otherwise
                 # (a venv nobody activated, a clone) — field test 0.15.4

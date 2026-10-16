@@ -560,7 +560,9 @@ nói rõ khi không có câu trả lời nào về.
 cạnh kết quả apply. Install còn ghi harness vào `CLAUDE.md` của dự án (khối
 có đánh dấu, giống AGENTS.md cho Codex): Claude Code nạp file này ở mọi
 phiên dù có hook hay không, và khi đã có nó thì hook SessionStart chỉ in
-trạng thái sống. Kèm theo là luật `deny` cho `Bash(pythia approve
+trạng thái sống — hoặc, khi khối thuộc bản pythia cũ hơn, in brief hiện hành
+dưới một dòng tiêu đề kèm dòng `NOTE`, cho tới khi `pythia install` làm mới
+khối. Kèm theo là luật `deny` cho `Bash(pythia approve
 --hook*)` — hook phải chạy trên payload do Claude Code ghi, agent tự bơm
 payload từ Bash là giả mạo phê duyệt. Sau `pip install --upgrade`, chạy lại
 `python -m pythia install`; `npx pythia-plsql` làm cả hai. Plugin cài qua
