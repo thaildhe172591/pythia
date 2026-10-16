@@ -382,6 +382,22 @@ def test_one_version_across_every_manifest():
     assert "oracledb" in pyproject
 
 
+def test_license_is_an_spdx_string_the_build_backend_reads():
+    """setuptools deprecated `license = { text = ... }` and stops building it
+    after 2027-02-18; the release workflow builds with whatever setuptools is
+    current. The SPDX string needs setuptools 77, which still runs on 3.9."""
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert re.search(r'^license = "MIT"$', pyproject, re.M), "license must be an SPDX string"
+    assert re.search(r'^license-files = \["LICENSE"\]$', pyproject, re.M)
+    assert (ROOT / "LICENSE").is_file()
+    floor = re.search(r'requires = \["setuptools>=(\d+)', pyproject)
+    assert floor and int(floor.group(1)) >= 77, "SPDX license needs setuptools>=77"
+    for manifest in (ROOT / ".claude-plugin" / "plugin.json",
+                     ROOT / ".claude-plugin" / "marketplace.json",
+                     ROOT / "npm" / "package.json"):
+        assert '"license": "MIT"' in manifest.read_text(encoding="utf-8"), manifest
+
+
 def test_entry_point_hint_names_the_directory_to_add():
     """pip install --user on Windows puts pythia.exe in a Scripts directory
     that is not on PATH, so the very next documented command fails with
