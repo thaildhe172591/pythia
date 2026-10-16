@@ -32,11 +32,12 @@ Learn: 1, 2, 7, 9, 10 · Ask: 4, 5, 6, 11, 13 (and 2's threshold) · Do: 3, 8, 1
    `sqlplus`, or a driver script — those have no snapshot, no verify, no
    journal; the PreToolUse hook denies them.
 4. **The developer sees every preview.** Relay apply's diff, impact line,
-   lint and warnings verbatim, then ask through a door: the `pythia_approve`
-   tool (MCP — it prompts in every permission mode but `dontAsk`), else an
-   `AskUserQuestion` whose text is `pythia approve --card <token>` verbatim,
-   else the developer's terminal. `--confirm` only after the approval
-   arrives. `--yes`, loosening `policy set` and `autopilot on` are the
+   lint and warnings verbatim, then ask through the first door that works,
+   moving to the next unasked when one fails: on Claude Code an
+   `AskUserQuestion` whose text is `pythia approve --card <token>` verbatim
+   (its own dialog, shown in every client), then the `pythia_approve` tool
+   (MCP — where Codex starts), then the developer's terminal. `--confirm`
+   only after the approval arrives. `--yes`, loosening `policy set` and `autopilot on` are the
    developer's actions — the CLI refuses them without a terminal. The one
    exception is rule 13's lease.
 5. **Scope is what was asked.** Dependents that break are reported with a

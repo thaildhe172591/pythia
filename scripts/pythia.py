@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.7"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.8"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -213,23 +213,30 @@ def paint_diff_line(ln, enabled):
 NL = chr(10)   # a literal escape does not survive every editing path
 
 
-def offer_path_fix(scripts_dir, interactive, forced=False):
+def offer_path_fix(scripts_dir, interactive, forced=False, skip=False,
+                   windows=None, add=None, ask=None):
     """Put pythia on PATH for the developer instead of handing them a command
-    to run. Only ever touches the user PATH, and only with a yes."""
-    if not scripts_dir or os.name != "nt":
+    to run. Only ever touches the user PATH. A person at the console is asked
+    (Enter means yes); with nobody to ask — an agent running the install,
+    the usual case on a fresh machine — it is added, because otherwise
+    `pythia` never works in the developer's own terminal. --no-path skips it."""
+    windows = (os.name == "nt") if windows is None else windows
+    add = add or add_to_user_path
+    ask = ask or input
+    if not scripts_dir or not windows or skip:
         return False
-    if not forced:
-        if not interactive:
-            return False
+    if not (pathlib.Path(scripts_dir) / "pythia.exe").is_file():
+        return False                      # a clone, a test run: nothing to put there
+    if interactive and not forced:
         try:
-            answer = input(NL + "Add it to your PATH now? [Y/n] ").strip().lower()
+            answer = ask(NL + "Add it to your PATH now? [Y/n] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return False
         if answer not in ("", "y", "yes"):
             return False
     try:
-        changed = add_to_user_path(scripts_dir)
+        changed = add(scripts_dir)
     except OSError as e:
         print(f"Could not update your PATH: {e}")
         return False
@@ -436,9 +443,9 @@ APPROVE_HEADLESS_MSG = (
     "approve is the developer's command — it needs a real console.\n"
     "Agents ask instead: AskUserQuestion with the text of `approve --card "
     "<token>` and the options Approve / Reject — the pythia hook mints the "
-    "grant when the developer answers Approve. Or a person runs approve in "
-    "their own terminal.\n(Real pipelines apply with --yes and PYTHIA_CI=1 "
-    "instead.)")
+    "grant when the developer answers Approve — then the pythia_approve tool "
+    "if that fails. Or a person runs approve in their own terminal.\n(Real "
+    "pipelines apply with --yes and PYTHIA_CI=1 instead.)")
 
 
 def grant_refusal(status, token, grant, conn_name, file_hint):
@@ -448,12 +455,10 @@ def grant_refusal(status, token, grant, conn_name, file_hint):
     preview_line = f"  {invocation()} apply {file_hint}"
     if status == "missing":
         return ("The confirmation token matches, but no developer approval is "
-                "on file.\nAsk in chat — AskUserQuestion carrying the text of\n"
-                f"  {invocation()} approve --card {token}\nwith the options "
-                "Approve / Reject (the pythia hook mints the grant on Approve) "
-                "— or ask the developer to run, in their own terminal "
-                f"(agents cannot run it):\n{approve_line}\n"
-                "Then re-run this command.")
+                "on file. Ask through the first door that works, moving on "
+                "without asking when one fails:\n"
+                + "\n".join(ln.replace("    ", "  ", 1) for ln in door_lines(token))
+                + "\nThen re-run this command.")
     if status == "expired":
         return (f"That approval expired ({GRANT_TTL_MINUTES} minutes after it "
                 "was given).\nAsk the developer to approve again:\n"
@@ -2480,17 +2485,10 @@ def run_apply(conn, schema, ns, file_text, origin=None):
                         f"{journal_root(ns.project_root) / entry / 'restore.sql'}",
                         "dim", en))
         if not confirmed:
-            print("\n  To apply — the developer approves, then the agent confirms:")
-            print("    Claude Code/Codex:  the agent calls the "
-                  + paint("pythia_approve", "cyan", en)
-                  + f" tool (MCP) with token {token} — prompts in every mode")
-            print("    or in chat:         AskUserQuestion with the text of "
-                  + paint(f"{invocation()} approve --card {token}", "cyan", en))
-            print("    or in a terminal:   "
-                  + paint(f"{invocation()} approve {token}", "cyan", en))
-            print("    then the agent:     "
-                  + paint(f"{invocation()} apply {ns.file} --confirm {token}",
-                          "cyan", en))
+            print_doors(token, en,
+                        then=f"{invocation()} apply {ns.file} --confirm {token}",
+                        head="To apply — the developer approves through the "
+                             "first door that works, then the agent confirms:")
     if not confirmed:
         return 0
 
@@ -2770,18 +2768,94 @@ def squash(text):
 TOKEN_IN_QUESTION = re.compile(r"approve\s+(?:--card\s+)?([0-9a-f]{6,})\b", re.I)
 
 
+def _tool_input_in(raw, tool_use_id, asked):
+    """The input of an AskUserQuestion tool_use in one transcript line, as
+    the model sent it (the wire copy when the line keeps one), or None."""
+    if b"AskUserQuestion" not in raw:
+        return None
+    try:
+        d = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(d, dict) or d.get("type") != "assistant":
+        return None
+    wire = d.get("wireToolInputs") if isinstance(d.get("wireToolInputs"), dict) else {}
+    for c in (d.get("message") or {}).get("content") or []:
+        if not (isinstance(c, dict) and c.get("type") == "tool_use"
+                and c.get("name") == "AskUserQuestion"):
+            continue
+        sent = wire.get(c.get("id"))
+        sent = sent if isinstance(sent, dict) else c.get("input")
+        if not isinstance(sent, dict):
+            continue
+        if tool_use_id:
+            if c.get("id") == tool_use_id:
+                return sent
+        elif [q.get("question") for q in sent.get("questions") or []
+              if isinstance(q, dict)] == asked:
+            return sent
+    return None
+
+
+def transcript_tool_input(payload, asked, chunk=1 << 20, limit=64 << 20,
+                          retries=2, pause=0.25):
+    """What the model itself sent in this AskUserQuestion call, read from
+    the session transcript — None when it cannot be found. On current
+    Claude Code the dialog writes the person's answer into tool_input (and
+    drops any answers the model wrote before it shows), so tool_input alone
+    cannot say who answered; the transcript keeps the call as the model sent
+    it. Read from the end, where the call is; bounded, and retried briefly
+    in case the line is still being written."""
+    import time
+    path = payload.get("transcript_path")
+    tid = payload.get("tool_use_id") if isinstance(payload.get("tool_use_id"), str) else None
+    if not isinstance(path, str) or not path:
+        return None
+    for attempt in range(retries + 1):
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, 2)
+                pos, tail, read = f.tell(), b"", 0
+                while pos > 0 and read < limit:
+                    step = min(chunk, pos)
+                    pos -= step
+                    read += step
+                    f.seek(pos)
+                    lines = (f.read(step) + tail).split(b"\n")
+                    tail = lines.pop(0) if pos > 0 else b""
+                    for raw in reversed(lines):
+                        found = _tool_input_in(raw, tid, asked)
+                        if found is not None:
+                            return found
+        except OSError:
+            return None
+        if attempt < retries:
+            time.sleep(pause)
+    return None
+
+
+def next_door_after_chat(token):
+    """Where the agent goes, without asking, when the chat door fails."""
+    return (f"Next door, now — no need to ask the developer first: call the "
+            f"pythia_approve tool (MCP) with token {token}; if it reports that "
+            f"the client did not show its card, or it is not available, relay "
+            f"`{invocation()} approve {token}` for the developer's terminal.")
+
+
 def hook_approve(ns):
     """The chat door. Claude Code runs this as a PostToolUse hook on
-    AskUserQuestion, with the payload on stdin; the developer's answer in it
-    was filled in by the client, not the agent. A grant is minted only when
-    the answer is exactly Approve AND the question carried pythia's own card
-    for that token — otherwise the human approved the agent's words, not the
-    preview, and that is no approval.
+    AskUserQuestion, with the payload on stdin. A grant is minted only when
+    the developer chose Approve in the dialog AND the question carried
+    pythia's own card for that token — otherwise the human approved the
+    agent's words, not the preview, and that is no approval.
 
-    Two failure modes are named instead of passed over in silence, because
-    both reached the field: answers pre-filled in tool_input (the agent or a
-    hook wrote them — that is not a person choosing), and no answer at all
-    (the question UI never rendered, which some permission setups cause).
+    Who chose is checked, not assumed. Current Claude Code writes the
+    person's answer into tool_input after dropping any the model wrote; the
+    transcript keeps what the model sent, so answers in the model's own call
+    are refused, and answers nobody can trace to the dialog are too. A
+    dialog that closed itself while the developer was away, a typed reply
+    instead of a choice, and no answer at all are each named. Every failure
+    that is not the developer's own no sends the agent to the next door.
     Everything else is silence: a hook that talks on every question is noise."""
     try:
         payload = json.load(sys.stdin)
@@ -2790,13 +2864,15 @@ def hook_approve(ns):
     if not isinstance(payload, dict) or payload.get("tool_name") != "AskUserQuestion":
         return
     tin = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-    resp = payload.get("tool_response")
-    answers = (resp.get("answers") if isinstance(resp, dict) else None) or {}
-    if not isinstance(answers, dict):
-        answers = {}
-    prefilled = tin.get("answers") or {}
+    resp = payload.get("tool_response") if isinstance(payload.get("tool_response"), dict) else {}
+    in_input = tin.get("answers") if isinstance(tin.get("answers"), dict) else {}
+    answers = resp.get("answers") if isinstance(resp.get("answers"), dict) else {}
+    answers = answers or in_input
+    idle = resp.get("afkTimeoutMs")
+    typed = str(resp.get("response") or "").strip()
     asked = [q.get("question", "") for q in (tin.get("questions") or [])
              if isinstance(q, dict)]
+    sent = transcript_tool_input(payload, asked) if in_input else None
     notes, seen = [], set()
     for question in list(answers) + [q for q in asked if q not in answers]:
         m = TOKEN_IN_QUESTION.search(str(question))
@@ -2806,23 +2882,38 @@ def hook_approve(ns):
         if token in seen:
             continue
         seen.add(token)
-        if prefilled:
-            notes.append(f"{token}: the answer arrived pre-filled in the tool "
-                         "input — written by the agent or a hook, not chosen by "
-                         "the developer. No grant minted. Ask again with no "
-                         "answers field, or use the pythia_approve tool.")
+        if idle:
+            notes.append(f"{token}: the dialog closed itself after "
+                         f"{round(float(idle) / 1000)} s with nobody at the "
+                         "keyboard — no one answered. No grant minted. "
+                         + next_door_after_chat(token))
+            continue
+        if in_input and sent is None:
+            notes.append(f"{token}: the answer is in the tool input, and the "
+                         "session transcript that shows whether you wrote it "
+                         "yourself could not be read — so it cannot count. No "
+                         "grant minted. " + next_door_after_chat(token))
+            continue
+        if in_input and sent.get("answers"):
+            notes.append(f"{token}: your own call carried answers — that is "
+                         "you choosing, not the developer. No grant minted. Ask "
+                         "again without an answers field.")
             continue
         answer = answers.get(question)
         if answer is None or not str(answer).strip():
+            if typed:
+                notes.append(f"{token}: the developer typed a reply instead of "
+                             f"choosing: {typed!r}. That is not an approval and "
+                             "no grant was minted — answer them, then ask again.")
+                continue
             notes.append(f"{token}: no answer came back — the question never "
-                         "reached the developer (a known Claude Code failure: an "
-                         "allow rule or a skill's allowed-tools naming "
-                         "AskUserQuestion, or a PreToolUse hook with an empty or "
-                         "'*' matcher, answers it first). No grant minted. Do "
-                         "not ask the same way again: call the pythia_approve "
-                         f"tool (MCP) with token {token}, or ask the developer to "
-                         f"run `{invocation()} approve {token}`. "
-                         f"`{invocation()} doctor` names the setting to fix.")
+                         "reached the developer (on older Claude Code an allow "
+                         "rule, a skill's allowed-tools naming AskUserQuestion, "
+                         "or a PreToolUse hook with an empty or '*' matcher "
+                         "answered it first; `"
+                         f"{invocation()} doctor` names such a setting). No grant "
+                         "minted. Do not ask the same way again. "
+                         + next_door_after_chat(token))
             continue
         if squash(answer) != "approve":
             notes.append(f"{token}: the developer did NOT approve (answered "
@@ -3113,12 +3204,12 @@ ASK    relay apply/deploy previews verbatim and wait for a real yes. >=10
        dependents or cross-schema: show the developer first. Refusals and
        exit 3 (written-but-broken) are relayed, never routed around. Never
        read exit codes through a pipe.
-DO     writes go through `pythia apply` / `pythia deploy` only. Approval
-       doors: the pythia_approve tool (MCP, every mode), else AskUserQuestion
-       with `pythia approve --card <token>` verbatim, else the developer's
-       `pythia approve <token>`. You never mint it. An active autopilot lease
-       lands covered writes without asking - report each one (autopilot
-       report). Prove done with evidence (pythia-verify). Contract: `pythia guide`.
+DO     writes only via `pythia apply` / `pythia deploy`. Approval doors, the
+       first that works, the next unasked if one fails: AskUserQuestion with
+       `pythia approve --card <token>` verbatim (Claude Code), pythia_approve
+       (MCP; Codex starts here), `pythia approve <token>` (terminal). Never
+       mint it. A lease lands covered writes unasked; report each (autopilot
+       report). Evidence before done (pythia-verify). Contract: `pythia guide`.
 """
 
 
@@ -3145,8 +3236,9 @@ def agents_md_block():
             "--confirm <token>`, `deploy <files> --confirm <token>`, or plain "
             "`apply` under an autopilot lease) yourself; do not stop at the "
             "preview or hand the developer a command to type. If the tool is "
-            "not available (older Codex), relay `pythia approve <token>` for "
-            "their terminal.\n"
+            "not available (older Codex), or reports that the client did not "
+            "show its card, relay `pythia approve <token>` for their terminal "
+            "at once.\n"
             f"{AGENTS_END}")
 
 
@@ -3159,15 +3251,16 @@ def claude_md_block():
     return (f"{AGENTS_BEGIN}\n"
             "## pythia — developing PL/SQL on Oracle\n\n"
             f"{BRIEF_GUIDE.rstrip()}\n\n"
-            "APPROVAL ON CLAUDE CODE: first door is the `pythia_approve` tool "
-            "(MCP server `pythia`, registered by `pythia install`) — it prompts in "
-            "every permission mode but dontAsk and shows pythia's own card. "
-            "Not connected? Ask an AskUserQuestion whose text is exactly the "
-            "output of `pythia approve --card <token>`, options Approve / "
-            "Reject, never with pre-filled answers; if the hook says no answer "
-            "came back, do not ask the same way again — use the tool, or relay "
-            "`pythia approve <token>` for the developer's terminal. Then run "
-            "the command the approval names yourself.\n\n"
+            "APPROVAL ON CLAUDE CODE: first door is AskUserQuestion — Claude "
+            "Code's own dialog, shown in every client (terminal, desktop, web, "
+            "phone). Its text is exactly the output of `pythia approve --card "
+            "<token>`, options Approve / Reject, never with answers filled in. "
+            "When pythia's hook says the answer did not count for any reason "
+            "but the developer's own Reject, go straight on — without asking — "
+            "to the `pythia_approve` tool (MCP server `pythia`); if that "
+            "reports the client did not show its card, relay `pythia approve "
+            "<token>` for the developer's terminal. Then run the command the "
+            "approval names yourself.\n\n"
             "HOOKS NOT RUNNING? pythia's SessionStart hook prints a `STATE` line "
             "(connections, autopilot, approval door). No STATE line this session, "
             "or no `pythia_approve` tool (MCP server `pythia` failed to "
@@ -3278,13 +3371,13 @@ One door for writes: snapshot -> impact -> preview -> token -> approve ->
 apply -> verify -> report.
 
   approve                 THE DEVELOPER'S ACT: mints the one-time grant that
-                          --confirm requires. Three doors, all theirs: the
-                          pythia_approve MCP tool (Claude Code and Codex; it
-                          prompts in every permission mode), Approve to your
-                          AskUserQuestion (question text = `approve --card
-                          <token>`, verbatim - the hook mints only then), or
-                          `approve <token>` at their own terminal. An agent
-                          never mints it - that is the point.
+                          --confirm requires. Three doors, all theirs, in this
+                          order: Approve to your AskUserQuestion (question
+                          text = `approve --card <token>`, verbatim - the hook
+                          mints only then; Claude Code), the pythia_approve
+                          MCP tool (where Codex starts), or `approve <token>`
+                          at their own terminal. A door that fails says so
+                          and names the next. An agent never mints it.
   apply                   the six-step write; --confirm binds to the preview
                           AND to the developer's approval
   deploy                  a release script, or several, statement by statement
@@ -3298,10 +3391,11 @@ apply -> verify -> report.
                           pauses it. `autopilot report` lists every write.
   journal restore         undo, through the same six steps and the same gate
   unistr                  exact non-ASCII literals for what you are writing
-  mcp                     Codex only: a write-free MCP approver. The agent
-                          calls its pythia_approve tool, Codex shows the card
-                          as a select prompt, and the developer's Approve mints
-                          the grant. It never writes; apply still verifies it.
+  mcp                     the write-free MCP approver: Codex's first door,
+                          Claude Code's second. The agent calls its
+                          pythia_approve tool, the client shows the card as a
+                          select prompt, and the developer's Approve mints the
+                          grant. It never writes; apply still verifies it.
   install · agent-user · guide    setting the harness itself up
   hook                    what Claude Code runs: session-start (guide + live
                           state), pre-tool (reads pass, approved writes pass,
@@ -4395,14 +4489,35 @@ def _mcp_text(text, is_error=False):
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
 
 
-def mcp_approve_decision(root, token, elicit):
+# no one reads a card and answers it faster than this: a quicker non-accept is
+# the client answering for nobody (a host with no elicitation UI declines at once)
+MCP_HUMAN_FLOOR_S = 1.5
+
+
+def next_door_after_mcp(token):
+    """Where the agent goes, without asking, when the MCP prompt fails."""
+    return (f"Next door, now — no need to ask the developer first: if you have "
+            f"not yet asked with AskUserQuestion for this token, do it — its "
+            f"text exactly the output of `{invocation()} approve --card "
+            f"{token}`, options Approve / Reject; otherwise, or with no "
+            f"AskUserQuestion (Codex), relay `{invocation()} approve {token}` "
+            "for the developer's terminal. Do not call pythia_approve again "
+            "this session.")
+
+
+def mcp_approve_decision(root, token, elicit, clock=None):
     """Mint on a developer's Approve, delivered through an MCP elicitation.
 
     Transport-free: `elicit(message, schema) -> (action, content)` performs the
     round-trip (a fake in tests). The card is pythia's own, built from the
     journal — so there is nothing for the agent to paraphrase and no verbatim
     check to run. Fail-closed everywhere: the only path that mints is an
-    explicit accept whose decision is exactly Approve."""
+    explicit accept whose decision is exactly Approve. A decline or cancel
+    back sooner than anyone could read the card is the client answering for
+    nobody, said as such, so the agent moves to the next door instead of
+    asking the developer what to change."""
+    import time
+    clock = clock or time.monotonic
     token = str(token or "").strip().lower()
     try:
         _, meta, body = approval_card(root, token)   # refuses unknown/applied
@@ -4413,12 +4528,21 @@ def mcp_approve_decision(root, token, elicit):
               "properties": {"decision": {"type": "string",
                                           "enum": ["Approve", "Reject"]}},
               "required": ["decision"]}
+    started = clock()
     try:
         action, content = elicit(message, schema)
     except Exception as e:                        # noqa: BLE001 — fail closed
-        return _mcp_text(f"No grant minted: the approval prompt could not be "
-                         f"completed ({e}). Approve in a terminal instead: "
-                         f"{invocation()} approve {token}", is_error=True)
+        return _mcp_text(f"No grant minted for {token}: the approval prompt "
+                         f"could not be shown ({e}). "
+                         + next_door_after_mcp(token), is_error=True)
+    took = clock() - started
+    if action != "accept" and took < MCP_HUMAN_FLOOR_S:
+        return _mcp_text(f"No grant minted for {token}: the prompt came back "
+                         f"{action!r} after {round(took * 1000)} ms — before "
+                         "anyone could read the card, so the client did not "
+                         "show it (this client shows no MCP prompts). That is "
+                         "not the developer's answer. "
+                         + next_door_after_mcp(token), is_error=True)
     if action != "accept" or (content or {}).get("decision") != "Approve":
         return _mcp_text(f"No grant minted for {token}: the developer did not "
                          "approve (answered "
@@ -4825,7 +4949,8 @@ def cmd_install(conn, schema, ns):
         print()
         print(hint)
         offer_path_fix(scripts_dir, interactive,
-                       getattr(ns, "add_to_path", False))
+                       getattr(ns, "add_to_path", False),
+                       skip=getattr(ns, "no_path", False))
 
 
 # --- scripts: splitting a multi-statement file (tests/test_phase6.py) --------
@@ -6099,15 +6224,30 @@ def _offline_connection(ns):
                               cwd, root)
 
 
-def print_doors(token, en=False, then=None):
-    print("\n  The developer approves it once, through any door:")
-    print("    Claude Code/Codex:  the agent calls the "
-          + paint("pythia_approve", "cyan", en)
-          + f" tool (MCP) with token {token} — prompts in every mode")
-    print("    or in chat:         AskUserQuestion with the text of "
-          + paint(f"{invocation()} approve --card {token}", "cyan", en))
-    print("    or in a terminal:   "
-          + paint(f"{invocation()} approve {token}", "cyan", en))
+def door_lines(token, en=False):
+    """The approval doors in the order an agent tries them; the first that
+    works is the one, and a door that fails says so and names the next.
+    Claude Code's own AskUserQuestion leads: it shows in every client
+    (terminal, desktop, web, phone) and no hook or allow rule answers it.
+    The MCP prompt follows — a host with no elicitation UI declines it
+    unseen — and leads on Codex, which has no AskUserQuestion. A developer's
+    terminal always works."""
+    return [
+        "    1. Claude Code:     AskUserQuestion, its text exactly the output of "
+        + paint(f"{invocation()} approve --card {token}", "cyan", en)
+        + ", options Approve / Reject",
+        "    2. if that fails:   the " + paint("pythia_approve", "cyan", en)
+        + f" tool (MCP) with token {token} — Codex starts here",
+        "    3. last:            the developer runs "
+        + paint(f"{invocation()} approve {token}", "cyan", en)
+        + " in their own terminal (agents cannot run it)"]
+
+
+def print_doors(token, en=False, then=None,
+                head="The developer approves it once, the first door that works:"):
+    print("\n  " + head)
+    for ln in door_lines(token, en):
+        print(ln)
     if then:
         print("    then the agent:     " + paint(then, "cyan", en))
 
@@ -7056,10 +7196,36 @@ def session_state_lines(root, home=None):
     mcp = _read_json(pathlib.Path(root) / ".mcp.json") or {}
     # a venv install registers the approver in Claude Code's local scope
     # (~/.claude.json), never in the shared .mcp.json
-    if ("pythia" in (mcp.get("mcpServers") or {})
-            or local_mcp_entry(root, home) is not None):
-        lines.append("approval door: the pythia_approve tool (MCP) — prompts in "
-                     "every permission mode; AskUserQuestion is the fallback")
+    has_mcp = ("pythia" in (mcp.get("mcpServers") or {})
+               or local_mcp_entry(root, home) is not None)
+    # the order is what works here, not a guess: Claude Code's own dialog
+    # leads where pythia's answer hook is wired (it shows in every client),
+    # the MCP prompt follows (some hosts decline it unseen), the terminal is
+    # last; dontAsk denies both chat doors. A scan that trips over a file
+    # must not cost the session its guide.
+    try:
+        hook_wired = approve_hook_wired(root, home)
+        dont_ask = any(what == DONTASK_NOTE
+                       for _, what in ask_question_breakers(root, home))
+    except Exception:                     # noqa: BLE001
+        hook_wired, dont_ask = False, False
+    terminal = f"`{run} approve <token>` in the developer's terminal"
+    if dont_ask:
+        lines.append("approval door: dontAsk mode denies AskUserQuestion and "
+                     f"pythia_approve here — relay {terminal}")
+    elif hook_wired:
+        lines.append("approval door: AskUserQuestion, its text exactly the "
+                     f"output of `{run} approve --card <token>` (options Approve "
+                     "/ Reject) — Claude Code's own dialog, shown in every "
+                     "client; if it fails, "
+                     + ("the pythia_approve tool (MCP); last, " if has_mcp else "")
+                     + f"{terminal}. When a door fails, go to the next without "
+                     "asking")
+    elif has_mcp:
+        lines.append("approval door: the pythia_approve tool (MCP) — pythia's "
+                     "AskUserQuestion hook is not wired here; if the tool "
+                     "reports the client did not show its card, relay "
+                     + terminal)
     return lines
 
 
@@ -7078,15 +7244,22 @@ def cmd_hook(conn, schema, ns):
                 _, r2 = find_config(pathlib.Path(payload["cwd"]), {})
                 root = r2 or root
             md = pathlib.Path(root) / "CLAUDE.md"
-            loaded = md.is_file() and AGENTS_BEGIN in md.read_text(
-                encoding="utf-8", errors="replace")
+            text = md.read_text(encoding="utf-8", errors="replace") \
+                if md.is_file() else ""
+            loaded = AGENTS_BEGIN in text and AGENTS_END in text
             run = invocation()
-            if loaded:
+            if loaded and squash(claude_md_block()) in squash(text):
                 # Claude Code already loaded the guide from CLAUDE.md: the
                 # hook adds what a static file cannot — the live state
                 print("PYTHIA HARNESS ACTIVE - the rules are in CLAUDE.md "
                       f"(pythia block); `{run} guide` prints the full contract.")
             else:
+                if loaded:
+                    # upgraded, not re-installed: the block carries an older
+                    # version's rules (the door order among them)
+                    print("PYTHIA HARNESS ACTIVE - CLAUDE.md's pythia block is "
+                          f"from an older pythia; where it differs from the "
+                          f"rules below, these win. `{run} install` refreshes it.")
                 print(BRIEF_GUIDE.rstrip())
             if run not in ("pythia", "pythia.exe"):
                 # the shared files say `pythia`; this machine runs it otherwise
@@ -7141,11 +7314,97 @@ def _frontmatter_value(text, key):
     return None
 
 
-def ask_question_breakers(project_root, home=None, plugin_limit=400):
+def approve_hook_wired(project_root, home=None):
+    """Is pythia's AskUserQuestion answer hook (`approve --hook`) wired for
+    this project — in its settings, the user's, or the enabled pythia
+    plugin? Without it a chat answer mints nothing."""
+    home = pathlib.Path(home or pathlib.Path.home())
+    root = pathlib.Path(project_root)
+    blobs = [json.dumps((_read_json(f) or {}).get("hooks") or {})
+             for f in (root / ".claude" / "settings.json",
+                       root / ".claude" / "settings.local.json",
+                       home / ".claude" / "settings.json",
+                       home / ".claude" / "settings.local.json")]
+    blobs += [json.dumps(h) for _, _, h in enabled_plugin_hooks(root, home)]
+    return any("approve --hook" in b for b in blobs)
+
+
+def enabled_plugin_hooks(project_root, home=None, env=None):
+    """[(plugin, where, hooks)] for every plugin Claude Code runs here: each
+    one installed_plugins.json lists (else each install under cache/) that
+    enabledPlugins does not switch off — user, then project, then local
+    settings, the last mention winning; no mention means on, unless its
+    plugin.json says defaultEnabled: false. Hooks come from hooks/hooks.json
+    and from plugin.json's `hooks` (paths, inline objects, or a list of
+    both). A marketplace clone holds the source of every plugin it lists,
+    installed or not, so it is never scanned: only an install path is."""
+    home = pathlib.Path(home or pathlib.Path.home())
+    env = os.environ if env is None else env
+    root = pathlib.Path(project_root)
+    state = {}
+    for path in (home / ".claude" / "settings.json",
+                 root / ".claude" / "settings.json",
+                 root / ".claude" / "settings.local.json"):
+        ep = (_read_json(path) or {}).get("enabledPlugins")
+        if isinstance(ep, dict):
+            for key, on in ep.items():
+                state[str(key)] = on is True
+    plugins = pathlib.Path(env.get("CLAUDE_CODE_PLUGIN_CACHE_DIR")
+                           or home / ".claude" / "plugins")
+    installs = {}
+    listed = (_read_json(plugins / "installed_plugins.json") or {}).get("plugins")
+    if isinstance(listed, dict):
+        for key, entries in listed.items():
+            for e in entries if isinstance(entries, list) else [entries]:
+                if isinstance(e, dict) and isinstance(e.get("installPath"), str):
+                    installs.setdefault(str(key), []).append(pathlib.Path(e["installPath"]))
+    elif (plugins / "cache").is_dir():    # no list: the newest copy in the cache
+        try:
+            for mkt in sorted((plugins / "cache").iterdir()):
+                for plug in sorted(mkt.iterdir()) if mkt.is_dir() else []:
+                    versions = [d for d in plug.iterdir() if d.is_dir()] \
+                        if plug.is_dir() else []
+                    if versions:
+                        installs[f"{plug.name}@{mkt.name}"] = [
+                            max(versions, key=lambda d: d.stat().st_mtime)]
+        except OSError:
+            pass
+    out = []
+    for key, roots in installs.items():
+        for pr in roots:
+            manifest = _read_json(pr / ".claude-plugin" / "plugin.json") or {}
+            if not state.get(key, manifest.get("defaultEnabled", True) is not False):
+                continue
+            found = [(pr / "hooks" / "hooks.json", None)]
+            declared = manifest.get("hooks")
+            for d in declared if isinstance(declared, list) else [declared]:
+                if isinstance(d, str):
+                    found.append((pr / d, None))
+                elif isinstance(d, dict):     # inline: the events themselves
+                    found.append((pr / ".claude-plugin" / "plugin.json",
+                                  d.get("hooks") if isinstance(d.get("hooks"), dict) else d))
+            read = set()
+            for f, inline in found:
+                if inline is None:
+                    if f in read or not f.is_file():
+                        continue
+                    read.add(f)
+                    inline = (_read_json(f) or {}).get("hooks")
+                if isinstance(inline, dict):
+                    out.append((key, str(f), inline))
+    return out
+
+
+# the one breaker that closes the MCP door too
+DONTASK_NOTE = "defaultMode is dontAsk — it denies AskUserQuestion and the MCP approver"
+
+
+def ask_question_breakers(project_root, home=None, env=None):
     """Every setting known to make AskUserQuestion return without showing the
     question (anthropics/claude-code#13439, #29547): an allow rule or a
     skill's allowed-tools naming it, a PreToolUse/PermissionRequest hook whose
-    matcher catches it, or dontAsk mode. [(where, what)]."""
+    matcher catches it — in settings or in an enabled plugin — or dontAsk
+    mode. [(where, what)]."""
     home = pathlib.Path(home or pathlib.Path.home())
     found = []
     for path in _settings_files(project_root, home):
@@ -7157,8 +7416,7 @@ def ask_question_breakers(project_root, home=None, plugin_limit=400):
             if "AskUserQuestion" in str(rule):
                 found.append((str(path), f"permissions.allow has {rule!r}"))
         if str(perms.get("defaultMode", "")) == "dontAsk":
-            found.append((str(path), "defaultMode is dontAsk — it denies "
-                                     "AskUserQuestion and the MCP approver"))
+            found.append((str(path), DONTASK_NOTE))
         for event in ("PreToolUse", "PermissionRequest"):
             for entry in (s.get("hooks") or {}).get(event) or []:
                 m = entry.get("matcher") if isinstance(entry, dict) else None
@@ -7181,20 +7439,15 @@ def ask_question_breakers(project_root, home=None, plugin_limit=400):
                 continue
             if tools and "AskUserQuestion" in tools:
                 found.append((str(sk), "allowed-tools pre-allows AskUserQuestion"))
-    plugins = home / ".claude" / "plugins"
-    if plugins.is_dir():
-        seen = 0
-        for hj in plugins.rglob("hooks.json"):
-            seen += 1
-            if seen > plugin_limit:
-                break
-            s = _read_json(hj) or {}
-            for event in ("PreToolUse", "PermissionRequest"):
-                for entry in (s.get("hooks") or {}).get(event) or []:
-                    m = entry.get("matcher") if isinstance(entry, dict) else None
-                    if _matcher_hits(m, "AskUserQuestion"):
-                        found.append((str(hj), f"plugin {event} hook with "
-                                               f"matcher {m!r}"))
+    for plugin, where, hooks in enabled_plugin_hooks(project_root, home, env):
+        for event in ("PreToolUse", "PermissionRequest"):
+            for entry in hooks.get(event) or []:
+                m = entry.get("matcher") if isinstance(entry, dict) else None
+                if _matcher_hits(m, "AskUserQuestion"):
+                    found.append((where, f"plugin {plugin}: {event} hook "
+                                           + ("with no matcher" if m in (None, "")
+                                              else f"with matcher {m!r}")))
+                    break
     return found
 
 
@@ -7362,10 +7615,22 @@ def harness_checks(project_root, home=None):
         out.append(("warn", "approval door", "pythia MCP approver not in .mcp.json "
                     "— the AskUserQuestion card and the console remain; "
                     f"{invocation()} install adds it"))
+    # Current Claude Code requires the dialog for AskUserQuestion, so a hook
+    # or an allow rule naming it no longer answers it; dontAsk still denies
+    # it, and the MCP prompt with it.
     for where, what in ask_question_breakers(root, home):
-        out.append(("fail", "AskUserQuestion",
-                    f"{what} — {where}. The question returns empty and approval "
-                    "never arrives; remove it, or approve with pythia_approve"))
+        if what == DONTASK_NOTE:
+            out.append(("fail", "AskUserQuestion",
+                        f"{what} — {where}. Both chat doors are closed; "
+                        f"approvals need `{invocation()} approve <token>` at "
+                        "the console. Leave dontAsk for any other mode"))
+        else:
+            out.append(("warn", "AskUserQuestion",
+                        f"{what} — {where}. On older Claude Code this answered "
+                        "AskUserQuestion before the developer saw it; current "
+                        "versions require the dialog anyway. If a chat approval "
+                        "ever comes back empty, pythia's hook says so and sends "
+                        "the agent to the next door — remove this to rule it out"))
     cmd_md = root / "CLAUDE.md"
     has_block = cmd_md.is_file() and AGENTS_BEGIN in cmd_md.read_text(
         encoding="utf-8", errors="replace")
@@ -7844,6 +8109,10 @@ def build_parser():
     s.add_argument("--add-to-path", action="store_true", dest="add_to_path",
                    help="put the pythia command on your PATH without asking "
                         "(Windows; user PATH only)")
+    s.add_argument("--no-path", action="store_true", dest="no_path",
+                   help="leave your PATH alone (Windows: without a console to "
+                        "ask, install otherwise adds pythia's directory to the "
+                        "user PATH)")
     s.add_argument("--no-hooks", action="store_true", dest="no_hooks",
                    help="leave Claude Code's .claude/settings.json alone "
                         "(no approve-in-chat hook, no session-start guide)")

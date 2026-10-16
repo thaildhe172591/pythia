@@ -15,6 +15,9 @@ import sys
 import tempfile
 
 os.environ.setdefault("PYTHIA_CI", "1")   # the suites are headless by design
+# a temp home stands for ~ in these tests; a moved plugins dir would leak the
+# developer's real plugins into them
+os.environ.pop("CLAUDE_CODE_PLUGIN_CACHE_DIR", None)
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 sys.path.insert(0, str(HERE))
@@ -680,14 +683,89 @@ def test_autopilot_report_lists_every_write_and_its_undo():
 
 # --- the chat hook: fail closed, and say why ------------------------------------
 
-def test_hook_refuses_prefilled_answers():
+def _transcript(td, model_input, tool_use_id="toolu_ask", filler=200):
+    """A Claude Code session transcript: JSONL, the assistant's tool_use as
+    the model sent it (content input, and the wire copy), after other lines."""
+    path = pathlib.Path(td) / "session.jsonl"
+    lines = [json.dumps({"type": "user", "message": {"content": "x" * 50}})
+             for _ in range(filler)]
+    lines.append(json.dumps({
+        "type": "assistant", "wireToolInputs": {tool_use_id: model_input},
+        "message": {"content": [{"type": "tool_use", "id": tool_use_id,
+                                 "name": "AskUserQuestion", "input": model_input}]}}))
+    lines.append(json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": tool_use_id}]}}))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def _dialog_answered(td, card, answer, model_input=None, with_id=True):
+    """The payload current Claude Code sends: the dialog writes the person's
+    answer into the tool input (the model's own answers are stripped before
+    the dialog shows), and the transcript keeps what the model sent."""
+    payload = p3._hook_payload(card, answer)
+    asked = {"questions": payload["tool_input"]["questions"]}
+    payload["tool_input"]["answers"] = {card: answer}
+    payload["transcript_path"] = _transcript(
+        td, model_input if model_input is not None else asked)
+    if with_id:
+        payload["tool_use_id"] = "toolu_ask"
+    return payload
+
+
+def test_hook_mints_an_answer_the_dialog_wrote_into_the_input():
+    """Field report (0.15.7, Claude Code 2.1.301): the developer picked
+    Approve and pythia refused it as pre-filled. The dialog itself writes the
+    answer into tool_input.answers now; the model's own answers, if any, are
+    stripped before it shows. What the model sent is in the transcript."""
+    with tempfile.TemporaryDirectory() as td:
+        card = p3._pending_preview(td)
+        out = p3._run_hook(td, _dialog_answered(td, card, "Approve"))
+        assert pythia.read_grant(td, "7f3a91"), out
+        assert "approved in chat" in out
+    with tempfile.TemporaryDirectory() as td:        # no tool_use_id: match the questions
+        card = p3._pending_preview(td)
+        p3._run_hook(td, _dialog_answered(td, card, "Approve", with_id=False))
+        assert pythia.read_grant(td, "7f3a91")
+
+
+def test_hook_refuses_answers_the_agent_wrote_into_its_own_call():
+    with tempfile.TemporaryDirectory() as td:
+        card = p3._pending_preview(td)
+        forged = {"questions": p3._hook_payload(card, "x")["tool_input"]["questions"],
+                  "answers": {card: "Approve"}}
+        out = p3._run_hook(td, _dialog_answered(td, card, "Approve", model_input=forged))
+        assert pythia.read_grant(td, "7f3a91") is None
+        assert "your own call" in out and "without an answers field" in out
+
+
+def test_hook_refuses_an_answer_it_cannot_trace_and_names_the_next_door():
+    """Answers in the input and no transcript to tell who wrote them: no
+    grant, and the agent is sent on to the next door at once."""
     with tempfile.TemporaryDirectory() as td:
         card = p3._pending_preview(td)
         payload = p3._hook_payload(card, "Approve")
         payload["tool_input"]["answers"] = {card: "Approve"}
         out = p3._run_hook(td, payload)
         assert pythia.read_grant(td, "7f3a91") is None
-        assert "pre-filled" in out
+        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        assert "pythia_approve" in ctx and "approve 7f3a91" in ctx
+        assert "now" in ctx
+
+
+def test_hook_an_idle_dialog_or_a_typed_reply_is_no_approval():
+    with tempfile.TemporaryDirectory() as td:
+        card = p3._pending_preview(td)
+        payload = p3._hook_payload(card, "Approve")
+        payload["tool_response"]["afkTimeoutMs"] = 300000     # closed itself
+        out = p3._run_hook(td, payload)
+        assert pythia.read_grant(td, "7f3a91") is None
+        assert "closed itself" in out and "300" in out
+        payload = p3._hook_payload(card, "")
+        payload["tool_response"]["response"] = "change the status to X first"
+        out = p3._run_hook(td, payload)
+        assert pythia.read_grant(td, "7f3a91") is None
+        assert "change the status to X first" in out
 
 
 def test_hook_names_an_answer_that_never_arrived():
@@ -1342,6 +1420,226 @@ def test_doctor_finds_what_breaks_askuserquestion():
         assert not any("hook pre-tool" in w for w in found)   # ours is Bash-only
         assert any("allowed-tools" in w for w in found)
         assert any("dontAsk" in w for w in found)
+
+
+# a hook with no matcher, as hookify ships it: it runs on every tool call
+BLANKET = {"PreToolUse": [{"hooks": [
+    {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pretooluse.py"}]}]}
+
+
+def _plugin(home, key, hooks, enabled=None, listed=True, manifest_hooks=None,
+            plugins=None):
+    """A plugin as Claude Code keeps it: the install under plugins/cache,
+    listed in installed_plugins.json, switched on or off in the user's
+    enabledPlugins (None: not mentioned there)."""
+    name, mkt = key.split("@")
+    plugins = pathlib.Path(plugins or pathlib.Path(home) / ".claude" / "plugins")
+    root = plugins / "cache" / mkt / name / "1.0.0"
+    if manifest_hooks is None:
+        (root / "hooks").mkdir(parents=True)
+        (root / "hooks" / "hooks.json").write_text(json.dumps({"hooks": hooks}),
+                                                    encoding="utf-8")
+    else:                                 # plugin.json names its own hooks file
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": name, "hooks": manifest_hooks}), encoding="utf-8")
+        (root / "conf").mkdir()
+        (root / "conf" / "h.json").write_text(json.dumps({"hooks": hooks}),
+                                              encoding="utf-8")
+    if listed:
+        f = plugins / "installed_plugins.json"
+        data = (json.loads(f.read_text(encoding="utf-8")) if f.is_file()
+                else {"version": 2, "plugins": {}})
+        data["plugins"][key] = [{"scope": "user", "installPath": str(root),
+                                 "version": "1.0.0"}]
+        f.write_text(json.dumps(data), encoding="utf-8")
+    if enabled is not None:
+        s = pathlib.Path(home) / ".claude" / "settings.json"
+        cur = json.loads(s.read_text(encoding="utf-8")) if s.is_file() else {}
+        cur.setdefault("enabledPlugins", {})[key] = enabled
+        s.write_text(json.dumps(cur), encoding="utf-8")
+    return root
+
+
+def test_doctor_counts_only_plugins_that_are_on():
+    """Field report: on every fresh machine with the official marketplace,
+    doctor failed on hookify — the marketplace clone holds the source of
+    every plugin it lists, and doctor read all of them. Only a plugin that
+    is installed and enabled runs its hooks."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        clone = (pathlib.Path(home) / ".claude" / "plugins" / "marketplaces"
+                 / "official" / "plugins" / "hookify" / "hooks")
+        clone.mkdir(parents=True)
+        (clone / "hooks.json").write_text(json.dumps({"hooks": BLANKET}),
+                                          encoding="utf-8")
+        assert pythia.ask_question_breakers(td, home) == []      # in the clone only
+        _plugin(home, "hookify@official", BLANKET, enabled=False)
+        assert pythia.ask_question_breakers(td, home) == []      # installed, off
+        # the project switches it on, and the local file outranks the user's
+        cl = pathlib.Path(td) / ".claude"
+        cl.mkdir()
+        (cl / "settings.local.json").write_text(json.dumps(
+            {"enabledPlugins": {"hookify@official": True}}), encoding="utf-8")
+        found = pythia.ask_question_breakers(td, home)
+        assert len(found) == 1 and "hookify@official" in found[0][1], found
+        # a plugin whose matcher names its tools stays out of it
+        _plugin(home, "fmt@official", {"PreToolUse": [{"matcher": "Edit|Write",
+                "hooks": [{"type": "command", "command": "fmt"}]}]}, enabled=True)
+        # one that names its hooks file in plugin.json is read there
+        _plugin(home, "audit@official", BLANKET, enabled=True,
+                manifest_hooks="./conf/h.json")
+        found = [w for _, w in pythia.ask_question_breakers(td, home)]
+        assert len(found) == 2, found
+        assert any("audit@official" in w for w in found)
+        assert not any("fmt@official" in w for w in found)
+        # installed with no enabledPlugins entry: on, unless the manifest says
+        # defaultEnabled false
+        _plugin(home, "trace@official", BLANKET)
+        quiet_root = _plugin(home, "mute@official", BLANKET)
+        (quiet_root / ".claude-plugin").mkdir()
+        (quiet_root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "mute", "defaultEnabled": False}), encoding="utf-8")
+        # hooks written inline in plugin.json, without the "hooks" wrapper
+        inline = _plugin(home, "inline@official", {}, enabled=True)
+        (inline / ".claude-plugin").mkdir()
+        (inline / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "inline", "hooks": BLANKET}), encoding="utf-8")
+        found = [w for _, w in pythia.ask_question_breakers(td, home)]
+        assert any("trace@official" in w for w in found), found
+        assert not any("mute@official" in w for w in found), found
+        assert any("inline@official" in w for w in found), found
+        assert len(found) == 4, found
+        # CLAUDE_CODE_PLUGIN_CACHE_DIR moves the whole plugins directory
+        with tempfile.TemporaryDirectory() as home2, \
+                tempfile.TemporaryDirectory() as moved:
+            _plugin(home2, "hookify@official", BLANKET, plugins=moved)
+            assert pythia.ask_question_breakers(td, home2, env={}) == []
+            found = pythia.ask_question_breakers(
+                td, home2, env={"CLAUDE_CODE_PLUGIN_CACHE_DIR": moved})
+            assert len(found) == 1 and "hookify@official" in found[0][1], found
+        # garbage in installed_plugins.json is not a crash
+        (pathlib.Path(home) / ".claude" / "plugins" / "installed_plugins.json"
+         ).write_text("{not json", encoding="utf-8")
+        pythia.ask_question_breakers(td, home)
+
+
+def test_doctor_only_dontask_fails_the_askuserquestion_door():
+    """Field report: the developer kept hookify and approved in chat, and
+    doctor failed on every machine. Current Claude Code requires the dialog
+    for AskUserQuestion whatever a hook or an allow rule says, so those are
+    warnings that name the old failure; dontAsk, which denies the dialog and
+    the MCP prompt alike, is the one fail."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        _plugin(home, "hookify@official", BLANKET, enabled=True)
+        rows = lambda: [(s, m) for s, a, m in pythia.harness_checks(td, home)
+                        if a == "AskUserQuestion"]
+        (st, msg), = rows()
+        assert st == "warn" and "hookify@official" in msg, msg
+        pythia.install_claude_mcp(td, launcher=_good_launcher())
+        assert [s for s, _ in rows()] == ["warn"]
+        s = pathlib.Path(home) / ".claude" / "settings.json"
+        cur = json.loads(s.read_text(encoding="utf-8"))
+        cur["permissions"] = {"defaultMode": "dontAsk"}
+        s.write_text(json.dumps(cur), encoding="utf-8")
+        got = rows()
+        assert "fail" in [st for st, m in got if "dontAsk" in m], got
+        assert "warn" in [st for st, m in got if "hookify" in m], got
+
+
+def test_session_state_orders_the_doors_by_what_works_here():
+    """Claude Code's own AskUserQuestion shows in every client; the MCP prompt
+    does not (a host with no elicitation UI declines it unseen). Where
+    pythia's answer hook is wired, the chat question leads, the MCP tool
+    follows, the terminal is last; without the hook the MCP tool leads; and
+    dontAsk, which denies both, leaves the terminal."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        door = lambda: [ln for ln in pythia.session_state_lines(td, home=home)
+                        if ln.startswith("approval door")]
+        pythia.install_claude_mcp(td, launcher=_good_launcher())
+        line = door()[0]
+        assert "AskUserQuestion" not in line.split("pythia_approve")[0], line
+        assert line.index("pythia_approve") < line.index("approve <token>")
+        pythia.install_claude_hooks(td, trust_mcp=True, launcher=_good_launcher())
+        line = door()[0]
+        assert (line.index("AskUserQuestion") < line.index("pythia_approve")
+                < line.index("approve <token>")), line
+        assert "approve --card <token>" in line
+        _plugin(home, "hookify@official", BLANKET, enabled=True)
+        assert door()[0] == line          # a hook no longer reorders the doors
+        s = pathlib.Path(home) / ".claude" / "settings.json"
+        cur = json.loads(s.read_text(encoding="utf-8"))
+        cur["permissions"] = {"defaultMode": "dontAsk"}
+        s.write_text(json.dumps(cur), encoding="utf-8")
+        line = door()[0]
+        assert "dontAsk" in line and "approve <token>" in line, line
+
+
+def test_every_printed_door_list_puts_the_chat_question_first():
+    """The preview, the deploy and the lease requests print one list: the
+    first door that works is the one, and each names the next."""
+    import contextlib
+    import io
+    lines = pythia.door_lines("7f3a91")
+    text = "\n".join(lines)
+    assert (text.index("AskUserQuestion") < text.index("pythia_approve")
+            < text.index("approve 7f3a91")), text
+    assert "approve --card 7f3a91" in text and "Codex" in text
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        pythia.print_doors("7f3a91")
+    assert all(ln in buf.getvalue() for ln in lines)
+
+
+def test_session_start_supersedes_a_claude_md_block_from_an_older_pythia():
+    """After `pip install -U` and before `pythia install` runs again, every
+    project's CLAUDE.md still carries the old block — the old door order
+    among it. Session start sees the block differs from this version's and
+    prints the current brief, saying which one wins."""
+    with tempfile.TemporaryDirectory() as td:
+        md = pathlib.Path(td) / "CLAUDE.md"
+        pythia.merge_claude_md(md)
+        route = pythia.BRIEF_GUIDE.splitlines()[2]
+        assert route not in _session_start(td)              # current: state only
+        md.write_text(md.read_text(encoding="utf-8").replace(
+            "APPROVAL ON CLAUDE CODE: first door is AskUserQuestion",
+            "APPROVAL ON CLAUDE CODE: first door is the `pythia_approve` tool"),
+            encoding="utf-8")
+        out = _session_start(td)
+        assert route in out and "older pythia" in out and "install" in out
+
+
+def test_the_claude_md_block_puts_the_chat_question_first():
+    block = pythia.claude_md_block()
+    door = block[block.index("APPROVAL ON CLAUDE CODE"):]
+    assert door.index("AskUserQuestion") < door.index("pythia_approve") \
+        < door.index("approve <token>")
+    assert "without asking" in door
+
+
+def test_install_puts_pythia_on_path_when_no_one_is_there_to_answer():
+    """Field report: on a fresh Windows machine an agent ran the install, no
+    one could answer the PATH question, and `pythia` never worked in the
+    developer's own terminal. Nobody to ask now means add it (user PATH
+    only); --no-path skips it; a person at the console is still asked."""
+    added = []
+    add = lambda d: added.append(d) or True
+    with tempfile.TemporaryDirectory() as scripts, \
+            tempfile.TemporaryDirectory() as clone:
+        (pathlib.Path(scripts) / "pythia.exe").write_bytes(b"")
+        assert pythia.offer_path_fix(scripts, False, windows=True, add=add)
+        assert added == [scripts]
+        added.clear()
+        assert not pythia.offer_path_fix(scripts, False, skip=True,
+                                         windows=True, add=add)
+        assert not pythia.offer_path_fix(scripts, False, windows=False, add=add)
+        # a directory without our executable (a clone, a test run) never goes in
+        assert not pythia.offer_path_fix(clone, False, windows=True, add=add)
+        assert not pythia.offer_path_fix(scripts, True, windows=True, add=add,
+                                         ask=lambda prompt: "n")
+        assert added == []
+        assert pythia.offer_path_fix(scripts, True, windows=True, add=add,
+                                     ask=lambda prompt: "")
+        assert added == [scripts]
 
 
 def test_doctor_reports_the_wiring_after_install():

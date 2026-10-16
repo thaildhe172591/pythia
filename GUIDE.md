@@ -56,8 +56,11 @@ python -m pythia check        # fill in connections.json, then verify
 
 **`pythia: command not found`?** pip writes the executable into a scripts
 directory that is usually not on PATH — pip warns about it, and it is why the
-commands above say `python -m pythia`, which always works. To get the short
-`pythia` form, let the tool put itself there:
+commands above say `python -m pythia`, which always works. On Windows,
+`install` puts the scripts directory on your *user* PATH: it asks first when
+you run it at a console, and adds it unasked when nobody can answer — an
+agent running the install, the usual case on a fresh machine (`--no-path`
+leaves PATH alone). To add it without the question:
 
 ```bash
 python -m pythia install --add-to-path   # Windows: edits your user PATH only
@@ -311,10 +314,10 @@ taken before the write is the only real undo there is.
 
 ```bash
 pythia apply PKG_ORDER_BODY.sql            # preview: diff + impact + warnings + token
-#   -> the agent calls the pythia_approve tool (MCP) with a1b2c3; the DEVELOPER picks Approve
-pythia approve --card a1b2c3               # or: the card for an AskUserQuestion (mints nothing)
-#   -> AskUserQuestion, options Approve / Reject; the DEVELOPER answers in chat
-pythia approve a1b2c3                      # or: the DEVELOPER, at their own terminal
+pythia approve --card a1b2c3               # 1. the card for an AskUserQuestion (mints nothing)
+#   -> AskUserQuestion, options Approve / Reject; the DEVELOPER answers in the dialog
+#   -> 2. if that fails: the pythia_approve tool (MCP) with a1b2c3 (Codex starts here)
+pythia approve a1b2c3                      # 3. last: the DEVELOPER, at their own terminal
 pythia apply PKG_ORDER_BODY.sql --confirm a1b2c3   # write exactly what was previewed
 ```
 
@@ -322,25 +325,36 @@ Steps, none removable: **snapshot → impact → preview → approve → apply �
 verify → report**.
 
 **Two steps, two people.** The preview ends by printing the agent's `apply
---confirm` line and the developer's doors. The grant is minted whichever is
-used, and without it the confirm is refused:
+--confirm` line and the developer's doors, in the order the agent tries
+them: the first that works is the one, and a door that fails says so and
+names the next, so the agent moves on without asking. The grant is minted
+whichever is used, and without it the confirm is refused:
 
-- **The `pythia_approve` tool** (since 0.15.0 on Claude Code, 0.14.0 on
-  Codex): the write-free MCP server `pythia install` registers in `.mcp.json`.
-  Its tool is marked `requiresUserInteraction`, so Claude Code prompts for it
-  on every call in every permission mode except `dontAsk` — no allow rule
-  skips it — and its MCP elicitation shows pythia's own card with
-  Approve / Reject. Nothing for the agent to paraphrase.
-- **In chat** (since 0.10.0): the agent runs `pythia approve --card <token>`
-  and asks an `AskUserQuestion` whose text is that card, verbatim, with the
-  options `Approve` / `Reject`. Claude Code writes the answer into the
-  `PostToolUse` hook payload; `pythia approve --hook` reads it and mints the
-  grant only if the answer is `Approve` *and* the question carried pythia's
-  card — a paraphrase mints nothing, so the developer always approves
-  pythia's words, not the agent's. The hook ships in the plugin and in the
-  example settings (§11); without it, answering in chat mints nothing.
-- **At a console**: `pythia approve <token>` (several tokens at once are
-  fine):
+1. **In chat, on Claude Code** (since 0.10.0; first since 0.15.8): the agent
+   runs `pythia approve --card <token>` and asks an `AskUserQuestion` whose
+   text is that card, verbatim, with the options `Approve` / `Reject`. It
+   is Claude Code's own dialog: it shows in every client (terminal, desktop
+   app, web, phone), and current Claude Code requires it for this tool
+   whatever a hook or an allow rule says. `pythia approve --hook` reads the
+   answer from the `PostToolUse` payload and mints the grant only if it is
+   `Approve` *and* the question carried pythia's card — a paraphrase mints
+   nothing, so the developer always approves pythia's words, not the
+   agent's. Who answered is checked: Claude Code writes the person's answer
+   into the tool input after dropping any the model wrote, so the hook reads
+   the model's own call from the session transcript and refuses answers the
+   agent put there, and answers it cannot trace. A dialog that closed itself
+   while the developer was away, or a typed reply instead of a choice, is
+   no approval. The hook ships in the plugin and in the example settings
+   (§11); without it, answering in chat mints nothing.
+2. **The `pythia_approve` tool** (since 0.15.0 on Claude Code, 0.14.0 on
+   Codex, where it is the first door): the write-free MCP server `pythia
+   install` registers in `.mcp.json`. Its MCP elicitation shows pythia's own
+   card with Approve / Reject — nothing for the agent to paraphrase. A host
+   with no elicitation UI (the Claude desktop app, some SDK hosts) declines
+   it unseen; a decline back in under 1.5 s is named as the client's, not
+   the developer's, and the agent moves on.
+3. **At a console**: `pythia approve <token>` (several tokens at once are
+   fine):
 
 ```
 $ pythia approve a1b2c3
@@ -535,8 +549,8 @@ prompt; sqlplus/SQLcl writes are denied with the reason. Its matchers are
 never `""` or `*` — a PreToolUse hook that catches `AskUserQuestion` makes
 the question return empty, which is the failure `pythia doctor` hunts for.
 `PostToolUse` on `AskUserQuestion` runs `python -m pythia approve --hook`:
-the chat approval door from §5 — it refuses answers pre-filled in the tool
-input and says so when no answer arrived. `PostToolUse` on Bash runs
+the chat approval door from §5 — it refuses answers the agent wrote into its
+own call (read from the transcript), and says so when no answer arrived. `PostToolUse` on Bash runs
 `hook post-tool`: the exit-code verdict next to an apply result. Install also
 registers the MCP approver in `.mcp.json` and enables it, and writes the
 harness into the project's `CLAUDE.md` (a marker-delimited block, like
@@ -683,7 +697,7 @@ previous comment is read before the write and `journal restore` puts it back.
 
 ```bash
 pythia autopilot request --groups plsql_source,comments,structural --hours 6 --note "order module"
-#   -> the agent asks with the card (pythia_approve tool / AskUserQuestion / console)
+#   -> the agent asks with the card (AskUserQuestion / pythia_approve tool / console)
 pythia autopilot status       # what is active, until when, writes used
 pythia autopilot report       # every write under the lease, its verdict and undo
 pythia autopilot off          # revoke — always allowed
@@ -703,12 +717,15 @@ pythia autopilot on ...       # the developer, at a console: request + approve i
 `pythia doctor` checks the harness: hooks wired, the MCP approver registered
 and enabled, skills installed once (not twice), policy, conventions, the
 lease, and whether git keeps `.pythia/connections.json` out of every clone.
-It also names every setting known to make `AskUserQuestion` return
-without showing the question — an allow rule or a skill's `allowed-tools`
-naming it, a PreToolUse or PermissionRequest hook whose matcher catches it
-(in settings files or installed plugins), `dontAsk` mode. `pythia doctor
---db` adds the database: version, character set, PL/Scope and warnings
-coverage, INVALID objects, utPLSQL.
+It also names the settings that once made `AskUserQuestion` return without
+showing the question — an allow rule or a skill's `allowed-tools` naming it,
+a PreToolUse or PermissionRequest hook whose matcher catches it (in settings
+files, or in a plugin that is installed and enabled — a marketplace clone
+holds every plugin it lists, and those do not run). Current Claude Code
+requires the dialog for `AskUserQuestion` whatever those say, so they are
+warnings; `dontAsk` mode, which denies both chat doors, is the one fail.
+`pythia doctor --db` adds the database: version, character set, PL/Scope and
+warnings coverage, INVALID objects, utPLSQL.
 
 ### `pythia explain` and `pythia stats` — tuning, license-safe
 

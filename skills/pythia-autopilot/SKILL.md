@@ -45,10 +45,10 @@ THE LEASE IS THE DEVELOPER'S. ITS LIMITS ARE NOT YOURS TO STRETCH.
    are part of the task, `data_dml` only if asked, destructive only if the
    developer names it; hours and writes sized to the job.
 3. **Request** — `pythia autopilot request --groups ... --hours ... --note
-   "<the task>"` prints the card and an 8-hex token. Ask through a door:
-   the `pythia_approve` tool, or `AskUserQuestion` with `pythia approve
-   --card <token>` verbatim, or the developer's own terminal. `autopilot on`
-   is the developer's console command, never yours.
+   "<the task>"` prints the card and an 8-hex token. Ask through the first
+   door that works: `AskUserQuestion` with `pythia approve --card <token>`
+   verbatim (Claude Code), the `pythia_approve` tool (Codex starts here),
+   the developer's own terminal. `autopilot on` is their command, never yours.
 4. **Work** with the normal skills — `pythia-impact` before every change
    still applies; then `pythia apply <file>` / `pythia deploy <files>` land
    covered statements directly. Read every result:

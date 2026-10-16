@@ -54,8 +54,10 @@ python -m pythia check        # điền connections.json rồi kiểm tra
 
 **Báo `pythia: command not found`?** pip đặt file thực thi vào thư mục scripts
 thường không nằm trong PATH — chính pip cũng cảnh báo, và đó là lý do các lệnh
-trên dùng `python -m pythia`, dạng luôn chạy được. Muốn gõ gọn `pythia`, để
-tool tự đặt mình vào PATH:
+trên dùng `python -m pythia`, dạng luôn chạy được. Trên Windows, `install` tự
+đưa thư mục scripts vào *user* PATH: hỏi trước khi bạn chạy ở console, và tự
+thêm khi không có ai trả lời — agent chạy cài đặt, trường hợp thường gặp trên
+máy mới (`--no-path` để giữ nguyên PATH). Muốn thêm luôn mà không hỏi:
 
 ```bash
 python -m pythia install --add-to-path   # Windows: chỉ sửa user PATH
@@ -301,10 +303,10 @@ trước khi ghi là cách hoàn tác thật duy nhất.
 
 ```bash
 pythia apply PKG_ORDER_BODY.sql            # preview: diff + impact + cảnh báo + token
-#   -> agent gọi tool pythia_approve (MCP) với a1b2c3; DEVELOPER chọn Approve
-pythia approve --card a1b2c3               # hoặc: lấy thẻ để hỏi bằng AskUserQuestion (không cấp gì)
-#   -> AskUserQuestion, lựa chọn Approve / Reject; DEVELOPER trả lời ngay trong chat
-pythia approve a1b2c3                      # hoặc: DEVELOPER, ở terminal của chính mình
+pythia approve --card a1b2c3               # 1. lấy thẻ để hỏi bằng AskUserQuestion (không cấp gì)
+#   -> AskUserQuestion, lựa chọn Approve / Reject; DEVELOPER trả lời trong hộp thoại
+#   -> 2. nếu hỏng: tool pythia_approve (MCP) với a1b2c3 (Codex bắt đầu từ đây)
+pythia approve a1b2c3                      # 3. cuối cùng: DEVELOPER, ở terminal của chính mình
 pythia apply PKG_ORDER_BODY.sql --confirm a1b2c3   # ghi đúng nội dung đã preview
 ```
 
@@ -312,24 +314,34 @@ Các bước, không tắt được: **snapshot → impact → preview → appro
 verify → report**.
 
 **Hai bước, hai người.** Preview kết thúc bằng dòng `apply --confirm` của
-agent và các cửa của dev. Cửa nào cũng cấp cùng một grant dùng-một-lần;
-thiếu nó thì confirm bị từ chối:
+agent và các cửa của dev, theo thứ tự agent thử: cửa đầu tiên chạy được là
+cửa dùng, cửa nào hỏng thì nói rõ và chỉ cửa kế tiếp, nên agent tự chuyển mà
+không cần hỏi. Cửa nào cũng cấp cùng một grant dùng-một-lần; thiếu nó thì
+confirm bị từ chối:
 
-- **Tool `pythia_approve`** (từ 0.15.0 trên Claude Code, 0.14.0 trên Codex):
-  MCP server không-ghi-DB mà `pythia install` đăng ký vào `.mcp.json`. Tool
-  được đánh dấu `requiresUserInteraction`, nên Claude Code luôn hỏi ở mọi
-  lần gọi, mọi permission mode trừ `dontAsk` — không allow rule nào bỏ qua
-  được — và MCP elicitation hiện đúng thẻ duyệt của pythia với Approve /
-  Reject. Agent không có gì để diễn giải lại.
-- **Trong chat** (từ 0.10.0): agent chạy `pythia approve --card <token>` rồi
-  hỏi bằng `AskUserQuestion` với nội dung đúng nguyên văn thẻ đó, lựa chọn
-  `Approve` / `Reject`. Claude Code ghi câu trả lời vào payload của hook
-  `PostToolUse`; `pythia approve --hook` đọc payload và chỉ cấp grant khi câu
-  trả lời là `Approve` *và* câu hỏi mang đúng thẻ của pythia — agent diễn
-  giải lại thì không cấp gì, nên dev luôn duyệt lời của pythia chứ không
-  phải lời của agent. Hook có sẵn trong plugin và trong settings mẫu (§11);
-  không có hook thì trả lời trong chat không cấp gì.
-- **Ở console**: `pythia approve <token>` (nhiều token một lần cũng được):
+1. **Trong chat, trên Claude Code** (từ 0.10.0; đứng đầu từ 0.15.8): agent
+   chạy `pythia approve --card <token>` rồi hỏi bằng `AskUserQuestion` với
+   nội dung đúng nguyên văn thẻ đó, lựa chọn `Approve` / `Reject`. Đây là hộp
+   thoại của chính Claude Code: hiện ở mọi client (terminal, app desktop,
+   web, điện thoại), và Claude Code hiện tại bắt buộc hiện nó bất kể hook hay
+   allow rule. `pythia approve --hook` đọc câu trả lời từ payload
+   `PostToolUse` và chỉ cấp grant khi câu trả lời là `Approve` *và* câu hỏi
+   mang đúng thẻ của pythia — agent diễn giải lại thì không cấp gì. Ai trả
+   lời cũng được kiểm: Claude Code ghi câu trả lời của người dùng vào tool
+   input sau khi bỏ mọi câu trả lời model tự điền, nên hook đọc lời gọi gốc
+   của model trong transcript của phiên, và từ chối câu trả lời do agent tự
+   điền cũng như câu trả lời không truy được nguồn. Hộp thoại tự đóng khi dev
+   vắng mặt, hay một câu gõ tay thay vì chọn, đều không phải cú duyệt. Hook
+   có sẵn trong plugin và trong settings mẫu (§11); không có hook thì trả lời
+   trong chat không cấp gì.
+2. **Tool `pythia_approve`** (từ 0.15.0 trên Claude Code, 0.14.0 trên Codex —
+   cửa đầu tiên ở Codex): MCP server không-ghi-DB mà `pythia install` đăng ký
+   vào `.mcp.json`. MCP elicitation hiện đúng thẻ duyệt của pythia với
+   Approve / Reject — agent không có gì để diễn giải lại. Host không có giao
+   diện elicitation (app desktop của Claude, một số SDK host) tự từ chối mà
+   không hiện ra; câu từ chối về trong dưới 1,5 giây được nói rõ là của
+   client chứ không phải của dev, và agent chuyển sang cửa kế tiếp.
+3. **Ở console**: `pythia approve <token>` (nhiều token một lần cũng được):
 
 ```
 $ pythia approve a1b2c3
@@ -542,7 +554,8 @@ chạy thẳng, ghi qua sqlplus/SQLcl bị chặn. Matcher của nó không bao 
 `""` hay `*` — hook PreToolUse bắt trúng `AskUserQuestion` làm câu hỏi trả về
 rỗng, đúng lỗi mà `pythia doctor` đi tìm. `PostToolUse` trên `AskUserQuestion`
 chạy `python -m pythia approve --hook`: cửa duyệt trong chat ở §5 — từ chối
-câu trả lời điền sẵn và nói rõ khi không có câu trả lời nào về.
+câu trả lời do agent tự điền vào lời gọi của chính nó (đọc từ transcript) và
+nói rõ khi không có câu trả lời nào về.
 `PostToolUse` trên Bash chạy `hook post-tool`: nhắc luật đọc exit code ngay
 cạnh kết quả apply. Install còn ghi harness vào `CLAUDE.md` của dự án (khối
 có đánh dấu, giống AGENTS.md cho Codex): Claude Code nạp file này ở mọi
@@ -650,7 +663,7 @@ cũ được đọc trước khi ghi và `journal restore` đặt lại đúng n
 
 ```bash
 pythia autopilot request --groups plsql_source,comments,structural --hours 6 --note "module đơn hàng"
-#   -> agent hỏi bằng thẻ (tool pythia_approve / AskUserQuestion / console)
+#   -> agent hỏi bằng thẻ (AskUserQuestion / tool pythia_approve / console)
 pythia autopilot status       # đang hiệu lực gì, đến khi nào, đã ghi bao nhiêu
 pythia autopilot report       # mọi lần ghi trong lease, kết quả và lệnh hoàn tác
 pythia autopilot off          # thu hồi — lúc nào cũng được
@@ -670,12 +683,15 @@ pythia autopilot on ...       # dev, tại console: xin + duyệt trong một l�
 `pythia doctor` kiểm harness: hook đã nối, MCP approver đã đăng ký và bật,
 skill cài một chỗ (không trùng), policy, conventions, lease, và git có giữ
 `.pythia/connections.json` ngoài mọi bản clone không. Nó còn chỉ đích
-danh mọi cấu hình đã biết làm `AskUserQuestion` trả về mà không hiện câu hỏi
-— allow rule hoặc `allowed-tools` của skill có `AskUserQuestion`, hook
-PreToolUse/PermissionRequest có matcher bắt trúng nó (trong file settings
-hoặc plugin đã cài), chế độ `dontAsk`. `pythia doctor --db` kiểm thêm
-database: phiên bản, bộ ký tự, độ phủ PL/Scope và warnings, object INVALID,
-utPLSQL.
+danh các cấu hình từng làm `AskUserQuestion` trả về mà không hiện câu hỏi —
+allow rule hoặc `allowed-tools` của skill có `AskUserQuestion`, hook
+PreToolUse/PermissionRequest có matcher bắt trúng nó (trong file settings,
+hoặc trong plugin đã cài và đang bật — bản clone marketplace chứa mọi plugin
+nó liệt kê, và những plugin đó không chạy). Claude Code hiện tại bắt buộc
+hiện hộp thoại cho `AskUserQuestion` bất kể các cấu hình đó, nên chúng chỉ là
+warning; chế độ `dontAsk` — đóng cả hai cửa duyệt trong chat — là fail duy
+nhất. `pythia doctor --db` kiểm thêm database: phiên bản, bộ ký tự, độ phủ
+PL/Scope và warnings, object INVALID, utPLSQL.
 
 ### `pythia explain` và `pythia stats` — tối ưu, không cần license thêm
 

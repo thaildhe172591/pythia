@@ -1289,7 +1289,7 @@ def test_preview_prints_both_follow_up_lines():
         assert f"approve --card {tok}" in out      # the chat door
         assert f"approve {tok}" in out             # the console door
         assert f"apply f.sql --confirm {tok}" in out
-        assert "in chat" in out and "terminal" in out
+        assert "AskUserQuestion" in out and "terminal" in out
 
 
 def test_journal_restore_needs_a_grant_too():

@@ -100,6 +100,30 @@ def test_no_mint_on_reject_decline_or_cancel():
             assert pythia.read_grant(td, token) is None       # nothing minted
 
 
+def test_a_decline_before_anyone_could_read_is_the_client_not_the_developer():
+    """Field report: in a host with no elicitation UI, Claude Code answers
+    every elicitation 'decline' at once; pythia told the agent the developer
+    had declined and to ask what should change. A non-accept faster than a
+    person can read the card is the client: the agent moves to the next
+    door, and a slow decline is still the developer's no."""
+    ticks = iter([100.0, 100.04])
+    with tempfile.TemporaryDirectory() as td:
+        token = _preview(td)
+        res = pythia.mcp_approve_decision(
+            td, token, lambda m, s: ("decline", {}), clock=lambda: next(ticks))
+        text = res["content"][0]["text"]
+        assert res["isError"] is True and pythia.read_grant(td, token) is None
+        assert "did not show" in text and "AskUserQuestion" in text
+        assert f"approve --card {token}" in text and f"approve {token}" in text
+        assert "ask what should change" not in text
+    ticks = iter([100.0, 108.0])
+    with tempfile.TemporaryDirectory() as td:
+        token = _preview(td)
+        res = pythia.mcp_approve_decision(
+            td, token, lambda m, s: ("decline", {}), clock=lambda: next(ticks))
+        assert "did not approve" in res["content"][0]["text"]
+
+
 def test_no_mint_for_unknown_token_and_elicit_is_not_even_called():
     with tempfile.TemporaryDirectory() as td:
         called = []
