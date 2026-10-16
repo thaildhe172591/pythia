@@ -190,6 +190,9 @@ each agent needs you to finish by hand.
    text untouched. The rules hold even with `--no-hooks`, before a restart,
    or while the hooks are untrusted; when the block is there, the
    SessionStart hook adds only the live state instead of repeating the guide.
+   A block from an older pythia (upgraded, not yet re-installed) gets the
+   current guide instead, with a `NOTE` line saying it wins until `pythia
+   install` refreshes the block.
 
    **The interpreter is chosen by what really starts pythia.** A hook that
    cannot start fails open — Claude Code treats its error as non-blocking —

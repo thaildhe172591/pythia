@@ -1606,6 +1606,16 @@ def test_session_start_supersedes_a_claude_md_block_from_an_older_pythia():
             encoding="utf-8")
         out = _session_start(td)
         assert route in out and "older pythia" in out and "install" in out
+        # one header, the note read first (field test 0.15.8: two headers)
+        assert out.count("PYTHIA HARNESS ACTIVE") == 1, out
+        lines = out.splitlines()
+        assert lines[0].startswith("PYTHIA HARNESS ACTIVE")
+        assert lines[1].startswith("NOTE ") and "older pythia" in lines[1], lines[:2]
+    for state in ("none", "current"):                      # one header there too
+        with tempfile.TemporaryDirectory() as td:
+            if state == "current":
+                pythia.merge_claude_md(pathlib.Path(td) / "CLAUDE.md")
+            assert _session_start(td).count("PYTHIA HARNESS ACTIVE") == 1
 
 
 def test_the_claude_md_block_puts_the_chat_question_first():

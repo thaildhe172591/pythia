@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.9 — 2026-10-16
+
+From the 0.15.8 field test: a project upgraded with `pip install -U` but not
+re-installed got two `PYTHIA HARNESS ACTIVE` lines at session start, one from
+the stale-block notice and one at the head of the brief.
+
+- **One header.** The brief's own header comes first. Under it, a `NOTE` line
+  says CLAUDE.md's block is from an older pythia, that these rules win where
+  the two differ, and that `pythia install` refreshes it. The note uses the
+  same label column as `RUN` and `STATE`.
+
 ## 0.15.8 — 2026-10-16
 
 From two field reports on fresh machines. `pythia install` left a `doctor`

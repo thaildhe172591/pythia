@@ -205,7 +205,10 @@ agent buộc bạn tự làm.
    mọi phiên — trong một khối có đánh dấu, không đụng nội dung của bạn. Nhờ
    vậy luật vẫn có hiệu lực cả khi cài `--no-hooks`, trước khi khởi động lại,
    hay khi hook chưa được trust; khi đã có khối này, hook SessionStart chỉ bổ
-   sung trạng thái sống chứ không lặp lại guide.
+   sung trạng thái sống chứ không lặp lại guide. Nếu khối đó thuộc bản pythia
+   cũ hơn (đã nâng cấp nhưng chưa cài lại), hook in guide hiện hành kèm một
+   dòng `NOTE` nói rằng guide này được ưu tiên cho tới khi `pythia install`
+   làm mới khối.
 
    **Interpreter được chọn theo cái thật sự chạy được pythia.** Hook không
    khởi động được thì cổng mở luôn — Claude Code coi lỗi của nó là không chặn —
