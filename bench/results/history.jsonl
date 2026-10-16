@@ -18,3 +18,4 @@
 {"version": "0.15.5", "date": "2026-10-15", "commit": "b82f99e", "scores": {"reliability": 100.0, "performance": 100.0, "agent_behavior": null, "code_quality": null}, "overall": 100.0}
 {"version": "0.15.6", "date": "2026-10-15", "commit": "0a82c4a", "scores": {"reliability": 100.0, "performance": 100.0, "agent_behavior": null, "code_quality": null}, "overall": 100.0}
 {"version": "0.15.7", "date": "2026-10-15", "commit": "b404967", "scores": {"reliability": 100.0, "performance": 100.0, "agent_behavior": null, "code_quality": null}, "overall": 100.0}
+{"version": "0.15.8", "date": "2026-10-16", "commit": "4686aee", "scores": {"reliability": 100.0, "performance": 100.0, "agent_behavior": null, "code_quality": null}, "overall": 100.0}
