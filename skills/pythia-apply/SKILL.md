@@ -54,19 +54,18 @@ confirms a number you already knew.
 2. **Relay the preview — verbatim.** The diff, the `impact:` line, every `!`
    warning, exactly as printed. The developer approves what they see, not
    your paraphrase.
-3. **Ask for approval — one door, one token at a time:**
-   - **First choice: the `pythia_approve` tool** (MCP, Claude Code and
-     Codex) with the token. It prompts in every permission mode but
-     `dontAsk`, and shows pythia's own card — nothing for you to word.
-   - **Else `AskUserQuestion`**: `pythia approve --card <token>` prints the
-     card; the question text is that card and nothing else — no word before
-     it, no translation after it. The hook compares question to card and
-     mints nothing when they differ. Explanation goes in the option
-     descriptions. Header `pythia`; options exactly `Approve` / `Reject`; up
-     to four tokens per call; never pre-fill `answers`. If the hook says
-     *no answer came back*, the question never rendered — switch to the
-     tool, do not ask the same way twice (`pythia doctor` names the cause).
-   - **Else** relay `pythia approve <token>` for the developer's terminal.
+3. **Ask for approval — the first door that works, the next one unasked:**
+   - **Claude Code: `AskUserQuestion`** — its own dialog, shown in every
+     client. `pythia approve --card <token>` prints the card; the question
+     text is that card and nothing else — no word before it, no translation
+     after it. The hook compares question to card and mints nothing when
+     they differ. Explanation goes in the option descriptions. Header
+     `pythia`; options exactly `Approve` / `Reject`; up to four tokens per
+     call; never fill in `answers`. When the hook says the answer did not
+     count for any reason but a Reject, go straight to the next door.
+   - **Then the `pythia_approve` tool** (MCP; Codex starts here) with the
+     token: pythia's own card. If it says the client did not show it, move on.
+   - **Last:** relay `pythia approve <token>` for the developer's terminal.
    Anything but `Approve` is not approval: stop and ask what should change.
 4. **Apply** by running the exact `then the agent:` line pythia printed. Two
    refusals are normal here, and neither is a malfunction:

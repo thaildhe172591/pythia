@@ -37,8 +37,8 @@ at the role tier; your site's security model belongs to your DBA.
 | Policy (`.pythia/policy.json`) | whole statement classes; DML, DDL and grants are `deny` by default | editing the file, deliberately |
 | Confirmation token | applying content that differs from what was previewed | not applying at all |
 | Approval grant | an agent completing a write no human approved | fabricating the grant file, faking a console, or piping a hand-made hook payload into `approve --hook`, deliberately — the `policy.json` tier |
-| Card check in the chat door | a human approving the agent's paraphrase instead of the preview | nothing short of the above — the hook mints only when the question carries pythia's own card verbatim, and refuses answers pre-filled in the tool input |
-| MCP approver (`pythia_approve`) | an approval given without a person seeing pythia's card | an Elicitation hook the developer configured to auto-accept, Codex's `danger-full-access`, or Claude Code's `dontAsk` (which denies the tool instead) |
+| Card check in the chat door | a human approving the agent's paraphrase instead of the preview, or an answer the agent wrote itself | editing the session transcript, deliberately — the `policy.json` tier; the hook mints only when the question carries pythia's own card verbatim, and only for an answer it can trace to the dialog: the model's own call, read from the transcript, carried none |
+| MCP approver (`pythia_approve`) | an approval given without a person seeing pythia's card | an Elicitation hook the developer configured to auto-accept, Codex's `danger-full-access`, or Claude Code's `dontAsk` (which denies the tool instead); a host that declines it unseen mints nothing, and the decline is named as the client's |
 | Autopilot lease | a delegation wider than the developer approved | editing `lease.json` by hand, deliberately — the `policy.json` tier; the lease never covers a protected connection, destructive statements the card did not include, or lint errors |
 | PreToolUse guard | sqlplus/SQLcl writes that skip the write path, forged `approve --hook` calls | obfuscating the command past a regex — it is a seatbelt for a well-meaning agent, not a sandbox |
 | TTY requirement | a headless agent self-approving `--yes` or loosening policy | `PYTHIA_CI=1`, deliberately, in a real pipeline |
@@ -52,19 +52,27 @@ the groups that are not rather than implying otherwise.
 The approval grant has two doors since 0.10.0, and each has an honest
 reading. The console door assumes a developer with a terminal on the machine
 holding the repo. The chat door (`AskUserQuestion` + the `PostToolUse` hook)
-closes the remote-developer gap for Claude Code: the answer the hook reads was
-written into the payload by the client, not the agent, and the hook refuses
-unless the question carried pythia's own card verbatim — so what is approved
-is the preview, not a paraphrase. Its limit: the hook is a process the agent's
-shell could also start. An agent that pipes a hand-made payload into `pythia
+closes the remote-developer gap for Claude Code, and since 0.15.8 it is the
+first door there: Claude Code's own dialog, required for this tool whatever a
+hook or an allow rule says. Current Claude Code writes the person's answer
+into the tool input after dropping any the model wrote, so the input alone
+cannot say who answered; the hook reads the model's own call from the
+session transcript (`wireToolInputs`) and mints only when that call carried
+no answers — an answer the agent wrote, or one the hook cannot trace, mints
+nothing. A dialog that closed itself while nobody was at the keyboard
+(`afkTimeoutMs`) is no answer. And the hook refuses unless the question
+carried pythia's own card verbatim — so what is approved is the preview, not
+a paraphrase. Its limits: the hook is a process the agent's shell could also
+start, and the transcript is a file the agent could edit. An agent that pipes a hand-made payload into `pythia
 approve --hook` has forged an approval — the same tier as faking a console or
 writing the grant file by hand, and `pythia install` writes a deny rule for
 that command shape into the Claude Code settings outright. Since 0.14.0 (Codex) and 0.15.0 (Claude Code) the
-MCP approver is a third door: its tool is marked `requiresUserInteraction`,
-so Claude Code prompts for it in every permission mode but `dontAsk`, and the
-elicitation shows pythia's own card — which also makes it immune to the
-settings that make `AskUserQuestion` return empty (`pythia doctor` lists
-them). What the grant raises is the
+MCP approver is a third door, the first on Codex: its tool is marked
+`requiresUserInteraction`, so Claude Code prompts for it in every permission
+mode but `dontAsk`, and the elicitation shows pythia's own card. A host with
+no elicitation UI declines it at once, unseen; pythia reads a non-accept back
+in under 1.5 s as the client's, says so, and the agent moves to the next
+door — nothing is minted either way. What the grant raises is the
 *bar*, not a wall: it turns a write an agent could complete on its own
 authority into one that takes deliberate forgery, which is the same tier as
 editing `policy.json`.

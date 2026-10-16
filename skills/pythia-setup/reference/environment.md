@@ -78,14 +78,17 @@ DEV, so every compile — not only pythia's — records them.
 
 | Client | Recommended mode | Approval door |
 |---|---|---|
-| Claude Code, reviewing each change | `default` or `acceptEdits` | `pythia_approve` (MCP, prompts in every mode but dontAsk); AskUserQuestion card as fallback |
-| Claude Code, autonomous session | `acceptEdits` + an autopilot lease | one `pythia_approve` for the lease; writes then land within it |
+| Claude Code, reviewing each change | `default` or `acceptEdits` | AskUserQuestion with the card (its own dialog, shown in every client — terminal, desktop, web, phone); `pythia_approve` (MCP) when that fails |
+| Claude Code, autonomous session | `acceptEdits` + an autopilot lease | one approval for the lease, same doors; writes then land within it |
 | Claude Code, `bypassPermissions` | works — the gates are pythia's, not the client's | same doors; never on a shared or protected connection |
 | Codex | default sandbox, interactive approvals | `pythia_approve` via MCP elicitation (≥ v0.120); never `danger-full-access` |
 
 `dontAsk` mode denies both AskUserQuestion and the MCP approver: approvals
 then only happen at the developer's console (`pythia approve <token>`), or
-through an autopilot lease started there (`pythia autopilot on`).
+through an autopilot lease started there (`pythia autopilot on`). A host
+with no MCP prompt UI (the Claude desktop app, some SDK hosts) declines the
+`pythia_approve` prompt unseen; pythia tells the two apart by time — no one
+reads a card in under 1.5 s — and sends the agent to the next door.
 
 After `pythia install`: restart the session, run `pythia doctor`, and fix
 every `fail` line — each one names its fix. Most are a setting that will stop

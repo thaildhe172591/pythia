@@ -88,12 +88,15 @@ verify → report**. DDL self-commits in Oracle, so the snapshot is the only rea
 undo — it runs first and no flag disables it. A content-bound token guarantees
 what lands is byte-for-byte what was previewed, and a **developer-minted grant**
 guarantees a person approved it at all — through a door that is always the
-developer's. The `pythia_approve` tool (MCP, on Claude Code and Codex) shows
-pythia's own approval card as a select prompt, and Claude Code prompts for it
-in every permission mode but `dontAsk` — no allow rule can skip it. In chat:
-an `AskUserQuestion` whose text is the card (`pythia approve --card <token>`),
-whose **Approve** — written into the hook payload by Claude Code, never by
-the agent — mints the one-time grant. At a console: `pythia approve <token>`.
+developer's, tried in order until one works. On Claude Code first: an
+`AskUserQuestion` whose text is the card (`pythia approve --card <token>`) —
+Claude Code's own dialog, shown in every client (terminal, desktop, web,
+phone) and never answered by a hook or an allow rule; its **Approve**, chosen
+in the dialog and traced through the session transcript to make sure the
+agent did not write it, mints the one-time grant. Next, and first on Codex:
+the `pythia_approve` tool (MCP), pythia's own card as a select prompt. Last, at
+a console: `pythia approve <token>`. A door that fails says so and names the
+next, and the agent moves on without asking.
 Without that grant `apply --confirm` refuses. A headless agent cannot `--yes`
 its own writes, cannot mint approval, and cannot loosen policy — each of those
 takes a human, answering or typing.
@@ -207,23 +210,25 @@ each agent needs you to finish by hand.
 
    Skills land in `.claude/skills` (or `~/.claude/skills` with `-g`).
 2. **Restart the Claude Code session** so the hooks and the MCP server load.
-3. **Run `pythia doctor`.** It confirms the wiring and names every setting
-   known to make `AskUserQuestion` return without showing the question — an
+3. **Run `pythia doctor`.** It confirms the wiring and names the settings
+   that once made `AskUserQuestion` return without showing the question — an
    allow rule or a skill's `allowed-tools` naming it, a PreToolUse hook with an
    empty or `*` matcher (in settings, or in a plugin that is installed and
-   enabled — the rest of a marketplace's plugins do not count), `dontAsk`
-   mode. That class of setting is why chat approval could fail outside
-   `bypassPermissions`; the MCP door is immune to all but `dontAsk`. So while
-   `pythia_approve` is wired, such a setting is a warning — it closes only
-   the `AskUserQuestion` door — and a fail without it, or for `dontAsk`.
+   enabled — the rest of a marketplace's plugins do not count). Current
+   Claude Code requires the dialog for `AskUserQuestion` whatever those say,
+   so they are warnings; `dontAsk` mode, which denies both chat doors, is the
+   one fail.
 4. *Optional:* copy the allow-list and `autoMode` from
    [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json).
    Those are your permission preferences, so pythia does not set them for you
    ([why](GUIDE.md#11-optional-claude-code-permission-settings)).
 
-**Approving a change:** the agent previews with `pythia apply`, calls the
-`pythia_approve` tool (or asks an `AskUserQuestion` carrying the card), you
-click **Approve**, and the agent runs `apply --confirm` itself.
+**Approving a change:** the agent previews with `pythia apply`, asks an
+`AskUserQuestion` carrying the card, you click **Approve**, and the agent runs
+`apply --confirm` itself. If that dialog's answer does not count (it closed
+while you were away, or the hook could not trace it), the agent goes on
+unasked to the `pythia_approve` tool, then to `pythia approve <token>` for your
+terminal.
 
 **Working autonomously:** say so. The agent requests a lease
 (`pythia autopilot request`), you approve its card once, and it builds —
@@ -246,7 +251,9 @@ tables, comments, packages, releases — without stopping for each write.
    `pythia: connected`.
 
 Needs **Codex ≥ v0.120** for the in-chat approval (MCP elicitation); an older
-or headless Codex falls back to the console `pythia approve <token>`. Do
+or headless Codex — or any host that declines the prompt without showing it,
+which pythia tells apart by time — falls back to the console `pythia approve
+<token>`, and the agent says so without being asked. Do
 **not** run Codex under `danger-full-access` — that sandbox auto-approves
 elicitations and bypasses your Approve.
 
@@ -302,8 +309,8 @@ works just as well.
 `pythia check` warns when the session runs with more power than the task needs.
 
 The developer approval that `apply` requires is minted per agent — Claude
-Code's `AskUserQuestion` hook, or Codex's `pythia_approve` MCP tool, or the
-console `pythia approve <token>` anywhere. How each is wired is in
+Code's `AskUserQuestion` hook first, then the `pythia_approve` MCP tool (where
+Codex starts), then the console `pythia approve <token>` anywhere. How each is wired is in
 [Setting up Claude Code and Codex](#setting-up-claude-code-and-codex) above.
 
 Per-group write policy, `.pythia/policy.json` (defaults shown):

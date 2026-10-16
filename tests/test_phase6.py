@@ -683,14 +683,89 @@ def test_autopilot_report_lists_every_write_and_its_undo():
 
 # --- the chat hook: fail closed, and say why ------------------------------------
 
-def test_hook_refuses_prefilled_answers():
+def _transcript(td, model_input, tool_use_id="toolu_ask", filler=200):
+    """A Claude Code session transcript: JSONL, the assistant's tool_use as
+    the model sent it (content input, and the wire copy), after other lines."""
+    path = pathlib.Path(td) / "session.jsonl"
+    lines = [json.dumps({"type": "user", "message": {"content": "x" * 50}})
+             for _ in range(filler)]
+    lines.append(json.dumps({
+        "type": "assistant", "wireToolInputs": {tool_use_id: model_input},
+        "message": {"content": [{"type": "tool_use", "id": tool_use_id,
+                                 "name": "AskUserQuestion", "input": model_input}]}}))
+    lines.append(json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": tool_use_id}]}}))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def _dialog_answered(td, card, answer, model_input=None, with_id=True):
+    """The payload current Claude Code sends: the dialog writes the person's
+    answer into the tool input (the model's own answers are stripped before
+    the dialog shows), and the transcript keeps what the model sent."""
+    payload = p3._hook_payload(card, answer)
+    asked = {"questions": payload["tool_input"]["questions"]}
+    payload["tool_input"]["answers"] = {card: answer}
+    payload["transcript_path"] = _transcript(
+        td, model_input if model_input is not None else asked)
+    if with_id:
+        payload["tool_use_id"] = "toolu_ask"
+    return payload
+
+
+def test_hook_mints_an_answer_the_dialog_wrote_into_the_input():
+    """Field report (0.15.7, Claude Code 2.1.301): the developer picked
+    Approve and pythia refused it as pre-filled. The dialog itself writes the
+    answer into tool_input.answers now; the model's own answers, if any, are
+    stripped before it shows. What the model sent is in the transcript."""
+    with tempfile.TemporaryDirectory() as td:
+        card = p3._pending_preview(td)
+        out = p3._run_hook(td, _dialog_answered(td, card, "Approve"))
+        assert pythia.read_grant(td, "7f3a91"), out
+        assert "approved in chat" in out
+    with tempfile.TemporaryDirectory() as td:        # no tool_use_id: match the questions
+        card = p3._pending_preview(td)
+        p3._run_hook(td, _dialog_answered(td, card, "Approve", with_id=False))
+        assert pythia.read_grant(td, "7f3a91")
+
+
+def test_hook_refuses_answers_the_agent_wrote_into_its_own_call():
+    with tempfile.TemporaryDirectory() as td:
+        card = p3._pending_preview(td)
+        forged = {"questions": p3._hook_payload(card, "x")["tool_input"]["questions"],
+                  "answers": {card: "Approve"}}
+        out = p3._run_hook(td, _dialog_answered(td, card, "Approve", model_input=forged))
+        assert pythia.read_grant(td, "7f3a91") is None
+        assert "your own call" in out and "without an answers field" in out
+
+
+def test_hook_refuses_an_answer_it_cannot_trace_and_names_the_next_door():
+    """Answers in the input and no transcript to tell who wrote them: no
+    grant, and the agent is sent on to the next door at once."""
     with tempfile.TemporaryDirectory() as td:
         card = p3._pending_preview(td)
         payload = p3._hook_payload(card, "Approve")
         payload["tool_input"]["answers"] = {card: "Approve"}
         out = p3._run_hook(td, payload)
         assert pythia.read_grant(td, "7f3a91") is None
-        assert "pre-filled" in out
+        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        assert "pythia_approve" in ctx and "approve 7f3a91" in ctx
+        assert "now" in ctx
+
+
+def test_hook_an_idle_dialog_or_a_typed_reply_is_no_approval():
+    with tempfile.TemporaryDirectory() as td:
+        card = p3._pending_preview(td)
+        payload = p3._hook_payload(card, "Approve")
+        payload["tool_response"]["afkTimeoutMs"] = 300000     # closed itself
+        out = p3._run_hook(td, payload)
+        assert pythia.read_grant(td, "7f3a91") is None
+        assert "closed itself" in out and "300" in out
+        payload = p3._hook_payload(card, "")
+        payload["tool_response"]["response"] = "change the status to X first"
+        out = p3._run_hook(td, payload)
+        assert pythia.read_grant(td, "7f3a91") is None
+        assert "change the status to X first" in out
 
 
 def test_hook_names_an_answer_that_never_arrived():
@@ -1448,44 +1523,123 @@ def test_doctor_counts_only_plugins_that_are_on():
         pythia.ask_question_breakers(td, home)
 
 
-def test_doctor_a_closed_askuserquestion_warns_while_pythia_approve_asks():
-    """Field report: the developer kept hookify and approved through
-    pythia_approve, and doctor still failed on every machine. A hook that
-    catches AskUserQuestion closes the second door only; while the MCP door
-    is wired and starts, that is a warning. Without the MCP door it is a
-    fail, and dontAsk, which closes both doors, is a fail either way."""
+def test_doctor_only_dontask_fails_the_askuserquestion_door():
+    """Field report: the developer kept hookify and approved in chat, and
+    doctor failed on every machine. Current Claude Code requires the dialog
+    for AskUserQuestion whatever a hook or an allow rule says, so those are
+    warnings that name the old failure; dontAsk, which denies the dialog and
+    the MCP prompt alike, is the one fail."""
     with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
         _plugin(home, "hookify@official", BLANKET, enabled=True)
         rows = lambda: [(s, m) for s, a, m in pythia.harness_checks(td, home)
                         if a == "AskUserQuestion"]
-        assert [s for s, _ in rows()] == ["fail"], rows()      # no MCP door yet
-        pythia.install_claude_mcp(td, launcher=_good_launcher())
         (st, msg), = rows()
-        assert st == "warn" and "pythia_approve" in msg, msg
-        assert "hookify@official" in msg
+        assert st == "warn" and "hookify@official" in msg, msg
+        pythia.install_claude_mcp(td, launcher=_good_launcher())
+        assert [s for s, _ in rows()] == ["warn"]
         s = pathlib.Path(home) / ".claude" / "settings.json"
         cur = json.loads(s.read_text(encoding="utf-8"))
         cur["permissions"] = {"defaultMode": "dontAsk"}
         s.write_text(json.dumps(cur), encoding="utf-8")
         got = rows()
-        assert ("fail" in [st for st, m in got if "dontAsk" in m]), got
-        assert ("warn" in [st for st, m in got if "hookify" in m]), got
+        assert "fail" in [st for st, m in got if "dontAsk" in m], got
+        assert "warn" in [st for st, m in got if "hookify" in m], got
 
 
-def test_session_state_says_when_askuserquestion_is_closed_here():
-    """The agent reads the approval door from the session state: where a
-    hook catches AskUserQuestion, falling back to it would lose the
-    approval, so the line says the fallback is the developer's terminal."""
+def test_session_state_orders_the_doors_by_what_works_here():
+    """Claude Code's own AskUserQuestion shows in every client; the MCP prompt
+    does not (a host with no elicitation UI declines it unseen). Where
+    pythia's answer hook is wired, the chat question leads, the MCP tool
+    follows, the terminal is last; without the hook the MCP tool leads; and
+    dontAsk, which denies both, leaves the terminal."""
     with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
-        pythia.install_claude_mcp(td, launcher=_good_launcher())
         door = lambda: [ln for ln in pythia.session_state_lines(td, home=home)
                         if ln.startswith("approval door")]
-        assert "AskUserQuestion is the fallback" in door()[0]
-        _plugin(home, "hookify@official", BLANKET, enabled=True)
+        pythia.install_claude_mcp(td, launcher=_good_launcher())
         line = door()[0]
-        assert "pythia_approve" in line and "hookify@official" in line, line
-        assert "AskUserQuestion is the fallback" not in line
-        assert "approve <token>" in line
+        assert "AskUserQuestion" not in line.split("pythia_approve")[0], line
+        assert line.index("pythia_approve") < line.index("approve <token>")
+        pythia.install_claude_hooks(td, trust_mcp=True, launcher=_good_launcher())
+        line = door()[0]
+        assert (line.index("AskUserQuestion") < line.index("pythia_approve")
+                < line.index("approve <token>")), line
+        assert "approve --card <token>" in line
+        _plugin(home, "hookify@official", BLANKET, enabled=True)
+        assert door()[0] == line          # a hook no longer reorders the doors
+        s = pathlib.Path(home) / ".claude" / "settings.json"
+        cur = json.loads(s.read_text(encoding="utf-8"))
+        cur["permissions"] = {"defaultMode": "dontAsk"}
+        s.write_text(json.dumps(cur), encoding="utf-8")
+        line = door()[0]
+        assert "dontAsk" in line and "approve <token>" in line, line
+
+
+def test_every_printed_door_list_puts_the_chat_question_first():
+    """The preview, the deploy and the lease requests print one list: the
+    first door that works is the one, and each names the next."""
+    import contextlib
+    import io
+    lines = pythia.door_lines("7f3a91")
+    text = "\n".join(lines)
+    assert (text.index("AskUserQuestion") < text.index("pythia_approve")
+            < text.index("approve 7f3a91")), text
+    assert "approve --card 7f3a91" in text and "Codex" in text
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        pythia.print_doors("7f3a91")
+    assert all(ln in buf.getvalue() for ln in lines)
+
+
+def test_session_start_supersedes_a_claude_md_block_from_an_older_pythia():
+    """After `pip install -U` and before `pythia install` runs again, every
+    project's CLAUDE.md still carries the old block — the old door order
+    among it. Session start sees the block differs from this version's and
+    prints the current brief, saying which one wins."""
+    with tempfile.TemporaryDirectory() as td:
+        md = pathlib.Path(td) / "CLAUDE.md"
+        pythia.merge_claude_md(md)
+        route = pythia.BRIEF_GUIDE.splitlines()[2]
+        assert route not in _session_start(td)              # current: state only
+        md.write_text(md.read_text(encoding="utf-8").replace(
+            "APPROVAL ON CLAUDE CODE: first door is AskUserQuestion",
+            "APPROVAL ON CLAUDE CODE: first door is the `pythia_approve` tool"),
+            encoding="utf-8")
+        out = _session_start(td)
+        assert route in out and "older pythia" in out and "install" in out
+
+
+def test_the_claude_md_block_puts_the_chat_question_first():
+    block = pythia.claude_md_block()
+    door = block[block.index("APPROVAL ON CLAUDE CODE"):]
+    assert door.index("AskUserQuestion") < door.index("pythia_approve") \
+        < door.index("approve <token>")
+    assert "without asking" in door
+
+
+def test_install_puts_pythia_on_path_when_no_one_is_there_to_answer():
+    """Field report: on a fresh Windows machine an agent ran the install, no
+    one could answer the PATH question, and `pythia` never worked in the
+    developer's own terminal. Nobody to ask now means add it (user PATH
+    only); --no-path skips it; a person at the console is still asked."""
+    added = []
+    add = lambda d: added.append(d) or True
+    with tempfile.TemporaryDirectory() as scripts, \
+            tempfile.TemporaryDirectory() as clone:
+        (pathlib.Path(scripts) / "pythia.exe").write_bytes(b"")
+        assert pythia.offer_path_fix(scripts, False, windows=True, add=add)
+        assert added == [scripts]
+        added.clear()
+        assert not pythia.offer_path_fix(scripts, False, skip=True,
+                                         windows=True, add=add)
+        assert not pythia.offer_path_fix(scripts, False, windows=False, add=add)
+        # a directory without our executable (a clone, a test run) never goes in
+        assert not pythia.offer_path_fix(clone, False, windows=True, add=add)
+        assert not pythia.offer_path_fix(scripts, True, windows=True, add=add,
+                                         ask=lambda prompt: "n")
+        assert added == []
+        assert pythia.offer_path_fix(scripts, True, windows=True, add=add,
+                                     ask=lambda prompt: "")
+        assert added == [scripts]
 
 
 def test_doctor_reports_the_wiring_after_install():

@@ -113,13 +113,13 @@ permission mode but `dontAsk`) and the Codex equivalents. After a restart:
 
 - `pythia doctor` — every hook wired and able to start pythia (a hook that
   cannot import it fails open: the guard is off), the approval door
-  registered, and every setting known to make `AskUserQuestion` return empty
-  (an allow rule or a skill's `allowed-tools` naming it, a PreToolUse hook
-  with an empty or `*` matcher in settings or an enabled plugin, `dontAsk`).
-  Each `fail` line is a reason the guard or the approvals do not work; relay
-  it with the file it names. While `pythia_approve` is wired, a hook like
-  that is a `warn`: approve through the MCP tool, then the terminal — the
-  session's `approval door` line says so; nothing needs removing.
+  registered, and the settings that once made `AskUserQuestion` return
+  empty (an allow rule or a skill's `allowed-tools` naming it, a PreToolUse
+  hook catching it in settings or an enabled plugin) — `warn` now, since
+  current Claude Code requires the dialog anyway — and `dontAsk`, a `fail`:
+  it closes both chat doors. Each `fail` line is a reason the guard or the
+  approvals do not work; relay it with the file it names. The session's
+  `approval door` line gives the doors in the order that works here.
 - `pythia doctor --db` — version, character set, PL/Scope and compiler
   warnings coverage, INVALID objects, utPLSQL.
 - Mark production-like connections `"protected": true` (or `"env": "prod"`)

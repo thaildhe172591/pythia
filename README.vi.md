@@ -86,13 +86,16 @@ Chỉ sau Học và Hỏi mới được chạm database, và chỉ qua một c�
 DDL trong Oracle tự commit nên snapshot là đường lùi duy nhất — nó chạy đầu
 tiên và không cờ nào tắt được. Token gắn nội dung bảo đảm thứ được ghi đúng
 từng byte với thứ đã xem; còn **grant do chính dev cấp** bảo đảm là *có người
-duyệt* — qua một cửa luôn thuộc về dev. Tool `pythia_approve` (MCP, trên
-Claude Code và Codex) hiện thẻ duyệt của chính pythia dưới dạng prompt chọn,
-và Claude Code luôn hỏi cho tool này ở mọi permission mode trừ `dontAsk` —
-không allow rule nào bỏ qua được. Trong chat: một `AskUserQuestion` có nội
-dung là thẻ duyệt (`pythia approve --card <token>`), câu trả lời **Approve**
-— do Claude Code ghi vào payload của hook, không phải agent — cấp grant
-một-lần. Ở console: `pythia approve <token>`. Thiếu grant đó thì
+duyệt* — qua một cửa luôn thuộc về dev, thử lần lượt tới khi một cửa chạy.
+Trên Claude Code, đầu tiên: một `AskUserQuestion` có nội dung là thẻ duyệt
+(`pythia approve --card <token>`) — hộp thoại của chính Claude Code, hiện ở
+mọi client (terminal, desktop, web, điện thoại), không hook hay allow rule
+nào trả lời thay được; câu trả lời **Approve** chọn trong hộp thoại, được đối
+chiếu với transcript của phiên để chắc agent không tự điền, cấp grant
+một-lần. Tiếp theo, và là cửa đầu trên Codex: tool `pythia_approve` (MCP),
+thẻ duyệt của pythia dưới dạng prompt chọn. Cuối cùng, ở console: `pythia
+approve <token>`. Cửa nào hỏng thì nói rõ và chỉ cửa kế tiếp, agent tự
+chuyển sang mà không cần hỏi. Thiếu grant đó thì
 `apply --confirm` từ chối. Agent chạy không người không thể `--yes` cho chính
 nó, không thể tự cấp grant, cũng không nới được policy — cả ba đều cần một
 con người, trả lời hoặc gõ.
@@ -226,23 +229,23 @@ agent buộc bạn tự làm.
    Skills vào `.claude/skills` (hoặc `~/.claude/skills` khi `-g`).
 2. **Khởi động lại phiên Claude Code** để hook và MCP server nạp.
 3. **Chạy `pythia doctor`.** Nó xác nhận mọi thứ đã nối, và chỉ đích danh
-   từng cấu hình làm `AskUserQuestion` trả về rỗng mà không hiện câu hỏi —
-   allow rule hoặc `allowed-tools` của một skill có `AskUserQuestion`, hook
+   các cấu hình từng làm `AskUserQuestion` trả về rỗng mà không hiện câu hỏi
+   — allow rule hoặc `allowed-tools` của một skill có `AskUserQuestion`, hook
    PreToolUse có matcher rỗng hoặc `*` (trong settings, hoặc trong plugin đã
-   cài và đang bật — các plugin khác của marketplace không tính), chế độ
-   `dontAsk`. Chính nhóm cấu hình đó là lý do duyệt trong chat có thể hỏng ở
-   các mode khác `bypassPermissions`; cửa MCP miễn nhiễm với tất cả trừ
-   `dontAsk`. Vì vậy khi `pythia_approve` đã nối, cấu hình như thế chỉ là
-   warning — nó chỉ đóng cửa `AskUserQuestion` — và là fail khi không có cửa
-   MCP, hoặc với `dontAsk`.
+   cài và đang bật — các plugin khác của marketplace không tính). Claude Code
+   hiện tại luôn bắt buộc hiện hộp thoại cho `AskUserQuestion` bất kể các cấu
+   hình đó, nên chúng chỉ là warning; chế độ `dontAsk` — đóng cả hai cửa duyệt
+   trong chat — là fail duy nhất.
 4. *Tuỳ chọn:* copy allow-list và `autoMode` từ
    [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json).
    Đó là quyền hạn của bạn, nên pythia không tự đặt
    ([vì sao](GUIDE.vi.md#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)).
 
-**Duyệt một thay đổi:** agent preview bằng `pythia apply`, gọi tool
-`pythia_approve` (hoặc hỏi một `AskUserQuestion` mang thẻ duyệt), bạn bấm
-**Approve**, agent tự chạy `apply --confirm`.
+**Duyệt một thay đổi:** agent preview bằng `pythia apply`, hỏi một
+`AskUserQuestion` mang thẻ duyệt, bạn bấm **Approve**, agent tự chạy `apply
+--confirm`. Nếu câu trả lời không được tính (hộp thoại tự đóng khi bạn vắng
+mặt, hoặc hook không đối chiếu được), agent tự chuyển sang tool
+`pythia_approve`, rồi tới `pythia approve <token>` cho terminal của bạn.
 
 **Làm việc tự động hoàn toàn:** cứ nói với agent. Agent xin một lease
 (`pythia autopilot request`), bạn duyệt thẻ của nó một lần, và nó làm — bảng,
@@ -264,7 +267,9 @@ comment, package, script release — không dừng lại ở từng lần ghi. M
 4. Kiểm: `/skills` liệt kê các skill pythia, `/mcp` hiện `pythia: connected`.
 
 Cần **Codex ≥ v0.120** cho duyệt-trong-chat (MCP elicitation); Codex cũ hơn
-hoặc chạy headless thì lùi về console `pythia approve <token>`. **Đừng** chạy
+hoặc chạy headless — hay bất kỳ host nào từ chối prompt mà không hiện ra, điều
+pythia phân biệt được nhờ thời gian — thì lùi về console `pythia approve
+<token>`, và agent tự nói điều đó mà không cần hỏi. **Đừng** chạy
 Codex dưới `danger-full-access` — sandbox đó tự-duyệt elicitation, vượt qua
 cú Approve của bạn.
 
@@ -325,9 +330,9 @@ một lần chạy. Đây chỉ là tiện ích; bạn tự làm tay theo
 cũng được. `pythia check` sẽ cảnh báo khi tài khoản đang dùng có quyền cao
 hơn mức công việc cần.
 
-Cú duyệt mà `apply` đòi được mint theo từng agent — tool `pythia_approve`
-(MCP) trên Claude Code và Codex, hook `AskUserQuestion` của Claude Code, hoặc
-console `pythia approve <token>` ở bất kỳ đâu. Cách wire từng cái nằm ở
+Cú duyệt mà `apply` đòi được mint theo từng agent — hook `AskUserQuestion`
+của Claude Code trước, rồi tool `pythia_approve` (MCP; Codex bắt đầu từ đây),
+rồi console `pythia approve <token>` ở bất kỳ đâu. Cách wire từng cái nằm ở
 [Cài đặt cho Claude Code và Codex](#cài-đặt-cho-claude-code-và-codex) phía trên.
 
 Chính sách ghi chia theo nhóm trong `.pythia/policy.json` (mặc định):

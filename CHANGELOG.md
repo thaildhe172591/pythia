@@ -2,30 +2,67 @@
 
 ## 0.15.8 — 2026-10-16
 
-From a field report: `pythia install` on fresh machines left one `doctor`
-failure, blamed on the hookify plugin, and the developer chose to keep
-hookify and approve through `pythia_approve`.
+From two field reports on fresh machines. `pythia install` left a `doctor`
+failure blamed on the hookify plugin. Then, in the Claude desktop app, both
+chat doors refused a developer who did approve: `pythia_approve` came back
+"declined" with no dialog shown, and AskUserQuestion's Approve was rejected
+as pre-filled.
 
-- **doctor reads only the plugins Claude Code runs.** It used to scan
-  every `hooks.json` under `~/.claude/plugins`, including the marketplace
-  clone, which holds the source of every plugin the marketplace lists. A
-  machine with the official marketplace failed on hookify and on
-  claude-security even when neither was installed. Now a plugin counts
-  when `installed_plugins.json` lists it (else the newest copy in
-  `cache/`) and `enabledPlugins` leaves it on. Settings are read user, then
-  project, then local, and the last mention wins; no mention means on,
-  unless the plugin's manifest says `defaultEnabled: false`. Its hooks come
-  from `hooks/hooks.json` and from `plugin.json`'s `hooks`, which can be
-  paths or inline objects. `CLAUDE_CODE_PLUGIN_CACHE_DIR` is honoured.
-- **A closed AskUserQuestion is a warning while pythia_approve asks.** A
-  hook or rule that catches `AskUserQuestion` closes the second door only.
-  With the MCP door wired and able to start, doctor now reports it as
-  `warn`. It stays `fail` when there is no MCP door. `dontAsk`, which
-  closes both doors, is always `fail`.
-- **The session state names a closed door.** Where `AskUserQuestion` is
-  caught, the `approval door` line no longer calls it the fallback. It
-  names what catches it and points to `pythia approve <token>` at the
-  developer's terminal.
+- **AskUserQuestion is the first door on Claude Code.** It is Claude Code's
+  own dialog and shows in every client: terminal, desktop app, web and
+  phone. Since Claude Code marks it `requiresUserInteraction`, no hook or
+  allow rule answers it. The order is AskUserQuestion, then the
+  `pythia_approve` tool (MCP, where Codex starts), then `pythia approve
+  <token>` at the developer's terminal. Every failure that is not the
+  developer's own Reject says so and names the next door, and the agent goes
+  on without asking. The preview, deploy and lease requests print one list
+  (`door_lines`). `grant_refusal`, the brief guide, the CLAUDE.md and
+  AGENTS.md blocks, AGENTS.md rule 4 and the skills give the same order.
+- **The chat door counts the answer the dialog writes.** Claude Code
+  2.1.301 drops any `answers` the model wrote before the dialog shows, then
+  writes the person's choice into `tool_input.answers`. pythia read that as
+  pre-filled and refused every real Approve. The hook now reads the model's
+  own call from the session transcript (`wireToolInputs`, by
+  `tool_use_id`, else by the questions). Answers in that call are refused as
+  the agent's; an answer it cannot trace sends the agent to the next door.
+  A dialog that closed itself while nobody was at the keyboard
+  (`afkTimeoutMs`) is no answer, and neither is a typed reply instead of a
+  choice. Each is named.
+- **A client that declines the MCP prompt unseen is named as such.** A host
+  with no elicitation UI answers every prompt "decline" at once. pythia then
+  told the agent the developer had declined, to stop and ask what should
+  change. Now a non-accept back in under 1.5 s is reported as the client's:
+  nothing is minted, and the agent moves to the next door. A slower decline
+  is still the developer's no.
+- **doctor reads only the plugins Claude Code runs.** It scanned every
+  `hooks.json` under `~/.claude/plugins`, including the marketplace clone,
+  which holds the source of every plugin the marketplace lists. With the
+  official marketplace, that meant hookify and claude-security, installed or
+  not. Now a plugin counts when `installed_plugins.json` lists it (else the
+  newest copy in `cache/`) and `enabledPlugins` leaves it on: user, then
+  project, then local settings; no mention means on unless the manifest
+  says `defaultEnabled: false`. Hooks come from `hooks/hooks.json` and
+  `plugin.json`'s `hooks` (paths or inline objects), and
+  `CLAUDE_CODE_PLUGIN_CACHE_DIR` is honoured.
+- **Only dontAsk fails the chat door.** An allow rule, a skill's
+  `allowed-tools` or a hook catching AskUserQuestion once answered it
+  before the developer saw it. Current Claude Code requires the dialog
+  anyway, so these are warnings now. `dontAsk`, which denies both chat
+  doors, stays a fail. The session's `approval door` line orders the doors
+  by what is wired: AskUserQuestion leads where pythia's answer hook is
+  wired, `pythia_approve` leads where it is not, and `dontAsk` leaves the
+  terminal.
+- **An older CLAUDE.md block is superseded at session start.** After `pip
+  install -U` and before `pythia install` runs again, a project's CLAUDE.md
+  still carries the old rules, the old door order among them. Session start
+  now notices that the block differs from this version's, prints the
+  current brief, and says which one wins.
+- **pythia lands on PATH when an agent installs it (Windows).** With
+  nobody at the console to answer, `pythia install` used to leave the
+  scripts directory off PATH, so `pythia` never worked in the developer's
+  own terminal. Now it adds the directory that holds `pythia.exe` to the
+  *user* PATH. A person at the console is still asked, and `--no-path` skips
+  it.
 - **The website explains who it is for, and answers back.** A section per
   agent shows what `pythia install` wires for Claude Code, Codex and any
   other agent, side by side (11, 7 and 4 of the same 11 pieces). A

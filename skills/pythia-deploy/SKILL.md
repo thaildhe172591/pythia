@@ -49,9 +49,10 @@ A RELEASE RUNS IN ORDER, AS PREVIEWED, AND STOPS AT THE FIRST BROKEN STEP
    `! DESTRUCTIVE` and lint lines, the diffs. Policy refusals arrive **before
    anything runs** — relay them; the developer decides.
 4. **Ask once** — the preview prints a deploy token (10 hex). The developer
-   approves it through one door: the `pythia_approve` tool, an
-   `AskUserQuestion` whose text is `pythia approve --card <token>` verbatim,
-   or `pythia approve <token>` in their terminal.
+   approves it through the first door that works — an `AskUserQuestion`
+   whose text is `pythia approve --card <token>` verbatim (Claude Code), the
+   `pythia_approve` tool (where Codex starts), `pythia approve <token>` in
+   their terminal — moving to the next unasked when one fails.
 5. **Run**: `pythia deploy <files> --confirm <token>` — the same file list.
    Each statement goes through snapshot → apply → verify with its own
    journal entry. Read the exit code, unpiped: `0` all landed · `1` refused
