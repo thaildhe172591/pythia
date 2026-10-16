@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 
-__version__ = "0.15.7"     # kept equal to pyproject.toml (tests/test_install.py)
+__version__ = "0.15.8"     # kept equal to pyproject.toml (tests/test_install.py)
 
 READONLY = re.compile(r"^\s*(select|with)\b", re.I)
 CONFIG_DIR = ".pythia"
@@ -7056,10 +7056,27 @@ def session_state_lines(root, home=None):
     mcp = _read_json(pathlib.Path(root) / ".mcp.json") or {}
     # a venv install registers the approver in Claude Code's local scope
     # (~/.claude.json), never in the shared .mcp.json
-    if ("pythia" in (mcp.get("mcpServers") or {})
-            or local_mcp_entry(root, home) is not None):
+    has_mcp = ("pythia" in (mcp.get("mcpServers") or {})
+               or local_mcp_entry(root, home) is not None)
+    # a hook or rule that swallows AskUserQuestion makes it no fallback here;
+    # a scan that trips over a file must not cost the session its guide
+    try:
+        closed = [what for _, what in ask_question_breakers(root, home)
+                  if what != DONTASK_NOTE]
+    except Exception:                     # noqa: BLE001
+        closed = []
+    if has_mcp and closed:
+        lines.append("approval door: the pythia_approve tool (MCP) — prompts in "
+                     f"every permission mode. AskUserQuestion is closed here "
+                     f"({closed[0]}): if pythia_approve fails, relay "
+                     f"`{run} approve <token>` for the developer's terminal")
+    elif has_mcp:
         lines.append("approval door: the pythia_approve tool (MCP) — prompts in "
                      "every permission mode; AskUserQuestion is the fallback")
+    elif closed:
+        lines.append(f"approval door: AskUserQuestion is closed here "
+                     f"({closed[0]}) — relay `{run} approve <token>` for the "
+                     "developer's terminal")
     return lines
 
 
@@ -7141,11 +7158,82 @@ def _frontmatter_value(text, key):
     return None
 
 
-def ask_question_breakers(project_root, home=None, plugin_limit=400):
+def enabled_plugin_hooks(project_root, home=None, env=None):
+    """[(plugin, where, hooks)] for every plugin Claude Code runs here: each
+    one installed_plugins.json lists (else each install under cache/) that
+    enabledPlugins does not switch off — user, then project, then local
+    settings, the last mention winning; no mention means on, unless its
+    plugin.json says defaultEnabled: false. Hooks come from hooks/hooks.json
+    and from plugin.json's `hooks` (paths, inline objects, or a list of
+    both). A marketplace clone holds the source of every plugin it lists,
+    installed or not, so it is never scanned: only an install path is."""
+    home = pathlib.Path(home or pathlib.Path.home())
+    env = os.environ if env is None else env
+    root = pathlib.Path(project_root)
+    state = {}
+    for path in (home / ".claude" / "settings.json",
+                 root / ".claude" / "settings.json",
+                 root / ".claude" / "settings.local.json"):
+        ep = (_read_json(path) or {}).get("enabledPlugins")
+        if isinstance(ep, dict):
+            for key, on in ep.items():
+                state[str(key)] = on is True
+    plugins = pathlib.Path(env.get("CLAUDE_CODE_PLUGIN_CACHE_DIR")
+                           or home / ".claude" / "plugins")
+    installs = {}
+    listed = (_read_json(plugins / "installed_plugins.json") or {}).get("plugins")
+    if isinstance(listed, dict):
+        for key, entries in listed.items():
+            for e in entries if isinstance(entries, list) else [entries]:
+                if isinstance(e, dict) and isinstance(e.get("installPath"), str):
+                    installs.setdefault(str(key), []).append(pathlib.Path(e["installPath"]))
+    elif (plugins / "cache").is_dir():    # no list: the newest copy in the cache
+        try:
+            for mkt in sorted((plugins / "cache").iterdir()):
+                for plug in sorted(mkt.iterdir()) if mkt.is_dir() else []:
+                    versions = [d for d in plug.iterdir() if d.is_dir()] \
+                        if plug.is_dir() else []
+                    if versions:
+                        installs[f"{plug.name}@{mkt.name}"] = [
+                            max(versions, key=lambda d: d.stat().st_mtime)]
+        except OSError:
+            pass
+    out = []
+    for key, roots in installs.items():
+        for pr in roots:
+            manifest = _read_json(pr / ".claude-plugin" / "plugin.json") or {}
+            if not state.get(key, manifest.get("defaultEnabled", True) is not False):
+                continue
+            found = [(pr / "hooks" / "hooks.json", None)]
+            declared = manifest.get("hooks")
+            for d in declared if isinstance(declared, list) else [declared]:
+                if isinstance(d, str):
+                    found.append((pr / d, None))
+                elif isinstance(d, dict):     # inline: the events themselves
+                    found.append((pr / ".claude-plugin" / "plugin.json",
+                                  d.get("hooks") if isinstance(d.get("hooks"), dict) else d))
+            read = set()
+            for f, inline in found:
+                if inline is None:
+                    if f in read or not f.is_file():
+                        continue
+                    read.add(f)
+                    inline = (_read_json(f) or {}).get("hooks")
+                if isinstance(inline, dict):
+                    out.append((key, str(f), inline))
+    return out
+
+
+# the one breaker that closes the MCP door too
+DONTASK_NOTE = "defaultMode is dontAsk — it denies AskUserQuestion and the MCP approver"
+
+
+def ask_question_breakers(project_root, home=None, env=None):
     """Every setting known to make AskUserQuestion return without showing the
     question (anthropics/claude-code#13439, #29547): an allow rule or a
     skill's allowed-tools naming it, a PreToolUse/PermissionRequest hook whose
-    matcher catches it, or dontAsk mode. [(where, what)]."""
+    matcher catches it — in settings or in an enabled plugin — or dontAsk
+    mode. [(where, what)]."""
     home = pathlib.Path(home or pathlib.Path.home())
     found = []
     for path in _settings_files(project_root, home):
@@ -7157,8 +7245,7 @@ def ask_question_breakers(project_root, home=None, plugin_limit=400):
             if "AskUserQuestion" in str(rule):
                 found.append((str(path), f"permissions.allow has {rule!r}"))
         if str(perms.get("defaultMode", "")) == "dontAsk":
-            found.append((str(path), "defaultMode is dontAsk — it denies "
-                                     "AskUserQuestion and the MCP approver"))
+            found.append((str(path), DONTASK_NOTE))
         for event in ("PreToolUse", "PermissionRequest"):
             for entry in (s.get("hooks") or {}).get(event) or []:
                 m = entry.get("matcher") if isinstance(entry, dict) else None
@@ -7181,20 +7268,15 @@ def ask_question_breakers(project_root, home=None, plugin_limit=400):
                 continue
             if tools and "AskUserQuestion" in tools:
                 found.append((str(sk), "allowed-tools pre-allows AskUserQuestion"))
-    plugins = home / ".claude" / "plugins"
-    if plugins.is_dir():
-        seen = 0
-        for hj in plugins.rglob("hooks.json"):
-            seen += 1
-            if seen > plugin_limit:
-                break
-            s = _read_json(hj) or {}
-            for event in ("PreToolUse", "PermissionRequest"):
-                for entry in (s.get("hooks") or {}).get(event) or []:
-                    m = entry.get("matcher") if isinstance(entry, dict) else None
-                    if _matcher_hits(m, "AskUserQuestion"):
-                        found.append((str(hj), f"plugin {event} hook with "
-                                               f"matcher {m!r}"))
+    for plugin, where, hooks in enabled_plugin_hooks(project_root, home, env):
+        for event in ("PreToolUse", "PermissionRequest"):
+            for entry in hooks.get(event) or []:
+                m = entry.get("matcher") if isinstance(entry, dict) else None
+                if _matcher_hits(m, "AskUserQuestion"):
+                    found.append((where, f"plugin {plugin}: {event} hook "
+                                           + ("with no matcher" if m in (None, "")
+                                              else f"with matcher {m!r}")))
+                    break
     return found
 
 
@@ -7335,6 +7417,7 @@ def harness_checks(project_root, home=None):
     out.extend(launch_checks(root, home_dir, s, sl))
     mcp = _read_json(root / ".mcp.json") or {}
     local = local_mcp_entry(root, home_dir)
+    door_rows = len(out)
     if local is not None:
         st, msg = launcher_health(
             mcp_launcher(local) or str(local.get("command")),
@@ -7362,10 +7445,24 @@ def harness_checks(project_root, home=None):
         out.append(("warn", "approval door", "pythia MCP approver not in .mcp.json "
                     "— the AskUserQuestion card and the console remain; "
                     f"{invocation()} install adds it"))
+    # AskUserQuestion is the second door: losing it while the MCP door is
+    # wired and starts costs nothing a developer has to fix. dontAsk closes
+    # both, and with no MCP door it was the only one in the chat.
+    mcp_door = any(a == "approval door" and s != "fail" and "registered" in m
+                   for s, a, m in out[door_rows:])
     for where, what in ask_question_breakers(root, home):
-        out.append(("fail", "AskUserQuestion",
-                    f"{what} — {where}. The question returns empty and approval "
-                    "never arrives; remove it, or approve with pythia_approve"))
+        if mcp_door and what != DONTASK_NOTE:
+            out.append(("warn", "AskUserQuestion",
+                        f"{what} — {where}. AskUserQuestion may return without "
+                        "asking, so that door is closed here; approvals go "
+                        "through pythia_approve (MCP), which still asks. "
+                        "Remove it only to get the second door back"))
+        else:
+            out.append(("fail", "AskUserQuestion",
+                        f"{what} — {where}. The question returns empty and "
+                        "approval never arrives; remove it, or "
+                        + ("approve at the console" if what == DONTASK_NOTE else
+                           f"wire pythia_approve (`{invocation()} install`)")))
     cmd_md = root / "CLAUDE.md"
     has_block = cmd_md.is_file() and AGENTS_BEGIN in cmd_md.read_text(
         encoding="utf-8", errors="replace")

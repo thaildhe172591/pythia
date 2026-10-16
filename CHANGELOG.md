@@ -1,7 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.15.8 — 2026-10-16
 
+From a field report: `pythia install` on fresh machines left one `doctor`
+failure, blamed on the hookify plugin, and the developer chose to keep
+hookify and approve through `pythia_approve`.
+
+- **doctor reads only the plugins Claude Code runs.** It used to scan
+  every `hooks.json` under `~/.claude/plugins`, including the marketplace
+  clone, which holds the source of every plugin the marketplace lists. A
+  machine with the official marketplace failed on hookify and on
+  claude-security even when neither was installed. Now a plugin counts
+  when `installed_plugins.json` lists it (else the newest copy in
+  `cache/`) and `enabledPlugins` leaves it on. Settings are read user, then
+  project, then local, and the last mention wins; no mention means on,
+  unless the plugin's manifest says `defaultEnabled: false`. Its hooks come
+  from `hooks/hooks.json` and from `plugin.json`'s `hooks`, which can be
+  paths or inline objects. `CLAUDE_CODE_PLUGIN_CACHE_DIR` is honoured.
+- **A closed AskUserQuestion is a warning while pythia_approve asks.** A
+  hook or rule that catches `AskUserQuestion` closes the second door only.
+  With the MCP door wired and able to start, doctor now reports it as
+  `warn`. It stays `fail` when there is no MCP door. `dontAsk`, which
+  closes both doors, is always `fail`.
+- **The session state names a closed door.** Where `AskUserQuestion` is
+  caught, the `approval door` line no longer calls it the fallback. It
+  names what catches it and points to `pythia approve <token>` at the
+  developer's terminal.
 - **The website explains who it is for, and answers back.** A section per
   agent shows what `pythia install` wires for Claude Code, Codex and any
   other agent, side by side (11, 7 and 4 of the same 11 pieces). A

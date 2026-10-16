@@ -228,9 +228,13 @@ agent buộc bạn tự làm.
 3. **Chạy `pythia doctor`.** Nó xác nhận mọi thứ đã nối, và chỉ đích danh
    từng cấu hình làm `AskUserQuestion` trả về rỗng mà không hiện câu hỏi —
    allow rule hoặc `allowed-tools` của một skill có `AskUserQuestion`, hook
-   PreToolUse có matcher rỗng hoặc `*`, chế độ `dontAsk`. Chính nhóm cấu hình
-   đó là lý do duyệt trong chat có thể hỏng ở các mode khác
-   `bypassPermissions`; cửa MCP miễn nhiễm với tất cả trừ `dontAsk`.
+   PreToolUse có matcher rỗng hoặc `*` (trong settings, hoặc trong plugin đã
+   cài và đang bật — các plugin khác của marketplace không tính), chế độ
+   `dontAsk`. Chính nhóm cấu hình đó là lý do duyệt trong chat có thể hỏng ở
+   các mode khác `bypassPermissions`; cửa MCP miễn nhiễm với tất cả trừ
+   `dontAsk`. Vì vậy khi `pythia_approve` đã nối, cấu hình như thế chỉ là
+   warning — nó chỉ đóng cửa `AskUserQuestion` — và là fail khi không có cửa
+   MCP, hoặc với `dontAsk`.
 4. *Tuỳ chọn:* copy allow-list và `autoMode` từ
    [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json).
    Đó là quyền hạn của bạn, nên pythia không tự đặt

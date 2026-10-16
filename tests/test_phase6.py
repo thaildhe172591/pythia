@@ -15,6 +15,9 @@ import sys
 import tempfile
 
 os.environ.setdefault("PYTHIA_CI", "1")   # the suites are headless by design
+# a temp home stands for ~ in these tests; a moved plugins dir would leak the
+# developer's real plugins into them
+os.environ.pop("CLAUDE_CODE_PLUGIN_CACHE_DIR", None)
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 sys.path.insert(0, str(HERE))
@@ -1342,6 +1345,147 @@ def test_doctor_finds_what_breaks_askuserquestion():
         assert not any("hook pre-tool" in w for w in found)   # ours is Bash-only
         assert any("allowed-tools" in w for w in found)
         assert any("dontAsk" in w for w in found)
+
+
+# a hook with no matcher, as hookify ships it: it runs on every tool call
+BLANKET = {"PreToolUse": [{"hooks": [
+    {"type": "command", "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pretooluse.py"}]}]}
+
+
+def _plugin(home, key, hooks, enabled=None, listed=True, manifest_hooks=None,
+            plugins=None):
+    """A plugin as Claude Code keeps it: the install under plugins/cache,
+    listed in installed_plugins.json, switched on or off in the user's
+    enabledPlugins (None: not mentioned there)."""
+    name, mkt = key.split("@")
+    plugins = pathlib.Path(plugins or pathlib.Path(home) / ".claude" / "plugins")
+    root = plugins / "cache" / mkt / name / "1.0.0"
+    if manifest_hooks is None:
+        (root / "hooks").mkdir(parents=True)
+        (root / "hooks" / "hooks.json").write_text(json.dumps({"hooks": hooks}),
+                                                    encoding="utf-8")
+    else:                                 # plugin.json names its own hooks file
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": name, "hooks": manifest_hooks}), encoding="utf-8")
+        (root / "conf").mkdir()
+        (root / "conf" / "h.json").write_text(json.dumps({"hooks": hooks}),
+                                              encoding="utf-8")
+    if listed:
+        f = plugins / "installed_plugins.json"
+        data = (json.loads(f.read_text(encoding="utf-8")) if f.is_file()
+                else {"version": 2, "plugins": {}})
+        data["plugins"][key] = [{"scope": "user", "installPath": str(root),
+                                 "version": "1.0.0"}]
+        f.write_text(json.dumps(data), encoding="utf-8")
+    if enabled is not None:
+        s = pathlib.Path(home) / ".claude" / "settings.json"
+        cur = json.loads(s.read_text(encoding="utf-8")) if s.is_file() else {}
+        cur.setdefault("enabledPlugins", {})[key] = enabled
+        s.write_text(json.dumps(cur), encoding="utf-8")
+    return root
+
+
+def test_doctor_counts_only_plugins_that_are_on():
+    """Field report: on every fresh machine with the official marketplace,
+    doctor failed on hookify — the marketplace clone holds the source of
+    every plugin it lists, and doctor read all of them. Only a plugin that
+    is installed and enabled runs its hooks."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        clone = (pathlib.Path(home) / ".claude" / "plugins" / "marketplaces"
+                 / "official" / "plugins" / "hookify" / "hooks")
+        clone.mkdir(parents=True)
+        (clone / "hooks.json").write_text(json.dumps({"hooks": BLANKET}),
+                                          encoding="utf-8")
+        assert pythia.ask_question_breakers(td, home) == []      # in the clone only
+        _plugin(home, "hookify@official", BLANKET, enabled=False)
+        assert pythia.ask_question_breakers(td, home) == []      # installed, off
+        # the project switches it on, and the local file outranks the user's
+        cl = pathlib.Path(td) / ".claude"
+        cl.mkdir()
+        (cl / "settings.local.json").write_text(json.dumps(
+            {"enabledPlugins": {"hookify@official": True}}), encoding="utf-8")
+        found = pythia.ask_question_breakers(td, home)
+        assert len(found) == 1 and "hookify@official" in found[0][1], found
+        # a plugin whose matcher names its tools stays out of it
+        _plugin(home, "fmt@official", {"PreToolUse": [{"matcher": "Edit|Write",
+                "hooks": [{"type": "command", "command": "fmt"}]}]}, enabled=True)
+        # one that names its hooks file in plugin.json is read there
+        _plugin(home, "audit@official", BLANKET, enabled=True,
+                manifest_hooks="./conf/h.json")
+        found = [w for _, w in pythia.ask_question_breakers(td, home)]
+        assert len(found) == 2, found
+        assert any("audit@official" in w for w in found)
+        assert not any("fmt@official" in w for w in found)
+        # installed with no enabledPlugins entry: on, unless the manifest says
+        # defaultEnabled false
+        _plugin(home, "trace@official", BLANKET)
+        quiet_root = _plugin(home, "mute@official", BLANKET)
+        (quiet_root / ".claude-plugin").mkdir()
+        (quiet_root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "mute", "defaultEnabled": False}), encoding="utf-8")
+        # hooks written inline in plugin.json, without the "hooks" wrapper
+        inline = _plugin(home, "inline@official", {}, enabled=True)
+        (inline / ".claude-plugin").mkdir()
+        (inline / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "inline", "hooks": BLANKET}), encoding="utf-8")
+        found = [w for _, w in pythia.ask_question_breakers(td, home)]
+        assert any("trace@official" in w for w in found), found
+        assert not any("mute@official" in w for w in found), found
+        assert any("inline@official" in w for w in found), found
+        assert len(found) == 4, found
+        # CLAUDE_CODE_PLUGIN_CACHE_DIR moves the whole plugins directory
+        with tempfile.TemporaryDirectory() as home2, \
+                tempfile.TemporaryDirectory() as moved:
+            _plugin(home2, "hookify@official", BLANKET, plugins=moved)
+            assert pythia.ask_question_breakers(td, home2, env={}) == []
+            found = pythia.ask_question_breakers(
+                td, home2, env={"CLAUDE_CODE_PLUGIN_CACHE_DIR": moved})
+            assert len(found) == 1 and "hookify@official" in found[0][1], found
+        # garbage in installed_plugins.json is not a crash
+        (pathlib.Path(home) / ".claude" / "plugins" / "installed_plugins.json"
+         ).write_text("{not json", encoding="utf-8")
+        pythia.ask_question_breakers(td, home)
+
+
+def test_doctor_a_closed_askuserquestion_warns_while_pythia_approve_asks():
+    """Field report: the developer kept hookify and approved through
+    pythia_approve, and doctor still failed on every machine. A hook that
+    catches AskUserQuestion closes the second door only; while the MCP door
+    is wired and starts, that is a warning. Without the MCP door it is a
+    fail, and dontAsk, which closes both doors, is a fail either way."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        _plugin(home, "hookify@official", BLANKET, enabled=True)
+        rows = lambda: [(s, m) for s, a, m in pythia.harness_checks(td, home)
+                        if a == "AskUserQuestion"]
+        assert [s for s, _ in rows()] == ["fail"], rows()      # no MCP door yet
+        pythia.install_claude_mcp(td, launcher=_good_launcher())
+        (st, msg), = rows()
+        assert st == "warn" and "pythia_approve" in msg, msg
+        assert "hookify@official" in msg
+        s = pathlib.Path(home) / ".claude" / "settings.json"
+        cur = json.loads(s.read_text(encoding="utf-8"))
+        cur["permissions"] = {"defaultMode": "dontAsk"}
+        s.write_text(json.dumps(cur), encoding="utf-8")
+        got = rows()
+        assert ("fail" in [st for st, m in got if "dontAsk" in m]), got
+        assert ("warn" in [st for st, m in got if "hookify" in m]), got
+
+
+def test_session_state_says_when_askuserquestion_is_closed_here():
+    """The agent reads the approval door from the session state: where a
+    hook catches AskUserQuestion, falling back to it would lose the
+    approval, so the line says the fallback is the developer's terminal."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        pythia.install_claude_mcp(td, launcher=_good_launcher())
+        door = lambda: [ln for ln in pythia.session_state_lines(td, home=home)
+                        if ln.startswith("approval door")]
+        assert "AskUserQuestion is the fallback" in door()[0]
+        _plugin(home, "hookify@official", BLANKET, enabled=True)
+        line = door()[0]
+        assert "pythia_approve" in line and "hookify@official" in line, line
+        assert "AskUserQuestion is the fallback" not in line
+        assert "approve <token>" in line
 
 
 def test_doctor_reports_the_wiring_after_install():

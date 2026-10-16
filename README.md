@@ -210,9 +210,12 @@ each agent needs you to finish by hand.
 3. **Run `pythia doctor`.** It confirms the wiring and names every setting
    known to make `AskUserQuestion` return without showing the question — an
    allow rule or a skill's `allowed-tools` naming it, a PreToolUse hook with an
-   empty or `*` matcher, `dontAsk` mode. That class of setting is why chat
-   approval could fail outside `bypassPermissions`; the MCP door is immune
-   to all but `dontAsk`.
+   empty or `*` matcher (in settings, or in a plugin that is installed and
+   enabled — the rest of a marketplace's plugins do not count), `dontAsk`
+   mode. That class of setting is why chat approval could fail outside
+   `bypassPermissions`; the MCP door is immune to all but `dontAsk`. So while
+   `pythia_approve` is wired, such a setting is a warning — it closes only
+   the `AskUserQuestion` door — and a fail without it, or for `dontAsk`.
 4. *Optional:* copy the allow-list and `autoMode` from
    [`examples/claude-code-settings.example.json`](examples/claude-code-settings.example.json).
    Those are your permission preferences, so pythia does not set them for you

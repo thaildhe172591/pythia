@@ -672,10 +672,14 @@ skill cài một chỗ (không trùng), policy, conventions, lease, và git có 
 `.pythia/connections.json` ngoài mọi bản clone không. Nó còn chỉ đích
 danh mọi cấu hình đã biết làm `AskUserQuestion` trả về mà không hiện câu hỏi
 — allow rule hoặc `allowed-tools` của skill có `AskUserQuestion`, hook
-PreToolUse/PermissionRequest có matcher bắt trúng nó (trong file settings
-hoặc plugin đã cài), chế độ `dontAsk`. `pythia doctor --db` kiểm thêm
-database: phiên bản, bộ ký tự, độ phủ PL/Scope và warnings, object INVALID,
-utPLSQL.
+PreToolUse/PermissionRequest có matcher bắt trúng nó (trong file settings,
+hoặc trong plugin đã cài và đang bật — bản clone marketplace chứa mọi plugin
+nó liệt kê, và những plugin đó không chạy), chế độ `dontAsk`. Khi cửa
+`pythia_approve` đã nối và chạy được, cấu hình như thế chỉ là warning: nó chỉ
+đóng cửa `AskUserQuestion`, và trạng thái đầu phiên bảo agent dùng terminal
+của dev thay vào. Không có cửa MCP thì là fail, còn `dontAsk` — đóng cả hai
+cửa — luôn là fail. `pythia doctor --db` kiểm thêm database: phiên bản, bộ
+ký tự, độ phủ PL/Scope và warnings, object INVALID, utPLSQL.
 
 ### `pythia explain` và `pythia stats` — tối ưu, không cần license thêm
 

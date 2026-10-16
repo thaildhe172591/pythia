@@ -706,9 +706,14 @@ lease, and whether git keeps `.pythia/connections.json` out of every clone.
 It also names every setting known to make `AskUserQuestion` return
 without showing the question — an allow rule or a skill's `allowed-tools`
 naming it, a PreToolUse or PermissionRequest hook whose matcher catches it
-(in settings files or installed plugins), `dontAsk` mode. `pythia doctor
---db` adds the database: version, character set, PL/Scope and warnings
-coverage, INVALID objects, utPLSQL.
+(in settings files, or in a plugin that is installed and enabled — a
+marketplace clone holds every plugin it lists, and those do not run),
+`dontAsk` mode. While the `pythia_approve` door is wired and starts, such a
+setting is a warning: it closes only the `AskUserQuestion` door, and the
+session state tells the agent to fall back to the developer's terminal
+instead. Without the MCP door it is a fail, and `dontAsk`, which closes
+both, always is. `pythia doctor --db` adds the database: version, character
+set, PL/Scope and warnings coverage, INVALID objects, utPLSQL.
 
 ### `pythia explain` and `pythia stats` — tuning, license-safe
 
