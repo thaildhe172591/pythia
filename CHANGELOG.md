@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.15.10 — 2026-10-16
+
+Packaging only: what gets installed is the same as 0.15.9.
 
 - **Packaging: SPDX license.** `pyproject.toml` now declares `license = "MIT"`
   with `license-files = ["LICENSE"]`, replacing the `{ text = "MIT" }` table.
   setuptools had deprecated the table and stops building it after 2027-02-18.
   The build now needs setuptools 77 or newer, which still runs on Python 3.9.
-  Wheel metadata reads `License-Expression: MIT`; nothing installed changes.
+  Wheel metadata reads `License-Expression: MIT`.
 
 ## 0.15.9 — 2026-10-16
 
