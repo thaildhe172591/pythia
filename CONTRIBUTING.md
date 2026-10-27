@@ -141,6 +141,10 @@ lint-rule counts — the same test holds it to the code. To release:
 2. `git tag vX.Y.Z && git push origin vX.Y.Z` — the `release` workflow
    checks the tag against the manifests, runs the suites, then publishes
    `pythia-plsql` to PyPI and npm.
+3. Nothing to do: once that succeeds, the `github-release` workflow creates
+   the GitHub Release, with the version's `CHANGELOG.md` section as its notes.
+   A tag with no release yet (one from before this workflow, or a run that
+   failed): Actions → github-release → Run workflow, with the tag.
 
 One-time setup by a maintainer:
 

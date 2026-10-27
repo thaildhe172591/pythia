@@ -8,6 +8,10 @@
   upstream adds agents, and a test refuses an exact count next to "agent".
 - **README: "Who is using pythia".** An empty list in both languages, asking
   users to add a line by pull request.
+- **GitHub Releases.** A new `github-release` workflow creates the Release
+  for a tag once `release` has published it to PyPI and npm, with that
+  version's CHANGELOG section as the notes. A failed publish gets no
+  Release. An existing tag can be released by hand from the Actions tab.
 
 ## 0.15.10 — 2026-10-16
 

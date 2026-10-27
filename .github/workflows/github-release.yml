@@ -1,0 +1,70 @@
+name: github-release
+
+# After `release` has published a tag vX.Y.Z to PyPI and npm, create the
+# GitHub Release for it, with that version's CHANGELOG section as the notes,
+# so everyone watching the repo's releases hears about it. A tag that
+# predates this workflow: Actions -> github-release -> Run workflow, with the
+# tag. A tag that already has a release is left as it is.
+
+on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v0.15.10"
+        required: true
+
+permissions:
+  contents: write   # create the release; nothing else
+
+jobs:
+  github-release:
+    # a failed publish gets no release: the page would announce a version
+    # nobody can install
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      # for a tag push, workflow_run reports the tag as head_branch
+      TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: tag is vX.Y.Z
+        run: '[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+      - name: notes from CHANGELOG.md
+        run: |
+          python3 - "${TAG#v}" notes.md <<'EOF'
+          import re, sys
+          v, out = sys.argv[1], sys.argv[2]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## " + re.escape(v) + r"\b[^\n]*\n(.*?)(?=^## |\Z)",
+                        text, re.S | re.M)
+          if not m:
+              sys.exit(f"CHANGELOG.md has no '## {v}' section")
+          # CHANGELOG is wrapped at 80 columns; a release page turns every
+          # newline into a line break, so join each wrapped line back on
+          lines, fence = [], False
+          for line in m.group(1).strip().splitlines():
+              s = line.strip()
+              if s.startswith("```"):
+                  fence = not fence
+              new_block = (fence or not s or not lines or not lines[-1].strip()
+                           or re.match(r"([-*+]|\d+\.)\s|[#>|]|```", s))
+              if new_block:
+                  lines.append(line)
+              else:
+                  lines[-1] += " " + s
+          open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          EOF
+      - name: create the release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already has a release — leaving it as it is"
+          else
+            gh release create "$TAG" --verify-tag --title "pythia ${TAG#v}" \
+              --notes-file notes.md
+          fi
