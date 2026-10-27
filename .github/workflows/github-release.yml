@@ -64,7 +64,12 @@ jobs:
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG already has a release — leaving it as it is"
-          else
-            gh release create "$TAG" --verify-tag --title "pythia ${TAG#v}" \
-              --notes-file notes.md
+            exit 0
           fi
+          # GitHub makes every new release Latest; only the highest version
+          # may be, or a backfilled or backported tag takes the badge
+          TOP=$(git ls-remote --tags --refs origin 'v*' | sed 's#.*refs/tags/##' \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ "$TAG" = "$TOP" ]; then LATEST=true; else LATEST=false; fi
+          gh release create "$TAG" --verify-tag --latest="$LATEST" \
+            --title "pythia ${TAG#v}" --notes-file notes.md
