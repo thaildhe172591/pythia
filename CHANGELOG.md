@@ -12,6 +12,8 @@
   for a tag once `release` has published it to PyPI and npm, with that
   version's CHANGELOG section as the notes. A failed publish gets no
   Release. An existing tag can be released by hand from the Actions tab.
+  Only the highest version is marked Latest, so a backfilled or backported
+  tag never takes the badge.
 
 ## 0.15.10 — 2026-10-16
 
