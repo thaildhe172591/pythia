@@ -13,7 +13,7 @@
 ![python](https://img.shields.io/badge/python-3.9%2B-blue)
 
 An Agent Skills + CLI kit for developing PL/SQL on Oracle Database with AI
-coding agents (Claude Code, Codex, Cursor — any of the 76 agents `npx skills`
+coding agents (Claude Code, Codex, Cursor — any of the 70+ agents `npx skills`
 supports).
 
 pythia is a **harness**: a book of working rules an agent studies and follows
@@ -133,7 +133,7 @@ pythia check               # fill in connections.json first, then verify
 ```
 
 The pip package is the whole kit: with Node.js present, `pythia install`
-runs `npx skills add` (77 agents, symlinked updates; `--source <git-url>`
+runs `npx skills add` (70+ agents, symlinked updates; `--source <git-url>`
 for internal mirrors) — without Node it copies the bundled pack itself.
 Prefer **global skills**: `pythia install -g` once per machine serves every
 project, and per-project installs then skip the skills step automatically —
@@ -364,7 +364,12 @@ The skills teach the agent the workflow — gates, not suggestions:
 | OS | Windows, macOS, Linux, WSL — full test matrix in CI |
 | Python | 3.9+ · stdlib + `python-oracledb` (thin mode) only |
 | Oracle | core works broadly; PL/Scope statement capture needs 12.2+; license-safe views only |
-| Agents | any `npx skills` agent (76) · native Claude Code plugin (hooks + MCP approver, any permission mode but `dontAsk`) · Codex (AGENTS.md harness + MCP approver, ≥ v0.120 for chat-style approval) |
+| Agents | any `npx skills` agent (70+) · native Claude Code plugin (hooks + MCP approver, any permission mode but `dontAsk`) · Codex (AGENTS.md harness + MCP approver, ≥ v0.120 for chat-style approval) |
+
+## Who is using pythia
+
+Nobody is listed yet. Using pythia on a real codebase? Open a pull request
+that adds a line here: your team or project, and what you use pythia for.
 
 ## Star History
 

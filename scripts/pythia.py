@@ -4930,7 +4930,7 @@ def cmd_install(conn, schema, ns):
             for tgt in copy_bundled_skills(ns.project_root):
                 print(f"Copied the bundled skill pack into {tgt}")
             print("(npx not found — with Node.js, `npx skills add` reaches "
-                  "77 agents with symlinked updates.)")
+                  "70+ agents with symlinked updates.)")
         elif code:
             sys.exit(code)
         else:

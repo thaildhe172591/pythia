@@ -84,7 +84,7 @@ step** — a second copy doubles every entry in the agent's menu. Want skills
 committed with a repo instead? Remove the global pack, then run
 `pythia install` in the project.
 
-- With Node.js the skills step runs `npx skills add` (77 agents; at a TTY you
+- With Node.js the skills step runs `npx skills add` (70+ agents; at a TTY you
   get the interactive agent picker). `--source <git-url>` installs the pack
   from an internal mirror.
 - Without Node the bundled pack is copied directly — the pip package is the
@@ -617,7 +617,7 @@ guidance — into `.claude/settings.json` (merge if you already have one), then
 restart the session and check `/permissions`.
 
 **pythia does not install this, on purpose.** It is another product's
-security configuration, it applies to one agent out of the 77 the skill
+security configuration, it applies to one agent out of the 70+ the skill
 pack supports, and — most of the reason — the two halves are not equally
 strong:
 
