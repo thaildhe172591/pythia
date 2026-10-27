@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Docs: agent counts are a floor.** README, GUIDE (both languages) and the
+  no-Node install note said 76 agents in one place and 77 in another, while
+  `npx skills` 1.7.4 lists 79. Every count now reads 70+, which stays true as
+  upstream adds agents, and a test refuses an exact count next to "agent".
+- **README: "Who is using pythia".** An empty list in both languages, asking
+  users to add a line by pull request.
+
 ## 0.15.10 — 2026-10-16
 
 Packaging only: what gets installed is the same as 0.15.9.

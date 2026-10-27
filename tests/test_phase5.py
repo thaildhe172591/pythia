@@ -177,6 +177,21 @@ def test_no_manifest_hardcodes_a_stale_skill_count():
         f"missing {sorted(EXPECTED - declared)}, extra {sorted(declared - EXPECTED)}")
 
 
+def test_no_doc_pins_an_exact_agent_count():
+    """`npx skills` adds agents every release: the docs said 76 in one line
+    and 77 in the next while upstream had moved on to 79. An exact count is
+    wrong by the next upstream release, so agent counts are a floor (70+)."""
+    exact = re.compile(r"(?<![\d.\w])(\d{2,3})(?![\d.+%\w])")
+    for rel in ("README.md", "README.vi.md", "GUIDE.md", "GUIDE.vi.md",
+                "npm/README.md", "scripts/pythia.py"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        for no, line in enumerate(text.splitlines(), 1):
+            if "agent" in line.lower():
+                m = exact.search(line)
+                assert not m, (f"{rel}:{no} pins an exact agent count "
+                               f"{m.group(1)!r}; write it as a floor (70+)")
+
+
 def test_apply_skill_teaches_the_approval_gate():
     """The CLI enforces the grant; the skill must explain it, or the agent
     reads the refusal as a malfunction and starts working around it."""

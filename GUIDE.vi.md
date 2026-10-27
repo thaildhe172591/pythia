@@ -81,7 +81,7 @@ skills** — vì bản thứ hai làm mỗi skill hiện đôi trong menu của 
 skills theo repo (commit cho team): xoá pack global rồi chạy `pythia install`
 trong project.
 
-- Có Node.js: bước skills chạy qua `npx skills add` (77 agent; ở terminal
+- Có Node.js: bước skills chạy qua `npx skills add` (70+ agent; ở terminal
   tương tác bạn được chọn agent). `--source <git-url>` để cài từ mirror nội bộ.
 - Không có Node: tự copy bộ skills đóng gói sẵn — gói pip là trọn bộ kit.
 
@@ -587,7 +587,7 @@ xử lý cả hai. Phần còn lại — allow list và autoMode — copy vào
 `/permissions` để kiểm tra.
 
 **pythia cố ý KHÔNG tự cài file này.** Đó là cấu hình bảo mật của sản phẩm
-khác, nó chỉ áp cho một agent trong số 77 agent mà skill pack hỗ trợ, và —
+khác, nó chỉ áp cho một agent trong số 70+ agent mà skill pack hỗ trợ, và —
 lý do lớn nhất — hai nửa của file không mạnh ngang nhau:
 
 | Nửa | Cơ chế | Độ chắc |

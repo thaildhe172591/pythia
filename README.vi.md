@@ -140,7 +140,7 @@ pythia check                    # 4. điền connections.json rồi kiểm tra
 skills — vì cài thêm bản thứ hai sẽ làm mỗi skill hiện hai lần trong menu
 của agent.
 
-Máy có Node.js thì bước skills chạy qua `npx skills add` (77 agent, cập nhật
+Máy có Node.js thì bước skills chạy qua `npx skills add` (70+ agent, cập nhật
 bằng symlink; thêm `--source <git-url>` nếu cài từ git nội bộ). Máy không có
 Node vẫn cài được — gói pip đã đóng gói sẵn skills bên trong.
 
@@ -391,7 +391,13 @@ gợi ý** — agent phải đi qua chúng:
 | Hệ điều hành | Windows, macOS, Linux, WSL — CI test đủ cả ba họ |
 | Python | 3.9+ · chỉ cần stdlib và `python-oracledb` (thin mode) |
 | Oracle | phần lõi chạy được với hầu hết phiên bản; PL/Scope statement cần 12.2+; chỉ dùng view không vướng license |
-| Agent | mọi agent mà `npx skills` hỗ trợ (76) · plugin Claude Code · Codex (harness AGENTS.md + MCP approver, ≥ v0.120 cho duyệt kiểu chat) |
+| Agent | mọi agent mà `npx skills` hỗ trợ (70+) · plugin Claude Code · Codex (harness AGENTS.md + MCP approver, ≥ v0.120 cho duyệt kiểu chat) |
+
+## Ai đang dùng pythia
+
+Chưa có ai trong danh sách. Bạn đang dùng pythia cho một codebase thật? Mở
+pull request thêm một dòng vào mục này: tên team hoặc dự án, và bạn dùng
+pythia vào việc gì.
 
 ## Đóng góp
 
