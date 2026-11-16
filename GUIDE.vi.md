@@ -142,6 +142,53 @@ Thứ tự chọn kết nối (không bao giờ đoán):
 **Không có fallback global** — CLI cài chung không bao giờ lẫn DB giữa các
 project; đứng ngoài mọi project thì lỗi rõ ràng.
 
+### Thin mode và thick mode — mọi phiên bản Oracle
+
+pythia kết nối bằng python-oracledb ở **thin mode** trước: thuần Python,
+không cần cài Oracle Client. Thin mode từ chối ba trường hợp, và với mỗi
+trường hợp pythia thử lại một lần ở **thick mode**, qua Oracle Client trên
+máy, rồi in `-- driver=thick (thin refused: DPY-…)`:
+
+| Thin mode từ chối | Lỗi | Cách sửa tận gốc |
+|---|---|---|
+| tài khoản có mật khẩu còn verifier 10G cũ | `DPY-3015` | DBA đặt lại mật khẩu: `ALTER USER APP_AGENT IDENTIFIED BY "..."` (nâng `SQLNET.ALLOWED_LOGON_VERSION_SERVER` trước nếu đang thấp) |
+| database cũ hơn 12.1 | `DPY-3010` | — |
+| server bắt buộc Native Network Encryption | `DPY-3001` | chuyển server sang TLS |
+
+Ngoài ba lỗi đó thì không thử lại: sai mật khẩu chỉ thất bại một lần, không
+phải hai, nên không bị tính gấp đôi vào `FAILED_LOGIN_ATTEMPTS`.
+
+Thick mode cần một Oracle Client — Instant Client là đủ — kết nối được tới
+server:
+
+| Database | Thin mode | Thick mode, với Oracle Client |
+|---|---|---|
+| 23ai, 21c, 19c | có | 19c, 21c hoặc 23ai |
+| 18c, 12.2, 12.1 | có | 19c hoặc 21c |
+| 11.2 | không (`DPY-3010`) | 19c (hoặc 11.2 đến 18c) |
+| 10.2 | không (`DPY-3010`) | 12.1 hoặc 11.2 |
+
+Đặt cho từng kết nối, hoặc cho mọi kết nối qua biến môi trường (entry thắng):
+
+```json
+"dev": { "host": "db-dev", "port": 1521, "service_name": "orclpdb",
+         "user": "app_agent[app_owner]", "password": "...",
+         "thick": true, "lib_dir": "C:/oracle/instantclient_19_29" }
+```
+
+- `"thick"`: `true` luôn thick · `false` luôn thin, không bao giờ nạp client
+  · không đặt (hoặc `PYTHIA_THICK=auto`): thin trước, thick khi gặp các lỗi
+  trên. `PYTHIA_THICK=1` / `0` áp cho mọi kết nối không có khóa này.
+- `"lib_dir"` / `PYTHIA_ORACLE_CLIENT`: thư mục Oracle Client. Cần trên
+  Windows và macOS trừ khi client đã nằm trong `PATH`; trên Linux để trống
+  và đưa client vào library path (`ldconfig` hoặc `LD_LIBRARY_PATH`). Oracle
+  Client đầy đủ của một bản cài database cũng dùng được — trên Windows là
+  thư mục `bin` của nó.
+
+Khi cần thick mode mà không nạp được client, thông báo lỗi giữ cả hai nguyên
+nhân (`DPY-3015 …` và `DPI-1047 …`) và nêu cả hai cách sửa. `pythia doctor
+--db` cho biết phiên đang chạy mode nào, và phiên bản client.
+
 ## 3. User agent least-privilege
 
 ### Bố cục 3 vai trò — chốt một lần, dùng mọi nơi

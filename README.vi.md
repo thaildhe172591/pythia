@@ -401,8 +401,8 @@ gợi ý** — agent phải đi qua chúng:
 | | |
 |---|---|
 | Hệ điều hành | Windows, macOS, Linux, WSL — CI test đủ cả ba họ |
-| Python | 3.9+ · chỉ cần stdlib và `python-oracledb` (thin mode) |
-| Oracle | phần lõi chạy được với hầu hết phiên bản; PL/Scope statement cần 12.2+; chỉ dùng view không vướng license |
+| Python | 3.9+ · chỉ cần stdlib và `python-oracledb` — mặc định thin mode, thick mode khi database cần |
+| Oracle | 12.1 đến 23ai ở thin mode, không cần Oracle Client; 10.2 và 11.2, tài khoản còn password verifier 10G cũ, và server bắt buộc Native Network Encryption thì qua thick mode, pythia tự chuyển sang khi máy có Oracle Client (GUIDE §2) · PL/Scope statement cần 12.2+; chỉ dùng view không vướng license |
 | Agent | mọi agent mà `npx skills` hỗ trợ (70+) · plugin Claude Code · Codex (harness AGENTS.md + MCP approver, ≥ v0.120 cho duyệt kiểu chat) |
 
 ## Ai đang dùng pythia

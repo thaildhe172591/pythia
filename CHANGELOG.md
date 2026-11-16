@@ -2,6 +2,22 @@
 
 ## 0.15.11 — 2026-11-16
 
+- **Thick mode: pythia reaches every Oracle version** (#47). An account
+  with an old 10G password verifier failed with `DPY-3015`, a database
+  before 12.1 with `DPY-3010`, a server requiring Native Network Encryption
+  with `DPY-3001`, and pythia had no way out of thin mode. It now connects
+  thin first and, on exactly those refusals, retries once in thick mode
+  through an Oracle Client, saying so (`-- driver=thick (thin refused:
+  DPY-3015)`); any other failure is not retried. A connection pins the mode
+  with `"thick": true|false` and names its client with `"lib_dir"`
+  (`PYTHIA_THICK`, `PYTHIA_ORACLE_CLIENT` for every connection). With no
+  client to load, the error keeps both causes and names both fixes: an
+  Oracle Client, or a DBA re-setting the password. `doctor --db` reports the
+  driver mode. One connection per invocation replaces the two-slot pool,
+  which fixed thin mode before a refusal could arrive. GUIDE §2 (both
+  languages) has the version matrix; README and the `pythia-setup` skill
+  say so.
+
 - **Release: npm publish is opt-in.** The `release` workflow's npm job runs
   only when the repository variable `NPM_PUBLISH` is `true`; this version
   goes to PyPI first, and to npm once the variable is set and the workflow

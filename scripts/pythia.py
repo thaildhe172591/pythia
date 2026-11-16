@@ -1533,6 +1533,32 @@ def connect_failure_message(exc, conn_name, user=None):
     account = authenticating_account(user)
     who = account or "<the connecting user>"
     head = f"Could not connect using connection {conn_name!r}: {text}"
+    code = thin_only_error(text)
+    if isinstance(exc, ThickModeUnavailable) or code:
+        why = (f"Thin mode was refused because {THIN_ONLY_ERRORS[code]}; "
+               "thick mode gets past it.\n") if code else ""
+        if isinstance(exc, ThickModeUnavailable):
+            how = ("pythia tried thick mode, but no Oracle Client library "
+                   "could be loaded.\n")
+        else:
+            how = ('This connection is pinned to thin mode: set "thick": true '
+                   "on it (or remove\n\"thick\": false) to use thick mode.\n")
+        fix = (f"{head}\n{why}{how}"
+               "Thick mode needs an Oracle Client (Instant Client is enough) on "
+               "this machine:\n"
+               '  - set "lib_dir" on the connection (or PYTHIA_ORACLE_CLIENT) '
+               "to its directory,\n"
+               "    e.g. C:/oracle/instantclient_19_29 on Windows; on Linux "
+               "leave it unset\n    and put the client on the library path "
+               "(ldconfig / LD_LIBRARY_PATH);\n"
+               "  - pick a client that reaches the server: 19c reaches 11.2 "
+               "and later, 12.1\n    reaches 10.2, 23ai only 19c and later.")
+        if code == "DPY-3015":
+            fix += ("\nThe lasting fix is on the database: a DBA re-sets the "
+                    "password so Oracle stores\na 11G/12C verifier (raise "
+                    "SQLNET.ALLOWED_LOGON_VERSION_SERVER first if it is low):\n"
+                    f"  ALTER USER {who} IDENTIFIED BY \"<password>\";")
+        return fix
     if "ORA-28000" in text:
         return (f"{head}\n"
                 f"The account {who} is locked. A DBA or superuser unlocks it:\n"
@@ -1559,19 +1585,88 @@ def connect_failure_message(exc, conn_name, user=None):
             "is reachable from here. Use --conn NAME to try a different entry.")
 
 
-def open_pool(c):
-    import oracledb
+# Refusals that only thin mode makes: thick mode, through an Oracle Client,
+# gets past each of them. Anything else (a wrong password, a refused
+# listener) fails the same way in both modes and is not retried.
+THIN_ONLY_ERRORS = {
+    "DPY-3015": "the account's password has an old (10G) verifier",
+    "DPY-3010": "the database is older than 12.1",
+    "DPY-3001": "the server requires Native Network Encryption",
+}
+
+_TRUE, _FALSE = ("1", "true", "yes", "on"), ("0", "false", "no", "off")
+
+
+class ThickModeUnavailable(Exception):
+    """Thick mode was needed (asked for, or thin mode was refused) but no
+    Oracle Client library could be loaded. Carries both causes."""
+
+    def __init__(self, thin_error, load_error):
+        self.thin_error, self.load_error = thin_error, load_error
+        parts = [str(thin_error)] if thin_error is not None else []
+        parts.append(f"thick mode unavailable: {load_error}")
+        super().__init__("\n".join(parts))
+
+
+def driver_settings(c, env):
+    """Which python-oracledb mode a connection uses, and where its Oracle
+    Client lives. The entry's "thick" (true/false) wins over PYTHIA_THICK;
+    absent both, "auto": thin first, thick when thin is refused for a reason
+    only thick gets past. "lib_dir" wins over PYTHIA_ORACLE_CLIENT."""
+    v = c.get("thick")
+    if v is not None and not isinstance(v, bool):
+        sys.exit(f'"thick" must be true or false in {CONFIG_NAME}, got '
+                 f"{json.dumps(v)}. Leave it out to let pythia choose.")
+    if v is None:
+        raw = (env.get("PYTHIA_THICK") or "").strip().lower()
+        if raw in _TRUE:
+            v = True
+        elif raw in _FALSE:
+            v = False
+        elif raw not in ("", "auto"):
+            sys.exit(f"PYTHIA_THICK must be 1, 0 or auto, got {raw!r}.")
+    mode = "auto" if v is None else ("thick" if v else "thin")
+    return mode, (c.get("lib_dir") or env.get("PYTHIA_ORACLE_CLIENT") or None)
+
+
+def thin_only_error(exc):
+    text = str(exc)
+    return next((code for code in THIN_ONLY_ERRORS if code in text), None)
+
+
+def open_connection(c, env, ora):
+    """One connection for this invocation, and the driver mode that made it
+    ("thin", "thick", or "thick (thin refused: DPY-…)"). A failed thin
+    connect leaves python-oracledb's mode unset, which is what lets auto mode
+    load the Oracle Client and try once more; a pool would fix thin mode on
+    creation, before the refusal arrives."""
     if not c.get("user") or not c.get("password"):
         sys.exit(f"Connection is missing 'user'/'password' — fill in {CONFIG_NAME}.")
     if not (c.get("dsn") or c.get("host")):
         sys.exit(f"Connection needs 'dsn' or 'host' — fill in {CONFIG_NAME}.")
-    dsn = c.get("dsn") or oracledb.makedsn(
+    mode, lib_dir = driver_settings(c, env)
+    dsn = c.get("dsn") or ora.makedsn(
         c["host"], int(c.get("port", 1521)),
         service_name=c.get("service_name") or None, sid=c.get("sid") or None)
-    # ponytail: a pool only helps within one invocation; cross-invocation reuse
-    # needs the MCP backend (persistent session) or a future resident mode.
-    return oracledb.create_pool(user=c["user"], password=c["password"], dsn=dsn,
-                                min=1, max=2)
+    params = {"user": c["user"], "password": c["password"], "dsn": dsn}
+
+    def thick(thin_error=None):
+        try:
+            ora.init_oracle_client(lib_dir=lib_dir)
+        except ora.Error as e:
+            raise ThickModeUnavailable(thin_error, e) from None
+
+    if mode == "thick":
+        thick()
+        return ora.connect(**params), "thick"
+    try:
+        return ora.connect(**params), "thin"
+    except ora.Error as e:
+        code = thin_only_error(e)
+        if mode == "thin" or code is None:
+            raise
+        thick(e)
+        return ora.connect(**params), f"thick (thin refused: {code})"
 
 
 def session_should_be_readonly(command, action=""):
@@ -1587,13 +1682,11 @@ def session_should_be_readonly(command, action=""):
     return True
 
 
-def acquire(pool, readonly=True):
-    conn = pool.acquire()
-    if readonly:
-        with conn.cursor() as cur:                    # defence 2: Oracle itself rejects
-            cur.execute("set transaction read only")  # DML/DDL in this transaction.
-    return conn                                       # NOT inherited by autonomous
-    #                                                   transactions inside called PL/SQL.
+def make_readonly(conn):
+    with conn.cursor() as cur:                    # defence 2: Oracle itself rejects
+        cur.execute("set transaction read only")  # DML/DDL in this transaction.
+    return conn                                   # NOT inherited by autonomous
+    #                                               transactions inside called PL/SQL.
 
 
 def cell(v):
@@ -7862,8 +7955,21 @@ def harness_checks(project_root, home=None):
     return out
 
 
+def driver_check(conn):
+    """Which python-oracledb mode this session runs in — thick means an Oracle
+    Client library on this machine is part of the connection."""
+    if getattr(conn, "thin", True):
+        return ("ok", "driver", "python-oracledb thin mode (no Oracle Client)")
+    try:
+        import oracledb
+        client = ".".join(str(x) for x in oracledb.clientversion()[:2])
+    except Exception:                     # noqa: BLE001
+        client = "?"
+    return ("ok", "driver", f"python-oracledb thick mode, Oracle Client {client}")
+
+
 def db_checks(conn, schema):
-    out = []
+    out = [driver_check(conn)]
     for q, fmt in (("db-version.sql", lambda rows: "; ".join(
             f"{r[0]} {r[1]}" for r in rows[:2])),
                    ("db-nls.sql", lambda rows: ", ".join(
@@ -8362,14 +8468,17 @@ def main(argv=None):
     except ModuleNotFoundError:
         sys.exit("The 'oracledb' package is required to connect: pip install oracledb")
     try:
-        pool = open_pool(c)
-        conn = acquire(pool, session_should_be_readonly(
-            ns.command, getattr(ns, "action", "") or ""))
-    except (oracledb.Error, OSError) as e:
+        conn, driver = open_connection(c, os.environ, oracledb)
+    except (oracledb.Error, OSError, ThickModeUnavailable) as e:
         # OSError too: a DNS or socket failure arrives raw from the socket layer,
         # not wrapped as an oracledb.Error.
         sys.exit(connect_failure_message(e, name, c.get("user")))
+    if driver != "thin":
+        print(f"-- driver={driver}", file=sys.stderr)
     try:
+        if session_should_be_readonly(ns.command,
+                                      getattr(ns, "action", "") or ""):
+            make_readonly(conn)
         if ns.command == "journal":           # only restore reaches here
             if not ns.id:
                 sys.exit(f"Usage: {invocation()} journal restore <id>")
@@ -8382,7 +8491,7 @@ def main(argv=None):
     except oracledb.Error as e:
         sys.exit(f"Oracle error: {e}")
     finally:
-        pool.close(force=True)
+        conn.close()
 
 
 if __name__ == "__main__":
