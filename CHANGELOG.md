@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.11 — 2026-11-16
 
 - **Thick mode: pythia reaches every Oracle version** (#47). An account
   with an old 10G password verifier failed with `DPY-3015`, a database
@@ -17,8 +17,6 @@
   which fixed thin mode before a refusal could arrive. GUIDE §2 (both
   languages) has the version matrix; README and the `pythia-setup` skill
   say so.
-
-## 0.15.11 — 2026-11-16
 
 - **Release: npm publish is opt-in.** The `release` workflow's npm job runs
   only when the repository variable `NPM_PUBLISH` is `true`; this version
