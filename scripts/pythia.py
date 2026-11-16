@@ -87,6 +87,8 @@ QUERY_BINDS = {
     "compile-errors.sql": {"s", "n"},
     "dependencies.sql": {"s", "n", "depth", "with_sys"},
     "impact.sql": {"s", "n", "depth"},
+    "synonyms-for.sql": {"s", "n"},
+    "dba-dependencies-readable.sql": set(),
     "similar-candidates.sql": {"s"},
     "plscope-usages.sql": {"s", "n"},
     "plscope-statements.sql": {"s", "n"},
@@ -1831,6 +1833,30 @@ def cmd_deps(conn, schema, ns):
         print(f"-- truncated at {len(rows)} rows (raise --limit, or --limit 0 for no cap)")
 
 
+def impact_caveats(conn, name):
+    """Why an impact answer can still be smaller than the truth, each as one
+    line. A falsely clean impact report is the worst failure for a tool whose
+    rule is "no proposal before the blast radius is known", so the reasons
+    are said instead of implied."""
+    target = name.upper()
+    caveats = [f"-- not shown: references inside dynamic SQL strings. "
+               f"Check with: {invocation()} grep {target}"]
+    try:
+        run_query(conn, load_query("dba-dependencies-readable.sql"))
+    except Exception:  # noqa: BLE001 — ORA-00942 or any refusal: not readable
+        caveats.append("-- other schemas: only dependents this session can see "
+                       "are listed; a schema that granted it nothing can still "
+                       f"depend on {target}")
+    return caveats
+
+
+def impact_synonyms(conn, schema, name):
+    """OWNER.SYNONYM_NAME for every synonym pointing straight at the object."""
+    _, rows = run_query(conn, load_query("synonyms-for.sql"),
+                        {"s": schema, "n": name})
+    return [f"{owner}.{syn}" for owner, syn in rows]
+
+
 def cmd_impact(conn, schema, ns):
     cols, rows = run_query(conn, load_query("impact.sql"),
                            {"s": schema, "n": ns.name, "depth": ns.depth})
@@ -1838,21 +1864,27 @@ def cmd_impact(conn, schema, ns):
     # touch this" signal there is — the best possible place to capture a
     # before-state the developer never had to ask for
     drift = auto_snapshot(conn, schema, ns.name, ns)
+    synonyms = impact_synonyms(conn, schema, ns.name)
+    caveats = impact_caveats(conn, ns.name)
     shown, truncated = clip(rows, ns.limit)
     if ns.json:
         print(json_envelope(ns.command, ns.conn_name, ns.schema, cols, shown, truncated,
-                            summary=impact_summary(rows)))
+                            summary=impact_summary(rows), synonyms=synonyms,
+                            caveats=caveats))
         report_drift(drift)
         return
     if not rows:
         print(f"-- nothing depends on {ns.name.upper()} "
               f"(within {schema}, depth {ns.depth})")
-        report_drift(drift)
-        return
-    sys.stdout.write(render_tree(shown, f"{schema}.{ns.name.upper()}"))
-    if truncated:
-        print(f"-- truncated at {len(shown)} rows (raise --limit, or --limit 0 for no cap)")
-    print(impact_summary(rows))
+    else:
+        sys.stdout.write(render_tree(shown, f"{schema}.{ns.name.upper()}"))
+        if truncated:
+            print(f"-- truncated at {len(shown)} rows (raise --limit, or --limit 0 for no cap)")
+        print(impact_summary(rows))
+    if synonyms:
+        print(f"-- also reachable as: {', '.join(synonyms)} (synonyms)")
+    for line in caveats:
+        print(line)
     report_drift(drift)
 
 
@@ -5236,6 +5268,23 @@ def render_comment(kind, table, column, text):
 
 # --- destructive statements --------------------------------------------------
 
+_ORA_IDENT = r'(?:"[^"]+"|[A-Za-z][\w$#]*)'
+_DROP_TABLE_RE = re.compile(
+    r"DROP\s+TABLE\s+(" + _ORA_IDENT + r"(?:\s*\.\s*" + _ORA_IDENT + r")?)"
+    r"((?:\s+(?!PURGE\b)[A-Za-z]+)*)", re.I)
+
+
+def dropped_table(sql):
+    """(name, options) for a DROP TABLE statement, the name exactly as written
+    (schema prefix and quotes kept, whitespace around the dot dropped), the
+    options between it and PURGE (CASCADE CONSTRAINTS); or None."""
+    m = _DROP_TABLE_RE.match(skip_leading_noise(sql))
+    if not m:
+        return None
+    name = re.sub(r"\s*\.\s*", ".", m.group(1))
+    return name, " ".join(m.group(2).split())
+
+
 def destructive_reason(sql, group):
     """Why a statement destroys something no journal can bring back, or None.
 
@@ -5256,9 +5305,16 @@ def destructive_reason(sql, group):
             return "account and role changes reach every session that uses them"
         if m.startswith("drop "):
             purge = " purge" in m
-            return ("DROP removes the object and everything in it"
-                    + (" — PURGE skips the Recycle Bin, so not even FLASHBACK "
-                       "TABLE can bring it back" if purge else ""))
+            if purge:
+                return ("DROP removes the object and everything in it — PURGE "
+                        "skips the Recycle Bin, so not even FLASHBACK TABLE can "
+                        "bring it back")
+            table = dropped_table(sql) if m.startswith("drop table ") else None
+            if table:
+                return ("DROP removes the object and everything in it — while it "
+                        f"is in the Recycle Bin, FLASHBACK TABLE {table[0]} TO "
+                        "BEFORE DROP brings it back")
+            return "DROP removes the object and everything in it"
         if m.startswith("truncate "):
             return "TRUNCATE deletes every row and cannot be rolled back"
         if m.startswith("rename ") or re.search(r"\brename\s+(column|to|constraint|partition)\b", m):
@@ -5575,7 +5631,15 @@ def lint_statement(text, group, conv=None):
                 if re.search(r"\bVARCHAR2\s*\(\s*\d+\s*\)", u):
                     hit("varchar2-byte-semantics", off)
         if re.match(r"DROP\s+TABLE\b.*\bPURGE\b", s):
-            hit("drop-purge", 0)
+            table = dropped_table(text)
+            if table:
+                name, opts = table
+                safe = " ".join(["DROP TABLE", name] + ([opts] if opts else []))
+                hit("drop-purge", 0,
+                    "DROP ... PURGE skips the Recycle Bin. Recoverable instead: "
+                    f"{safe} — undo with FLASHBACK TABLE {name} TO BEFORE DROP")
+            else:
+                hit("drop-purge", 0)
     if group == "data_dml":
         if re.match(r"(UPDATE|DELETE)\b", s) and not re.search(r"\bWHERE\b", s):
             hit("dml-no-where", 0)
@@ -7332,7 +7396,18 @@ def approve_hook_wired(project_root, home=None):
     return any("approve --hook" in b for b in blobs)
 
 
-def enabled_plugin_hooks(project_root, home=None, env=None):
+def enabled_plugin_roots(installs, state):
+    """[(key, install path, manifest)] for every install that is on."""
+    out = []
+    for key, roots in installs.items():
+        for pr in roots:
+            manifest = _read_json(pr / ".claude-plugin" / "plugin.json") or {}
+            if state.get(key, manifest.get("defaultEnabled", True) is not False):
+                out.append((key, pr, manifest))
+    return out
+
+
+def enabled_plugin_hooks(project_root, home=None, env=None, roots_only=False):
     """[(plugin, where, hooks)] for every plugin Claude Code runs here: each
     one installed_plugins.json lists (else each install under cache/) that
     enabledPlugins does not switch off — user, then project, then local
@@ -7372,29 +7447,27 @@ def enabled_plugin_hooks(project_root, home=None, env=None):
                             max(versions, key=lambda d: d.stat().st_mtime)]
         except OSError:
             pass
+    if roots_only:
+        return enabled_plugin_roots(installs, state)
     out = []
-    for key, roots in installs.items():
-        for pr in roots:
-            manifest = _read_json(pr / ".claude-plugin" / "plugin.json") or {}
-            if not state.get(key, manifest.get("defaultEnabled", True) is not False):
-                continue
-            found = [(pr / "hooks" / "hooks.json", None)]
-            declared = manifest.get("hooks")
-            for d in declared if isinstance(declared, list) else [declared]:
-                if isinstance(d, str):
-                    found.append((pr / d, None))
-                elif isinstance(d, dict):     # inline: the events themselves
-                    found.append((pr / ".claude-plugin" / "plugin.json",
-                                  d.get("hooks") if isinstance(d.get("hooks"), dict) else d))
-            read = set()
-            for f, inline in found:
-                if inline is None:
-                    if f in read or not f.is_file():
-                        continue
-                    read.add(f)
-                    inline = (_read_json(f) or {}).get("hooks")
-                if isinstance(inline, dict):
-                    out.append((key, str(f), inline))
+    for key, pr, manifest in enabled_plugin_roots(installs, state):
+        found = [(pr / "hooks" / "hooks.json", None)]
+        declared = manifest.get("hooks")
+        for d in declared if isinstance(declared, list) else [declared]:
+            if isinstance(d, str):
+                found.append((pr / d, None))
+            elif isinstance(d, dict):     # inline: the events themselves
+                found.append((pr / ".claude-plugin" / "plugin.json",
+                              d.get("hooks") if isinstance(d.get("hooks"), dict) else d))
+        read = set()
+        for f, inline in found:
+            if inline is None:
+                if f in read or not f.is_file():
+                    continue
+                read.add(f)
+                inline = (_read_json(f) or {}).get("hooks")
+            if isinstance(inline, dict):
+                out.append((key, str(f), inline))
     return out
 
 
@@ -7549,6 +7622,99 @@ def launch_checks(root, home, settings, local_settings):
     return out
 
 
+def _store_alias(path):
+    """A path under \\Microsoft\\WindowsApps\\ — the Store's App execution
+    alias, which prints "Python was not found" unless a Store Python is
+    really installed behind it."""
+    return "windowsapps" in str(path).replace("\\", "/").lower()
+
+
+def _really_runs(exe, timeout=15):
+    import subprocess
+    try:
+        return subprocess.run([exe, "-c", ""], stdin=subprocess.DEVNULL,
+                              capture_output=True, timeout=timeout).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def plugin_python(which=None, env=None, runs=None):
+    """The interpreter scripts/pythia-hook.sh picks for the plugin's hooks,
+    or None: the `py` launcher on Windows, then python3, then python; a
+    Store alias counts only if it runs. Keep the two in step."""
+    which = which or path_lookup
+    env = os.environ if env is None else env
+    runs = runs or _really_runs
+    names = (["py"] if env.get("OS") == "Windows_NT" else []) + ["python3", "python"]
+    for name in names:
+        found = which(name)
+        if found and (not _store_alias(found) or runs(found)):
+            return found
+    return None
+
+
+PYTHON_PATH_FIX = ("add your Python folder (e.g. %LOCALAPPDATA%\\Programs\\Python\\"
+                   "Python3xx\\) to the top of PATH, or reinstall Python from "
+                   "python.org with \"Add python.exe to PATH\" checked; turn off the "
+                   "python.exe / python3.exe App execution aliases; then restart "
+                   "Claude Code")
+
+
+def pythia_plugins(project_root, home=None, env=None):
+    """[(key, install path, manifest)] for each pythia plugin that is on."""
+    return [(k, pr, m) for k, pr, m in
+            enabled_plugin_hooks(project_root, home, env, roots_only=True)
+            if k.split("@")[0] == "pythia" or m.get("name") == "pythia"]
+
+
+def plugin_checks(plugins, which=None, env=None, runs=None):
+    """[(status, area, message)] for what the pythia plugin itself starts —
+    its hooks (through scripts/pythia-hook.sh) and its MCP server — and
+    whether it matches this CLI. `pythia install` reaches neither, so no
+    fix here sends the developer to it (issue #43)."""
+    which = which or path_lookup
+    runs = runs or _really_runs
+    out = []
+    for key, pr, manifest in plugins:
+        version = str(manifest.get("version") or "")
+        if version and version != __version__:
+            out.append(("warn", "version",
+                        f"plugin {key} is {version}, the pythia CLI here is "
+                        f"{__version__} — the plugin's hooks run its own copy, "
+                        "the commands you and the agent type run the CLI; bring "
+                        "them level (pip install -U pythia-plsql, /plugin update)"))
+        hooks_text = json.dumps((_read_json(pr / "hooks" / "hooks.json") or {})
+                                .get("hooks") or {})
+        if "pythia-hook.sh" in hooks_text:
+            exe = plugin_python(which=which, env=env, runs=runs)
+            out.append(("ok", "plugin hooks", f"{key} hooks start with {exe}")
+                       if exe else
+                       ("fail", "plugin hooks",
+                        f"{key} hooks find no Python 3 that runs (`python` is the "
+                        "Store alias or not on PATH, and no `py` launcher) — the "
+                        "guard blocks Bash until it can start; " + PYTHON_PATH_FIX))
+        entry = (manifest.get("mcpServers") or {}).get("pythia")
+        cmd = str(entry.get("command") or "") if isinstance(entry, dict) else ""
+        if cmd:
+            found = which(cmd) if not re.search(r"[/\\]", cmd) else cmd
+            if not found:
+                out.append(("fail", "approval door",
+                            f"{key}'s MCP server starts with `{cmd}`, which is not "
+                            "on PATH — the pythia_approve door stays closed "
+                            "(AskUserQuestion and the console remain); "
+                            + PYTHON_PATH_FIX))
+            elif _store_alias(found) and not runs(found):
+                out.append(("fail", "approval door",
+                            f"{key}'s MCP server starts with `{cmd}`, which is the "
+                            f"Microsoft Store alias at {found} — it prints \"Python "
+                            "was not found\" and exits, so the pythia_approve door "
+                            "stays closed; " + PYTHON_PATH_FIX))
+            else:
+                out.append(("ok", "approval door",
+                            f"pythia_approve MCP tool from plugin {key} ({cmd} = {found})"))
+    return out
+
+
 def harness_checks(project_root, home=None):
     """[(status, area, message)] — status ok | warn | fail | info."""
     import importlib.util
@@ -7577,18 +7743,31 @@ def harness_checks(project_root, home=None):
     s = _read_json(root / ".claude" / "settings.json") or {}
     sl = _read_json(root / ".claude" / "settings.local.json") or {}
     cmds = json.dumps(s.get("hooks") or {}) + json.dumps(sl.get("hooks") or {})
+    home_dir = pathlib.Path(home or pathlib.Path.home())
+    plugins = pythia_plugins(root, home_dir)
+    plugin_cmds = "".join(json.dumps((_read_json(pr / "hooks" / "hooks.json") or {})
+                                     .get("hooks") or {}) for _, pr, _ in plugins)
     for mark, what in (("hook session-start", "SessionStart guide + state"),
                        ("hook pre-tool", "PreToolUse guard (reads, approved writes, bypass block)"),
                        ("approve --hook", "PostToolUse AskUserQuestion approval"),
                        ("hook post-tool", "PostToolUse verdict reminders")):
         legacy = mark == "hook session-start" and "guide --brief" in cmds
-        out.append(("ok" if mark in cmds else "warn" if legacy else "warn",
-                    "claude hooks",
+        in_plugin = mark in plugin_cmds
+        if mark in cmds and in_plugin:
+            out.append(("warn", "claude hooks",
+                        f"{what}: wired twice — by the pythia plugin and in "
+                        ".claude/settings — so it runs twice on every call; "
+                        "remove pythia's entries from the settings file"))
+            continue
+        out.append(("ok" if mark in cmds or in_plugin else "warn", "claude hooks",
                     f"{what}: " + ("wired" if mark in cmds else
+                                   "wired by the pythia plugin" if in_plugin else
                                    "legacy guide hook — re-run install" if legacy
                                    else f"missing — {invocation()} install")))
-    home_dir = pathlib.Path(home or pathlib.Path.home())
     out.extend(launch_checks(root, home_dir, s, sl))
+    plugin_rows = plugin_checks(plugins)
+    out.extend(plugin_rows)
+    plugin_door = any(area == "approval door" for _, area, _ in plugin_rows)
     mcp = _read_json(root / ".mcp.json") or {}
     local = local_mcp_entry(root, home_dir)
     if local is not None:
@@ -7614,7 +7793,7 @@ def harness_checks(project_root, home=None):
                     ".mcp.json" + ("" if trusted else
                                    " (approve the server once in /mcp)")
                     + ("" if st == "ok" else f", but {msg}")))
-    else:
+    elif not plugin_door:
         out.append(("warn", "approval door", "pythia MCP approver not in .mcp.json "
                     "— the AskUserQuestion card and the console remain; "
                     f"{invocation()} install adds it"))
@@ -7662,7 +7841,14 @@ def harness_checks(project_root, home=None):
     if len([k for k, v in present.items() if v]) > 1:
         out.append(("warn", "skills", "pythia skills installed both globally and "
                     "per project — every menu entry shows twice"))
-    if not present:
+    plugin_skills = sorted({p.parent.name for _, pr, _ in plugins
+                            for p in (pr / "skills").glob("*/SKILL.md")})
+    if plugin_skills:
+        out.append(("warn" if present else "ok", "skills",
+                    f"{len(plugin_skills)} pythia skills from the "
+                    "plugin" + (" — and copies under .claude/skills: every menu "
+                                "entry shows twice" if present else "")))
+    elif not present:
         out.append(("info", "skills", "no pythia skills under .claude/skills — "
                     "fine if installed as a plugin"))
     eff = load_policy(root)

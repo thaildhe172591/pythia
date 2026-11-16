@@ -24,6 +24,19 @@ NO CHANGE PROPOSED WITHOUT ITS IMPACT MEASURED FIRST
 1. `pythia impact <OBJECT> --depth 2` — everything that depends on it,
    as a tree, ending with the line that matters:
    `-- impact: N dependent objects, M currently VALID`.
+   Up to three more `--` lines follow, and each one is a reason the tree
+   can be smaller than the truth — relay them, never call the list complete
+   while one is printed:
+   - `-- also reachable as: PUBLIC.ORDERS, ... (synonyms)` — callers can use
+     those names too; grep for them as well as the object's own name.
+   - `-- not shown: references inside dynamic SQL strings. Check with:
+     pythia grep <OBJECT>` — `EXECUTE IMMEDIATE` and `DBMS_SQL` record no
+     dependency. Run the printed command; it is always printed, even after
+     "nothing depends on".
+   - `-- other schemas: only dependents this session can see are listed`
+     — this session cannot read `DBA_DEPENDENCIES`, so a schema that granted
+     it nothing can still depend on the object. Say so when the change
+     matters outside the schema.
 2. `pythia deps <OBJECT> --depth 2` — the other direction, what it uses;
    read it when the change touches calls or table access.
 3. `pythia invalid` — the baseline. Anything already INVALID before the

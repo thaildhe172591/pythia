@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **Plugin on Windows: the hooks find a Python that runs, or fail closed**
+  (#43). A bare `python` is the Store alias, or not on PATH, on a fresh
+  Windows machine, and the plugin's guard failed open without a word. Its
+  hooks now start through `scripts/pythia-hook.sh` (`py -3` on Windows, then
+  `python3`, then `python`, skipping a Store alias that does not run); with
+  none, the PreToolUse hook blocks and names the fix. `doctor` checks the
+  plugin's own hooks and MCP command (a `python` under `\WindowsApps\` or off
+  PATH is a `fail` naming the fix), warns when the CLI and plugin versions
+  differ, and counts the plugin's hooks, approver and skills instead of
+  calling them missing. README, GUIDE (both languages) and SECURITY.md say
+  so.
+- **impact: says why its tree can be smaller than the truth** (#33, #34,
+  #35). After the tree (or "nothing depends on"), `impact` prints the
+  synonyms that point at the object (`-- also reachable as: ...`, new query
+  `synonyms-for.sql`), always a pointer to `pythia grep <OBJECT>` for
+  references inside dynamic SQL, and, when the session cannot read
+  `DBA_DEPENDENCIES` (new probe `dba-dependencies-readable.sql`), a line
+  saying dependents in other schemas may be invisible. `--json` carries
+  them as `synonyms` and `caveats`. The agent-user example names the
+  optional grant that removes the last caveat.
+- **DROP TABLE names the way back** (#36). Without `PURGE`, the destructive
+  reason on every preview and approval card adds `FLASHBACK TABLE <name> TO
+  BEFORE DROP`, the name as written. The statement stays destructive.
+- **lint: `drop-purge` hands over the recoverable statement** (#37). The
+  finding names the table and gives the statement without `PURGE` and its
+  `FLASHBACK TABLE ... TO BEFORE DROP`. Severity and rule id unchanged.
 - **Docs: agent counts are a floor.** README, GUIDE (both languages) and the
   no-Node install note said 76 agents in one place and 77 in another, while
   `npx skills` 1.7.4 lists 79. Every count now reads 70+, which stays true as

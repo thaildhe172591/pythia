@@ -244,6 +244,18 @@ agent buộc bạn tự làm.
    Đó là quyền hạn của bạn, nên pythia không tự đặt
    ([vì sao](GUIDE.vi.md#11-tuỳ-chọn-cấu-hình-quyền-cho-claude-code)).
 
+**Cài dạng plugin trên Windows?** Hook của plugin khởi động qua
+`scripts/pythia-hook.sh`: thử launcher `py`, rồi `python3`, rồi `python`, và
+bỏ qua alias của Microsoft Store — trên máy Windows mới cài, `python` trần
+thường chính là alias đó, hoặc không có trên PATH. Khi không cái nào chạy
+được, guard chặn Bash và nói rõ lý do thay vì lặng lẽ cho qua. MCP server của
+plugin vẫn khởi động bằng `python`; `pythia doctor` kiểm tra nó, cùng hook và
+phiên bản của plugin, và chỉ cách sửa: thêm
+`%LOCALAPPDATA%\Programs\Python\Python3xx\` vào PATH (hoặc cài lại Python với
+"Add python.exe to PATH"), tắt App execution alias python.exe, khởi động lại
+Claude Code. Đã bật plugin thì đừng chạy thêm `pythia install` cho hook —
+doctor tính cả những gì plugin cung cấp.
+
 **Duyệt một thay đổi:** agent preview bằng `pythia apply`, hỏi một
 `AskUserQuestion` mang thẻ duyệt, bạn bấm **Approve**, agent tự chạy `apply
 --confirm`. Nếu câu trả lời không được tính (hộp thoại tự đóng khi bạn vắng

@@ -290,6 +290,11 @@ pythia plscope T_ORDER         # vị trí dùng identifier chính xác (PL/Scop
 pythia similar PKG_ORDER_LIST  # chương trình đặt tên giống — mỏ convention
 ```
 
+`impact` kết thúc bằng các dòng nói vì sao cây có thể nhỏ hơn thực tế: các
+synonym trỏ tới object (`-- also reachable as: ...`), một lệnh `pythia grep`
+để tìm tham chiếu trong SQL động, và — khi session không đọc được
+`DBA_DEPENDENCIES` — rằng phụ thuộc ở schema khác có thể bị ẩn.
+
 Output: `--json` mọi lệnh; `--limit` / `--max-lines` / `--offset` (0 = bỏ
 giới hạn); **mọi cắt bớt đều có marker** `-- truncated ...` — không có marker
 nghĩa là bạn đã thấy tất cả. Màu chỉ cho người (`NO_COLOR`/`FORCE_COLOR`);
@@ -513,6 +518,8 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | Output bị cắt | có marker `-- truncated` — tăng `--limit`/`--max-lines` hoặc `--offset` đọc tiếp |
 | `--yes ... no terminal is attached` | agent định tự phê duyệt — đúng thiết kế: preview, relay nguyên văn, dừng; dev đồng ý rồi mới `--confirm <token>` |
 | `Loosening the write policy ... no terminal` | tương tự: đưa dev đúng lệnh `policy set` đã in để họ tự chạy |
+| `pythia: no Python 3 found to run its hooks` (plugin, Windows) | `python` là alias của Store hoặc không có trên PATH, và không có launcher `py` → thêm `%LOCALAPPDATA%\Programs\Python\Python3xx\` vào PATH (hoặc cài lại Python với "Add python.exe to PATH"), tắt App execution alias python.exe, khởi động lại Claude Code; `pythia doctor` kiểm tra hook và MCP server của plugin |
+| `plugin:pythia:pythia ... Connection closed` | MCP server của plugin khởi động bằng `python` — cùng nguyên nhân và cách sửa với dòng trên |
 
 ## 11. Tuỳ chọn: cấu hình quyền cho Claude Code
 

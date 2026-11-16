@@ -226,6 +226,18 @@ each agent needs you to finish by hand.
    Those are your permission preferences, so pythia does not set them for you
    ([why](GUIDE.md#11-optional-claude-code-permission-settings)).
 
+**Installed as a plugin on Windows?** The plugin's hooks start through
+`scripts/pythia-hook.sh`, which tries the `py` launcher, then `python3`,
+then `python`, and skips the Microsoft Store alias — a bare `python` on a
+fresh Windows machine is often that alias, or not on PATH at all. When none
+runs, the guard blocks Bash and says why instead of failing open. The
+plugin's MCP server still starts with `python`; `pythia doctor` checks it,
+and the plugin's own hooks and version, and names the fix: add
+`%LOCALAPPDATA%\Programs\Python\Python3xx\` to PATH (or reinstall Python with
+"Add python.exe to PATH"), turn off the python.exe App execution aliases,
+restart Claude Code. With the plugin on, do not also run `pythia install`
+for the hooks — doctor counts what the plugin provides.
+
 **Approving a change:** the agent previews with `pythia apply`, asks an
 `AskUserQuestion` carrying the card, you click **Approve**, and the agent runs
 `apply --confirm` itself. If that dialog's answer does not count (it closed

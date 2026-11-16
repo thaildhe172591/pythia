@@ -301,6 +301,12 @@ pythia plscope T_ORDER         # exact identifier usages (PL/Scope)
 pythia similar PKG_ORDER_LIST  # similarly named programs — the convention mine
 ```
 
+`impact` ends with the lines that say why its tree can be smaller than the
+truth: the synonyms that point at the object (`-- also reachable as: ...`),
+a `pythia grep` command for references inside dynamic SQL, and — when the
+session cannot read `DBA_DEPENDENCIES` — that dependents in other schemas
+may be invisible.
+
 Output: `--json` on every command; `--limit` / `--max-lines` / `--offset`
 (0 = no cap); **every cut carries a marker** `-- truncated ...` — no marker
 means you saw everything. Color is for humans only (`NO_COLOR` /
@@ -535,6 +541,8 @@ go through MCP.**
 | Output cut short | a `-- truncated` marker is present — raise `--limit`/`--max-lines`, or `--offset` to continue |
 | `--yes ... no terminal is attached` | an agent tried to self-approve — by design: preview, relay verbatim, stop; the developer approves, then `--confirm <token>` |
 | `Loosening the write policy ... no terminal` | same design: hand the developer the printed `policy set` command to run themselves |
+| `pythia: no Python 3 found to run its hooks` (plugin, Windows) | `python` is the Store alias or not on PATH, and there is no `py` launcher → add `%LOCALAPPDATA%\Programs\Python\Python3xx\` to PATH (or reinstall Python with "Add python.exe to PATH"), turn off the python.exe App execution aliases, restart Claude Code; `pythia doctor` checks the plugin's hooks and MCP server |
+| `plugin:pythia:pythia ... Connection closed` | the plugin's MCP server starts with `python` — same cause and fix as the row above |
 
 ## 11. Optional: Claude Code permission settings
 

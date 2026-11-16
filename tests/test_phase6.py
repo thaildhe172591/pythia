@@ -11,6 +11,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -2402,6 +2403,194 @@ def main():
     if failed:
         sys.exit(f"{failed} test(s) failed")
     print("OK")
+
+
+def test_drop_table_reason_names_the_way_back():
+    """Issue #36: while the Recycle Bin is on, a dropped table can come back;
+    the developer approving the drop is told how, with the real name."""
+    d = pythia.destructive_reason
+    fb = "while it is in the Recycle Bin, FLASHBACK TABLE {} TO BEFORE DROP brings it back"
+    assert d("DROP TABLE t_order", "structural") == (
+        "DROP removes the object and everything in it — " + fb.format("t_order"))
+    assert fb.format("app_owner.t_order") in d("drop table app_owner.t_order", "structural")
+    assert fb.format('APP_OWNER."T_Order"') in d('DROP TABLE APP_OWNER."T_Order"', "structural")
+    assert fb.format("T_ORDER") in d("-- why\n  DROP  TABLE T_ORDER CASCADE CONSTRAINTS", "structural")
+    purge = d("DROP TABLE t PURGE", "structural")
+    assert "FLASHBACK TABLE t TO BEFORE DROP" not in purge and "not even FLASHBACK" in purge
+    assert d("DROP VIEW v", "structural") == "DROP removes the object and everything in it"
+    assert d("DROP PACKAGE pkg_order", "structural") == "DROP removes the object and everything in it"
+
+
+def test_lint_drop_purge_hands_over_the_recoverable_statement():
+    """Issue #37: the finding names the table and gives both statements."""
+    def msg(sql):
+        found = [f for f in pythia.lint_statement(sql, "structural") if f[0] == "drop-purge"]
+        assert len(found) == 1, found
+        return found[0][2]
+    assert msg("DROP TABLE t_order PURGE") == (
+        "DROP ... PURGE skips the Recycle Bin. Recoverable instead: DROP TABLE t_order"
+        " — undo with FLASHBACK TABLE t_order TO BEFORE DROP")
+    m = msg("drop table app_owner.t_order purge")
+    assert "Recoverable instead: DROP TABLE app_owner.t_order —" in m
+    assert "FLASHBACK TABLE app_owner.t_order TO BEFORE DROP" in m
+    m = msg('DROP TABLE "App_Owner"."T Order" CASCADE CONSTRAINTS PURGE')
+    assert 'Recoverable instead: DROP TABLE "App_Owner"."T Order" CASCADE CONSTRAINTS —' in m
+    assert 'FLASHBACK TABLE "App_Owner"."T Order" TO BEFORE DROP' in m
+    assert pythia.LINT_RULES["drop-purge"][0] == "warning"
+
+
+# --- the plugin's launcher (issue #43) ------------------------------------------
+
+SHIM = HERE.parent / "scripts" / "pythia-hook.sh"
+
+
+def test_plugin_hooks_start_through_the_shim_not_a_bare_python():
+    """A bare `python` is the Store alias, or nothing, on a fresh Windows
+    machine: the guard then failed open in silence. Every plugin hook goes
+    through the shim, which looks for an interpreter that really runs."""
+    hooks = json.loads((HERE.parent / "hooks" / "hooks.json").read_text(
+        encoding="utf-8"))["hooks"]
+    cmds = [h["command"] for ev in hooks.values() for e in ev for h in e["hooks"]]
+    assert cmds
+    for c in cmds:
+        assert c.startswith('sh "${CLAUDE_PLUGIN_ROOT}/scripts/pythia-hook.sh" '), c
+    assert SHIM.is_file()
+    attrs = (HERE.parent / ".gitattributes").read_text(encoding="utf-8")
+    assert re.search(r"^scripts/\*\.sh\s+text\s+eol=lf", attrs, re.M)
+    assert b"\r" not in SHIM.read_bytes()
+
+
+def _run_shim(path_dirs, *args):
+    import shutil
+    import subprocess
+    sh = shutil.which("sh")
+    env = {"PATH": os.pathsep.join(str(d) for d in path_dirs)}
+    return subprocess.run([sh, str(SHIM), *args], env=env, capture_output=True,
+                          text=True, timeout=30)
+
+
+def _fake(dirpath, name, body):
+    dirpath.mkdir(parents=True, exist_ok=True)
+    f = dirpath / name
+    f.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+    f.chmod(0o755)
+
+
+def test_shim_skips_a_store_alias_and_fails_closed_when_nothing_runs():
+    if os.name == "nt":
+        return                            # the shim's logic is POSIX sh; CI's
+    with tempfile.TemporaryDirectory() as td:   # Linux and macOS run it
+        td = pathlib.Path(td)
+        alias = td / "Microsoft" / "WindowsApps"
+        _fake(alias, "python3", 'echo "Python was not found" >&2; exit 9009')
+        real = td / "Python314"
+        _fake(real, "python", 'echo "ran:$*"')
+        r = _run_shim([alias, real], "hook", "pre-tool")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == f"ran:{SHIM.parent / 'pythia.py'} hook pre-tool"
+        # nothing that runs: the guard fails closed (exit 2 blocks the tool)
+        # and says why, naming the fix
+        r = _run_shim([alias], "hook", "pre-tool")
+        assert r.returncode == 2
+        assert "no Python 3" in r.stderr and "PATH" in r.stderr
+        assert "WindowsApps" in r.stderr
+        # any other hook reports the error without blocking
+        r = _run_shim([alias], "hook", "session-start")
+        assert r.returncode == 1 and "no Python 3" in r.stderr
+        # an alias that does run (a Store Python install) is a real interpreter
+        good = td / "store" / "WindowsApps"
+        _fake(good, "python3", 'if [ "$1" = "-c" ]; then exit 0; fi; echo "store:$*"')
+        r = _run_shim([good], "approve", "--hook")
+        assert r.stdout.strip().startswith("store:") and r.stdout.strip().endswith(
+            "approve --hook")
+
+
+def _pythia_plugin(home, version="0.15.10", mcp_command="python"):
+    """The pythia plugin as Claude Code installs it, from this repository's
+    own hooks.json and a plugin.json with the given version/MCP command."""
+    hooks = json.loads((HERE.parent / "hooks" / "hooks.json").read_text(
+        encoding="utf-8"))["hooks"]
+    root = _plugin(home, "pythia@pythia", hooks)
+    (root / ".claude-plugin").mkdir(exist_ok=True)
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({
+        "name": "pythia", "version": version,
+        "mcpServers": {"pythia": {"command": mcp_command, "args": [
+            "${CLAUDE_PLUGIN_ROOT}/scripts/pythia.py", "mcp"]}}}), encoding="utf-8")
+    (root / "skills" / "pythia-apply").mkdir(parents=True)
+    (root / "skills" / "pythia-apply" / "SKILL.md").write_text("x", encoding="utf-8")
+    return root
+
+
+def test_plugin_python_mirrors_the_shim():
+    alias = "C:/Users/dev/AppData/Local/Microsoft/WindowsApps/python.exe"
+    real = "C:/Users/dev/AppData/Local/Programs/Python/Python314/python.exe"
+    py = "C:/Users/dev/AppData/Local/Programs/Python/Launcher/py.exe"
+    win = {"OS": "Windows_NT"}
+    pick = pythia.plugin_python
+    assert pick(which={"py": py, "python": alias}.get, env=win,
+                runs=lambda p: False) == py
+    assert pick(which={"python3": alias, "python": real}.get, env={},
+                runs=lambda p: False) == real
+    assert pick(which={"python": alias}.get, env=win, runs=lambda p: False) is None
+    assert pick(which={"python": alias}.get, env=win, runs=lambda p: True) == alias
+    assert pick(which={"py": py}.get, env={}, runs=lambda p: True) is None  # py: Windows only
+
+
+def test_doctor_checks_the_plugins_own_launch_commands():
+    """Issue #43: doctor checked only hooks written into settings. The
+    plugin's hooks and MCP server failed the same way, unreported — and its
+    advice, `pythia install`, would add a second set of hooks."""
+    alias = "C:/Users/dev/AppData/Local/Microsoft/WindowsApps/python.exe"
+    real = "/usr/bin/python3"
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        _pythia_plugin(home, version="0.15.10")
+        plugins = pythia.pythia_plugins(td, home)
+        assert len(plugins) == 1
+        broken = pythia.plugin_checks(plugins, which={"python": alias}.get,
+                                      env={"OS": "Windows_NT"}, runs=lambda p: False)
+        text = "\n".join(f"{st} {area} {msg}" for st, area, msg in broken)
+        hooks = [r for r in broken if r[1] == "plugin hooks"]
+        mcp = [r for r in broken if r[1] == "approval door"]
+        assert hooks and hooks[0][0] == "fail" and "no Python 3" in hooks[0][2]
+        assert mcp and mcp[0][0] == "fail"
+        assert "WindowsApps" in mcp[0][2] and "PATH" in mcp[0][2]
+        # never suggest a duplicate set of hooks
+        assert f"{pythia.invocation()} install" not in text
+        assert "pythia install" not in text
+        missing = pythia.plugin_checks(plugins, which={}.get, env={"OS": "Windows_NT"},
+                                       runs=lambda p: False)
+        m = [r for r in missing if r[1] == "approval door"][0]
+        assert m[0] == "fail" and "not on PATH" in m[2]
+        fine = pythia.plugin_checks(plugins, which={"python3": real, "python": real}.get,
+                                    env={}, runs=lambda p: True)
+        assert all(st in ("ok", "info") for st, _, _ in fine), fine
+
+
+def test_doctor_warns_on_a_cli_and_plugin_version_mismatch():
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        _pythia_plugin(home, version="0.11.0")
+        rows = pythia.plugin_checks(pythia.pythia_plugins(td, home),
+                                    which={"python3": "/usr/bin/python3",
+                                           "python": "/usr/bin/python3"}.get,
+                                    env={}, runs=lambda p: True)
+        v = [r for r in rows if r[1] == "version"]
+        assert v and v[0][0] == "warn"
+        assert "0.11.0" in v[0][2] and pythia.__version__ in v[0][2]
+
+
+def test_doctor_counts_what_the_plugin_provides():
+    """With the plugin on, the guard, the approver and the skills are there:
+    doctor must not call them missing and send the developer to install."""
+    with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
+        _pythia_plugin(home, version=pythia.__version__)
+        rows = pythia.harness_checks(td, home)
+        hooks = [r for r in rows if r[1] == "claude hooks"]
+        assert hooks and all(st == "ok" and "plugin" in msg for st, _, msg in hooks), hooks
+        door = [r for r in rows if r[1] == "approval door"]
+        assert door and not any("not in .mcp.json" in m for _, _, m in door), door
+        skills = [r for r in rows if r[1] == "skills"]
+        assert not any(st == "warn" for st, _, _ in skills), skills
+        assert any("plugin" in m for _, _, m in skills)
 
 
 if __name__ == "__main__":

@@ -113,7 +113,7 @@ not an obstacle to route around.
 | `plsql_source` | **Yes — completely.** The source is recoverable from `ALL_SOURCE`. |
 | `comments` | **Yes.** The previous comment is snapshotted before every write. |
 | `data_dml` | **No.** After commit only Flashback Query remains, and only within undo retention. Revalidation checks the row set *before* the write; it is not an undo. |
-| `structural` | **Almost never.** `DROP COLUMN` is permanent; a dropped table may be in the Recycle Bin. |
+| `structural` | **Almost never.** `DROP COLUMN` is permanent; a dropped table may be in the Recycle Bin — the preview names the `FLASHBACK TABLE ... TO BEFORE DROP` that brings it back, and `DROP ... PURGE` skips the bin. |
 | `grants` | Yes, but by hand. |
 | `session` | Not needed. |
 

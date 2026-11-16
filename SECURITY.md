@@ -117,6 +117,20 @@ approval is bound to that deploy and refused on its own, every statement is
 checked against the preview before the first one runs, and a stop withdraws
 whatever the approval had not used yet.
 
+### The plugin's hooks fail closed when no Python runs (Unreleased)
+
+`pythia install` picks a launcher that starts; the plugin cannot — its
+`hooks/hooks.json` is the same on every machine. A bare `python` there
+reached nothing on a fresh Windows machine (the Store alias, or no Python on
+PATH), so the guard failed open in silence (#43). The plugin's hooks now
+start through `scripts/pythia-hook.sh`: the `py` launcher on Windows, then
+`python3`, then `python`, a candidate under `\WindowsApps\` counted only if it
+runs. When none does, the PreToolUse hook exits 2 — Claude Code blocks the
+Bash or `run-sql` call and shows the reason — and every other hook reports
+the error. `pythia doctor` checks the plugin's hooks and its MCP server's
+`python` the same way, and never answers a plugin problem with `pythia
+install`, which would add a second set of hooks.
+
 ### The hooks are seatbelts, not a sandbox (0.15.0)
 
 The PreToolUse hook allows pythia's read-only commands only as one plain

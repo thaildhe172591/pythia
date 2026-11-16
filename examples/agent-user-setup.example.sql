@@ -47,6 +47,13 @@ ALTER USER app_owner GRANT CONNECT THROUGH app_agent;
 --   "agent_dev": { "user": "app_agent[app_owner]", "schema": "APP_OWNER", ... }
 -- (`pythia agent-user --save` generates steps 3-4 plus the config entry.)
 
+-- Optional: `pythia impact` reads ALL_DEPENDENCIES, which lists only the
+-- dependents this session can access, and says so with an "other schemas"
+-- line. One read-only grant on the dictionary removes that caveat; leave it
+-- out where even the names of other schemas' objects are not the agent's
+-- business:
+--   GRANT SELECT ON sys.dba_dependencies TO app_owner;
+
 -- To cut the agent off later, one statement — the owner is untouched:
 --   ALTER USER app_owner REVOKE CONNECT THROUGH app_agent;
 
