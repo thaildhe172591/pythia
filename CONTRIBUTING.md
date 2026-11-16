@@ -154,4 +154,8 @@ One-time setup by a maintainer:
   No token is stored anywhere.
 - **npm**: `npm token create` (automation token) → repository secret
   `NPM_TOKEN`. The very first `npm publish` of a name cannot use OIDC,
-  so the token path stays.
+  so the token path stays. The npm job runs only when the repository
+  variable `NPM_PUBLISH` is `true` (Settings → Secrets and variables →
+  Actions → Variables); without it a tag publishes to PyPI alone. To catch
+  npm up later, set the variable and re-run the `release` workflow for the
+  tag — PyPI skips the version it already has.

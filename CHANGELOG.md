@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.15.11 — 2026-11-16
+
+- **Release: npm publish is opt-in.** The `release` workflow's npm job runs
+  only when the repository variable `NPM_PUBLISH` is `true`; this version
+  goes to PyPI first, and to npm once the variable is set and the workflow
+  re-run for its tag.
 
 - **Plugin on Windows: the hooks find a Python that runs, or fail closed**
   (#43). A bare `python` is the Store alias, or not on PATH, on a fresh
