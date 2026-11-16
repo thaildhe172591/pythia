@@ -518,6 +518,8 @@ Bảy skill là **cổng chặn** kiểu superpowers, không phải gợi ý:
 | Output bị cắt | có marker `-- truncated` — tăng `--limit`/`--max-lines` hoặc `--offset` đọc tiếp |
 | `--yes ... no terminal is attached` | agent định tự phê duyệt — đúng thiết kế: preview, relay nguyên văn, dừng; dev đồng ý rồi mới `--confirm <token>` |
 | `Loosening the write policy ... no terminal` | tương tự: đưa dev đúng lệnh `policy set` đã in để họ tự chạy |
+| `pythia: no Python 3 found to run its hooks` (plugin, Windows) | `python` là alias của Store hoặc không có trên PATH, và không có launcher `py` → thêm `%LOCALAPPDATA%\Programs\Python\Python3xx\` vào PATH (hoặc cài lại Python với "Add python.exe to PATH"), tắt App execution alias python.exe, khởi động lại Claude Code; `pythia doctor` kiểm tra hook và MCP server của plugin |
+| `plugin:pythia:pythia ... Connection closed` | MCP server của plugin khởi động bằng `python` — cùng nguyên nhân và cách sửa với dòng trên |
 
 ## 11. Tuỳ chọn: cấu hình quyền cho Claude Code
 

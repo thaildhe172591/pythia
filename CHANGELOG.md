@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Plugin on Windows: the hooks find a Python that runs, or fail closed**
+  (#43). A bare `python` is the Store alias, or not on PATH, on a fresh
+  Windows machine, and the plugin's guard failed open without a word. Its
+  hooks now start through `scripts/pythia-hook.sh` (`py -3` on Windows, then
+  `python3`, then `python`, skipping a Store alias that does not run); with
+  none, the PreToolUse hook blocks and names the fix. `doctor` checks the
+  plugin's own hooks and MCP command (a `python` under `\WindowsApps\` or off
+  PATH is a `fail` naming the fix), warns when the CLI and plugin versions
+  differ, and counts the plugin's hooks, approver and skills instead of
+  calling them missing. README, GUIDE (both languages) and SECURITY.md say
+  so.
 - **impact: says why its tree can be smaller than the truth** (#33, #34,
   #35). After the tree (or "nothing depends on"), `impact` prints the
   synonyms that point at the object (`-- also reachable as: ...`, new query
