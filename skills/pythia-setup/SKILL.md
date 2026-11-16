@@ -28,6 +28,9 @@ applies:
 - The file holds credentials: install writes it into `.gitignore` (commit
   that line) — keep it that way, and keep it out of chat and screenshots.
   `pythia doctor` fails if git tracks it.
+- Thin mode first; on `DPY-3015` (old 10G password verifier), `DPY-3010`
+  (database before 12.1) or `DPY-3001` it retries in thick mode through an
+  Oracle Client. `"thick": true|false` and `"lib_dir"` pin it (GUIDE §2).
 
 Verify with `pythia check`: it prints who you are connected as and object
 counts. A failure names the connection and what to check.

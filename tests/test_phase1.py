@@ -327,6 +327,160 @@ def test_oracle_account_taken_from_a_proxy_connect_string():
     assert pythia.authenticating_account(None) is None
 
 
+class FakeOracle:
+    """A stand-in for python-oracledb: thin mode refuses whatever `thin_error`
+    says, thick mode loads only when `client_ok`, and once a connection has
+    been made the mode is fixed — as the real driver behaves."""
+    class Error(Exception):
+        pass
+
+    def __init__(self, thin_error=None, client_ok=True):
+        self.thin_error, self.client_ok = thin_error, client_ok
+        self.thick, self.fixed, self.calls = False, False, []
+
+    def makedsn(self, host, port, service_name=None, sid=None):
+        return f"{host}:{port}/{service_name or sid}"
+
+    def init_oracle_client(self, lib_dir=None):
+        self.calls.append(("init", lib_dir))
+        if self.fixed and not self.thick:
+            raise self.Error("DPY-2019: python-oracledb thick mode cannot be "
+                             "used because a thin mode connection has already "
+                             "been created")
+        if not self.client_ok:
+            raise self.Error("DPI-1047: Cannot locate a 64-bit Oracle Client "
+                             "library")
+        self.thick = True
+
+    def connect(self, user, password, dsn):
+        self.calls.append(("connect", "thick" if self.thick else "thin"))
+        if not self.thick and self.thin_error:
+            raise self.Error(self.thin_error)   # a failed connect fixes nothing
+        self.fixed = True
+        return ("conn", "thick" if self.thick else "thin")
+
+
+ENTRY = {"user": "app_owner", "password": "x", "host": "db.example.com",
+         "service_name": "orcl"}
+VERIFIER = ("DPY-3015: password verifier type 0x939 is not supported by "
+            "python-oracledb in thin mode")
+
+
+def test_driver_mode_defaults_to_auto_and_obeys_entry_then_env():
+    assert pythia.driver_settings(ENTRY, {}) == ("auto", None)
+    assert pythia.driver_settings({**ENTRY, "thick": True}, {})[0] == "thick"
+    assert pythia.driver_settings({**ENTRY, "thick": False}, {})[0] == "thin"
+    assert pythia.driver_settings(ENTRY, {"PYTHIA_THICK": "1"})[0] == "thick"
+    assert pythia.driver_settings(ENTRY, {"PYTHIA_THICK": "no"})[0] == "thin"
+    # the entry is the specific word, the environment the general one
+    assert pythia.driver_settings({**ENTRY, "thick": False},
+                                  {"PYTHIA_THICK": "1"})[0] == "thin"
+    lib = pythia.driver_settings({**ENTRY, "lib_dir": "C:/oracle/client"},
+                                 {"PYTHIA_ORACLE_CLIENT": "/elsewhere"})[1]
+    assert lib == "C:/oracle/client"
+    assert pythia.driver_settings(ENTRY, {"PYTHIA_ORACLE_CLIENT": "/ic"})[1] == "/ic"
+    expect_exit(lambda: pythia.driver_settings({**ENTRY, "thick": "yes"}, {}),
+                '"thick"', "true", "false")
+    expect_exit(lambda: pythia.driver_settings(ENTRY, {"PYTHIA_THICK": "maybe"}),
+                "PYTHIA_THICK")
+
+
+def test_thin_is_tried_first_and_no_client_is_loaded_when_it_works():
+    ora = FakeOracle()
+    conn, driver = pythia.open_connection(ENTRY, {}, ora)
+    assert conn[1] == "thin" and driver == "thin"
+    assert not any(c[0] == "init" for c in ora.calls)
+
+
+def test_old_password_verifier_falls_back_to_thick_and_says_so():
+    ora = FakeOracle(thin_error=VERIFIER)
+    conn, driver = pythia.open_connection({**ENTRY, "lib_dir": "/ic"}, {}, ora)
+    assert conn[1] == "thick"
+    assert "thick" in driver and "DPY-3015" in driver     # announced, with why
+    assert ("init", "/ic") in ora.calls
+
+
+def test_every_thin_only_refusal_falls_back():
+    for err in ("DPY-3010: connections to this database server version are "
+                "not supported by python-oracledb in thin mode",
+                "DPY-3001: Native Network Encryption and Data Integrity is "
+                "only supported in python-oracledb thick mode"):
+        conn, _ = pythia.open_connection(ENTRY, {}, FakeOracle(thin_error=err))
+        assert conn[1] == "thick", err
+
+
+def test_other_failures_are_not_retried_in_thick_mode():
+    ora = FakeOracle(thin_error="ORA-01017: invalid username/password")
+    try:
+        pythia.open_connection(ENTRY, {}, ora)
+    except ora.Error as e:
+        assert "ORA-01017" in str(e)
+    else:
+        raise AssertionError("a wrong password must not be retried")
+    # one attempt only: a retry would count toward FAILED_LOGIN_ATTEMPTS
+    assert [c for c in ora.calls if c[0] == "connect"] == [("connect", "thin")]
+
+
+def test_thin_pinned_never_loads_a_client():
+    ora = FakeOracle(thin_error=VERIFIER)
+    try:
+        pythia.open_connection({**ENTRY, "thick": False}, {}, ora)
+    except ora.Error:
+        pass
+    else:
+        raise AssertionError("thin pinned must not fall back")
+    assert not any(c[0] == "init" for c in ora.calls)
+
+
+def test_thick_requested_loads_the_client_before_any_connection():
+    ora = FakeOracle()
+    conn, driver = pythia.open_connection({**ENTRY, "thick": True}, {}, ora)
+    assert ora.calls[0][0] == "init" and conn[1] == "thick" and driver == "thick"
+
+
+def test_no_client_for_thick_names_both_fixes():
+    ora = FakeOracle(thin_error=VERIFIER, client_ok=False)
+    try:
+        pythia.open_connection(ENTRY, {}, ora)
+    except pythia.ThickModeUnavailable as e:
+        msg = pythia.connect_failure_message(e, "dev", user="agent[owner]")
+    else:
+        raise AssertionError("expected ThickModeUnavailable")
+    assert "DPY-3015" in msg and "DPI-1047" in msg   # both causes kept
+    assert "lib_dir" in msg and "PYTHIA_ORACLE_CLIENT" in msg
+    assert "Instant Client" in msg
+    assert "ALTER USER AGENT IDENTIFIED BY" in msg   # the DBA's root-cause fix
+    assert "host/port/service_name" not in msg       # the network was fine
+
+    pinned = FakeOracle(client_ok=False)
+    try:
+        pythia.open_connection({**ENTRY, "thick": True}, {}, pinned)
+    except pythia.ThickModeUnavailable as e:
+        assert "DPI-1047" in pythia.connect_failure_message(e, "dev")
+    else:
+        raise AssertionError("expected ThickModeUnavailable")
+
+
+def test_thin_refusal_pinned_thin_still_explains_thick():
+    msg = pythia.connect_failure_message(Exception(VERIFIER), "dev", user="agent")
+    assert '"thick": true' in msg and "ALTER USER AGENT" in msg
+
+
+def test_connection_still_requires_credentials_and_a_target():
+    expect_exit(lambda: pythia.open_connection({"user": "u"}, {}, FakeOracle()),
+                "password")
+    expect_exit(lambda: pythia.open_connection({"user": "u", "password": "p"},
+                                               {}, FakeOracle()), "dsn")
+
+
+
+def test_doctor_names_the_driver_mode():
+    class Conn:
+        thin = True
+    assert "thin mode" in pythia.driver_check(Conn())[2]
+    Conn.thin = False
+    assert "thick mode" in pythia.driver_check(Conn())[2]
+
 SECRET = "hunter2-do-not-leak"
 
 

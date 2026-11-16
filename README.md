@@ -374,8 +374,8 @@ The skills teach the agent the workflow — gates, not suggestions:
 | | |
 |---|---|
 | OS | Windows, macOS, Linux, WSL — full test matrix in CI |
-| Python | 3.9+ · stdlib + `python-oracledb` (thin mode) only |
-| Oracle | core works broadly; PL/Scope statement capture needs 12.2+; license-safe views only |
+| Python | 3.9+ · stdlib + `python-oracledb` only — thin mode by default, thick mode when the database needs it |
+| Oracle | 12.1 to 23ai in thin mode, with no Oracle Client; 10.2 and 11.2, accounts with an old 10G password verifier, and servers that require Native Network Encryption through thick mode, which pythia switches to by itself when an Oracle Client is installed (GUIDE §2) · PL/Scope statement capture needs 12.2+; license-safe views only |
 | Agents | any `npx skills` agent (70+) · native Claude Code plugin (hooks + MCP approver, any permission mode but `dontAsk`) · Codex (AGENTS.md harness + MCP approver, ≥ v0.120 for chat-style approval) |
 
 ## Who is using pythia
