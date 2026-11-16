@@ -51,6 +51,10 @@ jobs:
 
   npm:
     needs: check
+    # held unless the repository variable NPM_PUBLISH is "true": a release
+    # can go to PyPI while the npm account is unavailable. Set the variable,
+    # then re-run this workflow for the tag (PyPI skips what it already has).
+    if: vars.NPM_PUBLISH == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

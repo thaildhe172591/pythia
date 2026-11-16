@@ -2505,7 +2505,7 @@ def test_shim_skips_a_store_alias_and_fails_closed_when_nothing_runs():
             "approve --hook")
 
 
-def _pythia_plugin(home, version="0.15.10", mcp_command="python"):
+def _pythia_plugin(home, version=None, mcp_command="python"):
     """The pythia plugin as Claude Code installs it, from this repository's
     own hooks.json and a plugin.json with the given version/MCP command."""
     hooks = json.loads((HERE.parent / "hooks" / "hooks.json").read_text(
@@ -2513,7 +2513,7 @@ def _pythia_plugin(home, version="0.15.10", mcp_command="python"):
     root = _plugin(home, "pythia@pythia", hooks)
     (root / ".claude-plugin").mkdir(exist_ok=True)
     (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({
-        "name": "pythia", "version": version,
+        "name": "pythia", "version": version or pythia.__version__,
         "mcpServers": {"pythia": {"command": mcp_command, "args": [
             "${CLAUDE_PLUGIN_ROOT}/scripts/pythia.py", "mcp"]}}}), encoding="utf-8")
     (root / "skills" / "pythia-apply").mkdir(parents=True)
@@ -2543,7 +2543,7 @@ def test_doctor_checks_the_plugins_own_launch_commands():
     alias = "C:/Users/dev/AppData/Local/Microsoft/WindowsApps/python.exe"
     real = "/usr/bin/python3"
     with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as home:
-        _pythia_plugin(home, version="0.15.10")
+        _pythia_plugin(home)
         plugins = pythia.pythia_plugins(td, home)
         assert len(plugins) == 1
         broken = pythia.plugin_checks(plugins, which={"python": alias}.get,
