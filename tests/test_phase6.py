@@ -2404,5 +2404,39 @@ def main():
     print("OK")
 
 
+def test_drop_table_reason_names_the_way_back():
+    """Issue #36: while the Recycle Bin is on, a dropped table can come back;
+    the developer approving the drop is told how, with the real name."""
+    d = pythia.destructive_reason
+    fb = "while it is in the Recycle Bin, FLASHBACK TABLE {} TO BEFORE DROP brings it back"
+    assert d("DROP TABLE t_order", "structural") == (
+        "DROP removes the object and everything in it — " + fb.format("t_order"))
+    assert fb.format("app_owner.t_order") in d("drop table app_owner.t_order", "structural")
+    assert fb.format('APP_OWNER."T_Order"') in d('DROP TABLE APP_OWNER."T_Order"', "structural")
+    assert fb.format("T_ORDER") in d("-- why\n  DROP  TABLE T_ORDER CASCADE CONSTRAINTS", "structural")
+    purge = d("DROP TABLE t PURGE", "structural")
+    assert "FLASHBACK TABLE t TO BEFORE DROP" not in purge and "not even FLASHBACK" in purge
+    assert d("DROP VIEW v", "structural") == "DROP removes the object and everything in it"
+    assert d("DROP PACKAGE pkg_order", "structural") == "DROP removes the object and everything in it"
+
+
+def test_lint_drop_purge_hands_over_the_recoverable_statement():
+    """Issue #37: the finding names the table and gives both statements."""
+    def msg(sql):
+        found = [f for f in pythia.lint_statement(sql, "structural") if f[0] == "drop-purge"]
+        assert len(found) == 1, found
+        return found[0][2]
+    assert msg("DROP TABLE t_order PURGE") == (
+        "DROP ... PURGE skips the Recycle Bin. Recoverable instead: DROP TABLE t_order"
+        " — undo with FLASHBACK TABLE t_order TO BEFORE DROP")
+    m = msg("drop table app_owner.t_order purge")
+    assert "Recoverable instead: DROP TABLE app_owner.t_order —" in m
+    assert "FLASHBACK TABLE app_owner.t_order TO BEFORE DROP" in m
+    m = msg('DROP TABLE "App_Owner"."T Order" CASCADE CONSTRAINTS PURGE')
+    assert 'Recoverable instead: DROP TABLE "App_Owner"."T Order" CASCADE CONSTRAINTS —' in m
+    assert 'FLASHBACK TABLE "App_Owner"."T Order" TO BEFORE DROP' in m
+    assert pythia.LINT_RULES["drop-purge"][0] == "warning"
+
+
 if __name__ == "__main__":
     main()

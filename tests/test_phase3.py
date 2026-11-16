@@ -208,6 +208,8 @@ class FakeCursor:
         low = " ".join(sql.lower().split())
         for key, value in self.script.items():
             if key in low:
+                if isinstance(value, Exception):   # e.g. ORA-00942 on a probe
+                    raise value
                 if isinstance(value, list):   # sequenced responses, e.g. the
                     cols, rows = value[0]     # INVALID set before vs after the
                     if len(value) > 1:        # write; the last response sticks
@@ -1740,6 +1742,86 @@ def test_token_mismatch_names_an_already_applied_preview():
         msg = pythia.token_mismatch_message(ns, None)
         assert "already applied" in msg and "changed since that preview" not in msg
 
+
+
+def impact_run(script, json_mode=False):
+    """Drive cmd_impact against a scripted connection; returns stdout."""
+    import argparse
+    import contextlib
+    import io
+    ns = argparse.Namespace(command="impact", conn_name="DEV", schema=None,
+                            name="t_order", depth=3, limit=0, json=json_mode,
+                            project_root=None)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        pythia.cmd_impact(FakeConn(script), "APP_OWNER", ns)
+    return buf.getvalue()
+
+
+IMPACT_COLS = [("LVL", "OWNER", "NAME", "TYPE", "STATUS", "DEPENDENCY_TYPE")]
+
+
+def impact_script(dependents=(), synonyms=(), dba_readable=True):
+    return {
+        "from all_dependencies": (IMPACT_COLS, list(dependents)),
+        "from all_synonyms": ([("OWNER", "SYNONYM_NAME")], list(synonyms)),
+        "from dba_dependencies": (([("N",)], [(1,)]) if dba_readable
+                                  else RuntimeError("ORA-00942: table or view does not exist")),
+    }
+
+
+def test_impact_points_to_grep_for_dynamic_sql_with_and_without_dependents():
+    """Issue #33: dynamic SQL records no dependency, so 'nothing depends on'
+    can be false. The way to check is printed, paste-able, either way."""
+    grep_cmd = f"{pythia.invocation()} grep T_ORDER"
+    found = impact_run(impact_script(
+        [(1, "APP_OWNER", "PKG_ORDER", "PACKAGE BODY", "VALID", "HARD")]))
+    assert "PKG_ORDER" in found
+    assert ("-- not shown: references inside dynamic SQL strings. "
+            f"Check with: {grep_cmd}") in found
+    empty = impact_run(impact_script())
+    assert "nothing depends on T_ORDER" in empty
+    assert f"Check with: {grep_cmd}" in empty
+    # after the "nothing depends" line, not before it
+    assert empty.index("nothing depends") < empty.index("not shown:")
+    env = json.loads(impact_run(impact_script(), json_mode=True).splitlines()[0])
+    assert any("dynamic SQL" in c and grep_cmd in c for c in env["caveats"])
+
+
+def test_impact_lists_the_synonyms_that_point_at_the_object():
+    """Issue #34: callers can reach the object under other names."""
+    out = impact_run(impact_script(
+        [(1, "APP_OWNER", "PKG_ORDER", "PACKAGE BODY", "VALID", "HARD")],
+        synonyms=[("PUBLIC", "ORDERS"), ("APP_API", "ORDERS")]))
+    assert "-- also reachable as: PUBLIC.ORDERS, APP_API.ORDERS (synonyms)" in out
+    none = impact_run(impact_script())
+    assert "also reachable as" not in none
+    env = json.loads(impact_run(impact_script(synonyms=[("PUBLIC", "ORDERS")]),
+                                json_mode=True).splitlines()[0])
+    assert env["synonyms"] == ["PUBLIC.ORDERS"]
+    env = json.loads(impact_run(impact_script(), json_mode=True).splitlines()[0])
+    assert env["synonyms"] == []
+
+
+def test_impact_says_when_other_schemas_may_be_invisible():
+    """Issue #35: ALL_DEPENDENCIES lists only what the session can access.
+    Readable DBA_DEPENDENCIES means the answer is complete: no line."""
+    line = ("-- other schemas: only dependents this session can see are listed; "
+            "a schema that granted it nothing can still depend on T_ORDER")
+    assert "other schemas:" not in impact_run(impact_script(dba_readable=True))
+    out = impact_run(impact_script(dba_readable=False))
+    assert line in out
+    out = impact_run(impact_script(
+        [(1, "APP_OWNER", "PKG_ORDER", "PACKAGE BODY", "VALID", "HARD")],
+        dba_readable=False))
+    assert line in out
+    env = json.loads(impact_run(impact_script(dba_readable=False),
+                                json_mode=True).splitlines()[0])
+    assert any(c.startswith("-- other schemas:") or "other schemas" in c
+               for c in env["caveats"])
+    env = json.loads(impact_run(impact_script(dba_readable=True),
+                                json_mode=True).splitlines()[0])
+    assert not any("other schemas" in c for c in env["caveats"])
 
 
 if __name__ == "__main__":

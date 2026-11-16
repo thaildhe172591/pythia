@@ -87,6 +87,8 @@ QUERY_BINDS = {
     "compile-errors.sql": {"s", "n"},
     "dependencies.sql": {"s", "n", "depth", "with_sys"},
     "impact.sql": {"s", "n", "depth"},
+    "synonyms-for.sql": {"s", "n"},
+    "dba-dependencies-readable.sql": set(),
     "similar-candidates.sql": {"s"},
     "plscope-usages.sql": {"s", "n"},
     "plscope-statements.sql": {"s", "n"},
@@ -1831,6 +1833,30 @@ def cmd_deps(conn, schema, ns):
         print(f"-- truncated at {len(rows)} rows (raise --limit, or --limit 0 for no cap)")
 
 
+def impact_caveats(conn, name):
+    """Why an impact answer can still be smaller than the truth, each as one
+    line. A falsely clean impact report is the worst failure for a tool whose
+    rule is "no proposal before the blast radius is known", so the reasons
+    are said instead of implied."""
+    target = name.upper()
+    caveats = [f"-- not shown: references inside dynamic SQL strings. "
+               f"Check with: {invocation()} grep {target}"]
+    try:
+        run_query(conn, load_query("dba-dependencies-readable.sql"))
+    except Exception:  # noqa: BLE001 — ORA-00942 or any refusal: not readable
+        caveats.append("-- other schemas: only dependents this session can see "
+                       "are listed; a schema that granted it nothing can still "
+                       f"depend on {target}")
+    return caveats
+
+
+def impact_synonyms(conn, schema, name):
+    """OWNER.SYNONYM_NAME for every synonym pointing straight at the object."""
+    _, rows = run_query(conn, load_query("synonyms-for.sql"),
+                        {"s": schema, "n": name})
+    return [f"{owner}.{syn}" for owner, syn in rows]
+
+
 def cmd_impact(conn, schema, ns):
     cols, rows = run_query(conn, load_query("impact.sql"),
                            {"s": schema, "n": ns.name, "depth": ns.depth})
@@ -1838,21 +1864,27 @@ def cmd_impact(conn, schema, ns):
     # touch this" signal there is — the best possible place to capture a
     # before-state the developer never had to ask for
     drift = auto_snapshot(conn, schema, ns.name, ns)
+    synonyms = impact_synonyms(conn, schema, ns.name)
+    caveats = impact_caveats(conn, ns.name)
     shown, truncated = clip(rows, ns.limit)
     if ns.json:
         print(json_envelope(ns.command, ns.conn_name, ns.schema, cols, shown, truncated,
-                            summary=impact_summary(rows)))
+                            summary=impact_summary(rows), synonyms=synonyms,
+                            caveats=caveats))
         report_drift(drift)
         return
     if not rows:
         print(f"-- nothing depends on {ns.name.upper()} "
               f"(within {schema}, depth {ns.depth})")
-        report_drift(drift)
-        return
-    sys.stdout.write(render_tree(shown, f"{schema}.{ns.name.upper()}"))
-    if truncated:
-        print(f"-- truncated at {len(shown)} rows (raise --limit, or --limit 0 for no cap)")
-    print(impact_summary(rows))
+    else:
+        sys.stdout.write(render_tree(shown, f"{schema}.{ns.name.upper()}"))
+        if truncated:
+            print(f"-- truncated at {len(shown)} rows (raise --limit, or --limit 0 for no cap)")
+        print(impact_summary(rows))
+    if synonyms:
+        print(f"-- also reachable as: {', '.join(synonyms)} (synonyms)")
+    for line in caveats:
+        print(line)
     report_drift(drift)
 
 
@@ -5236,6 +5268,23 @@ def render_comment(kind, table, column, text):
 
 # --- destructive statements --------------------------------------------------
 
+_ORA_IDENT = r'(?:"[^"]+"|[A-Za-z][\w$#]*)'
+_DROP_TABLE_RE = re.compile(
+    r"DROP\s+TABLE\s+(" + _ORA_IDENT + r"(?:\s*\.\s*" + _ORA_IDENT + r")?)"
+    r"((?:\s+(?!PURGE\b)[A-Za-z]+)*)", re.I)
+
+
+def dropped_table(sql):
+    """(name, options) for a DROP TABLE statement, the name exactly as written
+    (schema prefix and quotes kept, whitespace around the dot dropped), the
+    options between it and PURGE (CASCADE CONSTRAINTS); or None."""
+    m = _DROP_TABLE_RE.match(skip_leading_noise(sql))
+    if not m:
+        return None
+    name = re.sub(r"\s*\.\s*", ".", m.group(1))
+    return name, " ".join(m.group(2).split())
+
+
 def destructive_reason(sql, group):
     """Why a statement destroys something no journal can bring back, or None.
 
@@ -5256,9 +5305,16 @@ def destructive_reason(sql, group):
             return "account and role changes reach every session that uses them"
         if m.startswith("drop "):
             purge = " purge" in m
-            return ("DROP removes the object and everything in it"
-                    + (" — PURGE skips the Recycle Bin, so not even FLASHBACK "
-                       "TABLE can bring it back" if purge else ""))
+            if purge:
+                return ("DROP removes the object and everything in it — PURGE "
+                        "skips the Recycle Bin, so not even FLASHBACK TABLE can "
+                        "bring it back")
+            table = dropped_table(sql) if m.startswith("drop table ") else None
+            if table:
+                return ("DROP removes the object and everything in it — while it "
+                        f"is in the Recycle Bin, FLASHBACK TABLE {table[0]} TO "
+                        "BEFORE DROP brings it back")
+            return "DROP removes the object and everything in it"
         if m.startswith("truncate "):
             return "TRUNCATE deletes every row and cannot be rolled back"
         if m.startswith("rename ") or re.search(r"\brename\s+(column|to|constraint|partition)\b", m):
@@ -5575,7 +5631,15 @@ def lint_statement(text, group, conv=None):
                 if re.search(r"\bVARCHAR2\s*\(\s*\d+\s*\)", u):
                     hit("varchar2-byte-semantics", off)
         if re.match(r"DROP\s+TABLE\b.*\bPURGE\b", s):
-            hit("drop-purge", 0)
+            table = dropped_table(text)
+            if table:
+                name, opts = table
+                safe = " ".join(["DROP TABLE", name] + ([opts] if opts else []))
+                hit("drop-purge", 0,
+                    "DROP ... PURGE skips the Recycle Bin. Recoverable instead: "
+                    f"{safe} — undo with FLASHBACK TABLE {name} TO BEFORE DROP")
+            else:
+                hit("drop-purge", 0)
     if group == "data_dml":
         if re.match(r"(UPDATE|DELETE)\b", s) and not re.search(r"\bWHERE\b", s):
             hit("dml-no-where", 0)

@@ -290,6 +290,11 @@ pythia plscope T_ORDER         # vị trí dùng identifier chính xác (PL/Scop
 pythia similar PKG_ORDER_LIST  # chương trình đặt tên giống — mỏ convention
 ```
 
+`impact` kết thúc bằng các dòng nói vì sao cây có thể nhỏ hơn thực tế: các
+synonym trỏ tới object (`-- also reachable as: ...`), một lệnh `pythia grep`
+để tìm tham chiếu trong SQL động, và — khi session không đọc được
+`DBA_DEPENDENCIES` — rằng phụ thuộc ở schema khác có thể bị ẩn.
+
 Output: `--json` mọi lệnh; `--limit` / `--max-lines` / `--offset` (0 = bỏ
 giới hạn); **mọi cắt bớt đều có marker** `-- truncated ...` — không có marker
 nghĩa là bạn đã thấy tất cả. Màu chỉ cho người (`NO_COLOR`/`FORCE_COLOR`);

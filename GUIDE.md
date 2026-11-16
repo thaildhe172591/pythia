@@ -301,6 +301,12 @@ pythia plscope T_ORDER         # exact identifier usages (PL/Scope)
 pythia similar PKG_ORDER_LIST  # similarly named programs — the convention mine
 ```
 
+`impact` ends with the lines that say why its tree can be smaller than the
+truth: the synonyms that point at the object (`-- also reachable as: ...`),
+a `pythia grep` command for references inside dynamic SQL, and — when the
+session cannot read `DBA_DEPENDENCIES` — that dependents in other schemas
+may be invisible.
+
 Output: `--json` on every command; `--limit` / `--max-lines` / `--offset`
 (0 = no cap); **every cut carries a marker** `-- truncated ...` — no marker
 means you saw everything. Color is for humans only (`NO_COLOR` /
